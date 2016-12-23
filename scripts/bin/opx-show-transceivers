@@ -1,0 +1,103 @@
+#!/usr/bin/python
+# Copyright (c) 2015 Dell Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+#
+# THIS CODE IS PROVIDED ON AN *AS IS* BASIS, WITHOUT WARRANTIES OR
+# CONDITIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT
+# LIMITATION ANY IMPLIED WARRANTIES OR CONDITIONS OF TITLE, FITNESS
+# FOR A PARTICULAR PURPOSE, MERCHANTABLITY OR NON-INFRINGEMENT.
+#
+# See the Apache Version 2.0 License for specific language governing
+# permissions and limitations under the License.
+
+import sys
+import cps_utils
+import nas_front_panel_map as fp
+import nas_phy_media as media
+import cps_object
+
+
+def media_show_usage():
+    print "\nopx-show-transceivers summary  : Displays the entire media inventory in the board"
+    print "opx-show-transceivers all  : Displays the entire media inventory and their details in the board"
+    print "opx-show-transceivers <Front panel port ID> : Displays media details for the port\n"
+
+    return
+
+
+def display_media_inventory(verbose=False):
+    media_list = media.get_all_media_info()
+    print '%4s  %24s   %18s   %18s   %4s' % ("Front Panel Port", "Media Type", "Part Number", "Serial Number", "DellQualified")
+    for m in media_list:
+        try:
+            obj = cps_object.CPSObject(obj=m)
+            _port = obj.get_attr_data('port')
+            _media_type = obj.get_attr_data('type')
+            if _media_type == 1:
+                _vendor_pn = ''
+                _serial_no = ''
+                _qualified = ''
+            else:
+                _vendor_pn = obj.get_attr_data('base-pas/media/vendor-pn')
+                _serial_no = obj.get_attr_data('base-pas/media/serial-number')
+                _qualified = obj.get_attr_data('base-pas/media/dell-qualified')
+                if _qualified == 1:
+                    _qualified = 'Yes'
+                else:
+                    _qualified = 'No'
+            print '%4s              %24s         %18s    %18s        %4s' % (str(_port), media.get_media_str(_media_type), _vendor_pn, _serial_no, _qualified)
+            if verbose == True :
+                display_media_info(_port)
+        except:
+            print 'Error: unable to read media info'
+            continue
+
+
+
+def display_media_info(fp_port_id):
+    fp_port = fp.find_front_panel_port(fp_port_id)
+    if fp_port is None:
+        print 'Invalid front port number %d' % (fp_port_id)
+        return
+    print 'Front Panel Port %d media details' % (fp_port_id)
+    print '=================================='
+    if fp_port.media_id < 0:
+        print ' no Media details found'
+        return
+    m = media.get_media_info(fp_port.media_id)
+    for i in m:
+        obj = cps_object.CPSObject(obj=i)
+        _port = obj.get_attr_data('port')
+        _media_type = obj.get_attr_data('type')
+        if _media_type == 1:
+            print 'Media not present or not accessible\n'
+        else:
+            cps_utils.print_obj(i)
+    n = media.get_media_channel_info(fp_port.media_id)
+    for i in n:
+        obj = cps_object.CPSObject(obj=i)
+        cps_utils.print_obj(i)
+
+
+
+if __name__ == '__main__':
+    opt = None
+    if len(sys.argv) < 2:
+        media_show_usage()
+        sys.exit(1)
+
+    opt = sys.argv[1]
+    f = '/etc/opx/base_port_physical_mapping_table.xml'
+    fp.init(f)
+    if opt == 'summary':
+        display_media_inventory()
+    elif opt == 'all':
+        display_media_inventory(verbose=True)
+    elif opt.isdigit():
+        display_media_info(int(opt))
+    else:
+        print 'invalid argument: %s' % (opt)
+        media_show_usage()

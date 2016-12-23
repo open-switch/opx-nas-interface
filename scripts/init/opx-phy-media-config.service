@@ -1,0 +1,15 @@
+[Unit]
+Description=Physical media configuration function provider
+After=opx-object-library.service
+Wants=opx-object-library.service
+DefaultDependencies=no
+
+[Service]
+EnvironmentFile=/etc/opx/opx-environment
+ExecStart=/usr/bin/base_nas_phy_media_config.sh
+
+# Resource Limitations
+LimitNOFILE=16384
+
+[Install]
+WantedBy=multi-user.target

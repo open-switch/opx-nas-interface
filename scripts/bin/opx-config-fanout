@@ -1,0 +1,144 @@
+#!/usr/bin/python
+# Copyright (c) 2015 Dell Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+#
+# THIS CODE IS PROVIDED ON AN *AS IS* BASIS, WITHOUT WARRANTIES OR
+# CONDITIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT
+# LIMITATION ANY IMPLIED WARRANTIES OR CONDITIONS OF TITLE, FITNESS
+# FOR A PARTICULAR PURPOSE, MERCHANTABLITY OR NON-INFRINGEMENT.
+#
+# See the Apache Version 2.0 License for specific language governing
+# permissions and limitations under the License.
+
+import cps
+import cps_object
+import sys
+import nas_os_if_utils as nas_if
+import nas_front_panel_map as fp
+import cps_utils
+import time
+import base_qos_init
+
+_g_if_name = 'if/interfaces/interface/name'
+
+if __name__ == '__main__':
+    if len(sys.argv) < 3:
+        print "Invalid arguments specified.... %s [port] [true/false]" % sys.argv[0]
+        sys.exit(0)
+    elif sys.argv[2].lower() != 'true':
+        if sys.argv[2].lower() != 'false':
+            print "Invalid arguments specified.... %s [port] [true/false]" % sys.argv[0]
+            sys.exit(0)
+
+    nas_fp_cache = nas_if.FpPortCache()
+    if_cache = nas_if.IfCache()
+
+    if sys.argv[1].isdigit():
+        fp_obj = nas_fp_cache.get(int(sys.argv[1]))
+    else:
+        front_port = nas_if.get_front_port_from_name(sys.argv[1])
+        if front_port == None:
+            print 'Failed to get front port id'
+            exit(0)
+        fp_obj = nas_fp_cache.get(front_port[0])
+    if fp_obj is None:
+        print "Invalid front panel port specified..."
+        print "Please choose from one of the following..."
+        nas_fp_cache.print_keys()
+        exit(0)
+
+    mode = '1x1'
+
+    if sys.argv[2].lower() == 'true':
+        mode = '4x1'
+
+    npu = fp_obj.get_attr_data('npu-id')
+    phy_port_list = nas_if.physical_ports_for_front_panel_port(fp_obj)
+
+    if mode == '4x1':
+        _mode = 2
+    else:
+        _mode = 4
+
+    breakout_cap = phy_port_list[0].get_attr_data('breakout-capabilities')
+    if _mode not in breakout_cap:
+        print mode + ' breakout mode not supported on this port'
+        sys.exit(1)
+    current_mode =  phy_port_list[0].get_attr_data('fanout-mode')
+    if current_mode == _mode:
+        print 'Port already configure in the ' + mode + ' fanout mode'
+        sys.exit(1)
+
+    l = []
+
+    for phy_port in phy_port_list:
+        if_port = if_cache.get_by_port(
+            npu,
+            phy_port.get_attr_data('port-id'))
+        if if_port is None:
+            continue
+        if_name = if_port.get_attr_data(_g_if_name)
+        print "Deleting.. %s" % if_name
+        cps_obj = cps_object.CPSObject(module = 'dell-base-if-cmn/set-interface',
+                                       data = {'dell-base-if-cmn/set-interface/input/operation': 2,
+                                               _g_if_name: if_name})
+        l.append(('rpc', cps_obj.get()))
+    tr = cps_utils.CPSTransaction(l)
+    tr.commit()
+
+    obj = cps_object.CPSObject(module='base-if-phy/breakout',
+                               data={
+                               'base-if-phy/breakout/input/front-panel-port':
+                               fp_obj.get_attr_data(
+                                   'base-if-phy/front-panel-port/front-panel-port'),
+                                   'base-if-phy/breakout/input/breakout-mode':
+                                   _mode
+                               })
+    tr = cps_utils.CPSTransaction([('rpc', obj.get())])
+
+    if tr.commit() == False:
+        print "Failed..."
+    else:
+        print "Completed..."
+
+        # look at thephysical port and determine the number of hardware ports
+        # that exist
+        target_number_of_ports = len(
+            fp_obj.get()['data']['base-if-phy/front-panel-port/port'])
+
+        # if the mode is breakin... then need to create one port only
+        if mode == '1x1':  # 1x1
+            target_number_of_ports = 1
+
+        # wait for all of the physical ports to appear - depends on timing
+        phy_port_list = []
+        while len(phy_port_list) < target_number_of_ports:
+            time.sleep(1)
+            phy_port_list = nas_if.physical_ports_for_front_panel_port(fp_obj)
+
+        l = []
+        ifnames = []
+        # add ports to a transaction
+        for phy_port in phy_port_list:
+            ifobj = nas_if.make_interface_from_phy_port(phy_port)
+            print "Creating interface " + ifobj.get_attr_data(_g_if_name)
+            l.append(('rpc', ifobj.get()))
+            ifnames.append(ifobj.get_attr_data(_g_if_name))
+            if mode == '1x1':
+                break
+
+        # do the actual port create
+        tr = cps_utils.CPSTransaction(l)
+
+        # commit
+        if tr.commit() == False:
+            print "Failed to create interfaces for breakout operation"
+        else:
+            print "Successfully created interfaces..."
+
+        # init qos default
+        base_qos_init.init_interfaces(ifnames)
+

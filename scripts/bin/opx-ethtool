@@ -1,0 +1,279 @@
+#!/usr/bin/python
+# Copyright (c) 2015 Dell Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+#
+# THIS CODE IS PROVIDED ON AN *AS IS* BASIS, WITHOUT WARRANTIES OR
+# CONDITIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT
+# LIMITATION ANY IMPLIED WARRANTIES OR CONDITIONS OF TITLE, FITNESS
+# FOR A PARTICULAR PURPOSE, MERCHANTABLITY OR NON-INFRINGEMENT.
+#
+# See the Apache Version 2.0 License for specific language governing
+# permissions and limitations under the License.
+
+import sys
+import string
+import getopt
+import cps
+import cps_utils
+import cps_object
+import nas_os_utils
+import nas_os_if_utils as nas_if
+import nas_front_panel_map as fp
+import nas_phy_media as media
+import nas_stat_utils as stat
+from sys import argv
+
+
+ETH_TOOL_VER = '1.0'
+
+def usage():
+    ''' Usage '''
+    print 'opx-ethtool devname'
+    print 'opx-ethtool -h|--help'
+    print 'opx-ethtool -v|--version'
+    print 'opx-ethtool -e|--eeprom-dump devname'
+    # following will be implemented in the next version.
+    #print 'ethtool -s devname speed N [duplex half|full] [port tp|aui|bnc|mii] [autoneg on|off]'
+    print 'opx-ethtool -s| --speed devname [speed N|auto] [duplex half|full|auto] [autoneg on|off|auto]'
+    #print 'ethtool -m|--dump-module-eeprom devname'
+    print 'opx-ethtool -S|--statistics devname'
+    sys.exit(1)
+
+def ethtool_show_interface(argv):
+    _media_type = 0
+    _vendor_pn = ""
+    _serial_no = ""
+    _dell_qualified = ""
+
+    if_name = argv[0]
+    l = []
+    l =  nas_if.nas_os_if_state_list(d={'if/interfaces-state/interface/name':if_name})
+    if l is None:
+        print ' Wrong interface name or interface not present.'
+        return
+    _if_state_obj = cps_object.CPSObject(obj=l[0])
+    if_index = _if_state_obj.get_attr_data('if/interfaces-state/interface/if-index')
+    supported_speed = []
+    supported_speed = _if_state_obj.get_attr_data('dell-if/if/interfaces-state/interface/supported-speed')
+    _str = []
+    for i in supported_speed:
+        _str.append(nas_if.from_yang_speed(i))
+
+    _admin_status = _if_state_obj.get_attr_data('if/interfaces-state/interface/admin-status')
+    _oper_status =  _if_state_obj.get_attr_data('if/interfaces-state/interface/oper-status')
+
+    l = []
+    l =  nas_if.nas_os_if_list(d={'if/interfaces/interface/name':if_name})
+    _if_obj = cps_object.CPSObject(obj=l[0])
+
+    # Media-Info
+    media_id = nas_if.get_media_id_from_if_index(if_index)
+    media_info = media.get_media_info(media_id)
+    for i in media_info:
+        obj = cps_object.CPSObject(obj=i)
+        _media_type = obj.get_attr_data('type')
+        if _media_type == 1:
+            print '\n Media not present or not accessible \n'
+        else:
+            _vendor_pn = obj.get_attr_data('base-pas/media/vendor-pn')
+            _serial_no = obj.get_attr_data('base-pas/media/serial-number')
+            if obj.get_attr_data('base-pas/media/dell-qualified') == 1:
+                _dell_qualified = 'Yes'
+            else:
+                _dell_qualified = 'No'
+
+    print 'Settings for ' + if_name + ':'
+    # Transceiver Status
+    media_id = nas_if.get_media_id_from_if_index(if_index)
+    media_channel_info = media.get_media_channel_info(media_id)
+    _transceiver_status = ''
+    _mode=2 #This parameter shows that port has not been fanned out and it is breakout mode
+    breakout_cap,current_mode = nas_if.get_breakoutCap_currentMode_mode(if_index)
+    if (_mode not in breakout_cap) or (current_mode == _mode):
+        (unit_slot, port, sub_port) = if_name.split('-')
+        for i in media_channel_info:
+            obj = cps_object.CPSObject(obj=i)
+            _channel_id = obj.get_attr_data('base-pas/media-channel/channel')
+            if int(sub_port) == int(_channel_id):
+                if obj.get_attr_data('base-pas/media-channel/state') == 1:
+                    _transceiver_status = 'Enable'
+                elif obj.get_attr_data('base-pas/media-channel/state') == 0:
+                    _transceiver_status = 'Disable'
+                else:
+                    _transceiver_status = 'Unknown'
+                print '    Channel ID:  %2s' %(_channel_id)
+                print '    Transceiver Status: ' + _transceiver_status
+    else:
+        for i in media_channel_info:
+            obj = cps_object.CPSObject(obj=i)
+            _channel_id = obj.get_attr_data('base-pas/media-channel/channel')
+            if obj.get_attr_data('base-pas/media-channel/state') == 1:
+                _transceiver_status = 'Enable'
+            elif obj.get_attr_data('base-pas/media-channel/state') == 0:
+                _transceiver_status = 'Disable'
+            else:
+                _transceiver_status = 'Unknown'
+            print '    Channel ID:  %2s' %(_channel_id)
+            print '    Transceiver Status: ' + _transceiver_status
+
+    print '    Media Type: ' + media.get_media_str(_media_type)
+    print '    Part Number: ' + _vendor_pn
+    print '    Serial Number: ' + _serial_no
+    print '    Dell Qualified: '  + _dell_qualified
+    print '    Administrative State: ' + nas_if.admin_status_str_get(_admin_status)
+    print '    Operational State: ' + nas_if.oper_status_str_get(_oper_status)
+    print '    Supported Speed (in Mbps):  '  + str(_str)
+    print '    Auto Negotiation : ' + nas_if.from_yang_autoneg(_if_obj.get_attr_data('dell-if/if/interfaces/interface/auto-negotiation'))
+    print '    Speed   : ' + str(nas_if.from_yang_speed(_if_obj.get_attr_data('dell-if/if/interfaces/interface/speed')))
+    print '    Duplex   : ' + str(nas_if.from_yang_duplex(_if_obj.get_attr_data('dell-if/if/interfaces/interface/duplex')))
+
+def _nas_media_show(if_name):
+    print 'Show media info for '+ if_name
+    try:
+        if_index = nas_os_utils.if_nametoindex(if_name)
+        media_id = nas_if.get_media_id_from_if_index(if_index)
+        media_info = media.get_media_info(media_id)
+        for i in media_info:
+            obj = cps_object.CPSObject(obj=i)
+            _port = obj.get_attr_data('port')
+            _media_type = obj.get_attr_data('type')
+            if _media_type == 1:
+                print 'Media not present or not accessible\n'
+            else:
+                cps_utils.print_obj(i)
+    except:
+        print 'Invalid interface or does not have media info: ' + if_name
+
+def _nas_stat_show(if_name):
+    try:
+        if_index = nas_os_utils.if_nametoindex(if_name)
+    except:
+        print 'Interface not valid :' + if_name
+        sys.exit(1)
+    obj = cps_object.CPSObject(qual="observed",module='dell-base-if-cmn/if/interfaces-state/interface/statistics',
+    						   data={"if/interfaces-state/interface/name": if_name,
+                					 "if/interfaces-state/interface/type":"ianaift:ethernetCsmacd"})
+    l = []
+    cps.get([obj.get()],l)
+    if len(l) != 0:
+        print 'Statistics for interface ' + if_name + "\n"
+        stat.print_ether_stats(l[0])
+    else:
+        print 'Statistics not available for ' + if_name
+
+def ethtool_version_show():
+    print 'ethtool version is ' + ETH_TOOL_VER
+
+
+def _nas_if_configure(arg_list):
+    if_name = arg_list[0]
+    if_index = nas_os_utils.if_nametoindex(if_name)
+    _media_type = 0
+    media_id = nas_if.get_media_id_from_if_index(if_index)
+    if media_id == 0:
+        # media_id 0 is used for non-pluggable ports, for such ports, media_type "Not Applicable" is used.
+        ethtool_if_configure(arg_list,_media_type)
+        sys.exit(1)
+    media_info = media.get_media_info(media_id)
+    for j in media_info:
+        obj = cps_object.CPSObject(obj=j)
+        _media_type = obj.get_attr_data('type')
+        ethtool_if_configure(arg_list,_media_type)
+
+def ethtool_if_configure(arg_list,_media_type):
+    if_name = arg_list[0]
+    single_arg_len = 2
+    i  = 1
+    str_output = ''
+    _speed = None
+    _duplex = None
+    _neg = None
+    _attr_speed = None
+    _attr_duplex = None
+    _attr_neg = None
+    while i < (len(arg_list) - 1):
+        if arg_list[i] == "speed":
+            _speed = arg_list[i+1]
+            if _speed.lower() == 'auto':
+                _speed = 'auto'
+            else:
+                _speed = int(_speed) # numerical speed value in kbps
+            _attr_speed = nas_if.to_yang_speed(_speed)
+            if (_attr_speed == False) or (validate_if_speed(if_name, _attr_speed) == False):
+                print 'speed ' + arg_list[i+1] + ' not supported on:',if_name
+                sys.exit(1)
+            str_output += ' speed ' +str(_speed)
+        elif arg_list[i] == "duplex":
+            _duplex = arg_list[i+1].lower()
+            _attr_duplex = nas_if.to_yang_duplex(_duplex)
+            if _attr_duplex == None:
+                print 'Wrong option for duplex'
+                print 'opx-ethtool -s devname [duplex half|full|auto]'
+                sys.exit(1)
+            else:
+                str_output += ' duplex ' + _duplex
+        elif arg_list[i] == "autoneg":
+            _neg = arg_list[i+1].lower()
+            _attr_neg =  nas_if.to_yang_negotiation(_neg)
+            if _attr_neg == None:
+                print 'Wrong option for autoneg'
+                print 'opx-ethtool -s devname [autoneg on|off|auto]'
+                sys.exit(1)
+            else:
+                str_output += ' autoneg ' + _neg
+        else:
+            print 'opx-ethtool -s| --speed devname [speed N|auto] [duplex half|full|auto] [autoneg on|off|auto]'
+        i = i + single_arg_len
+    if nas_if.nas_set_interface_attribute(if_name, _attr_speed, _attr_duplex, _attr_neg):
+        print str_output
+    else:
+        print 'Configuration changes not assigned to ', if_name
+
+def validate_if_speed(if_name,_attr_speed):
+    l = []
+    l =  nas_if.nas_os_if_state_list(d={'if/interfaces-state/interface/name':if_name})
+    if l is None:
+        print ' Wrong interface name or interface not present.'
+        return
+    _if_state_obj = cps_object.CPSObject(obj=l[0])
+    supported_speed = []
+    supported_speed = _if_state_obj.get_attr_data('dell-if/if/interfaces-state/interface/supported-speed')
+    supported_speed.append(nas_if.to_yang_speed('auto'))
+    if _attr_speed in supported_speed:
+        return True
+    else:
+        return False
+
+def main(argv):
+
+    try:
+        opts, args = getopt.getopt(argv, "hve:S:s:", \
+                ["help", "version", "eeprom-dump=", "statistics=", "speed="])
+    except getopt.GetoptError:
+        usage()
+
+    if len(opts) == 0:
+        if not argv:
+            usage()
+        else:
+            ethtool_show_interface(argv)
+    for opt, arg in opts:
+        if opt in ('-h', '--help'):
+            usage()
+        elif opt in ('-v','--version'):
+            ethtool_version_show()
+        elif opt in ('-e', '--eeprom-dump'):
+            _nas_media_show(arg)
+        elif opt in ('-S', '--statistics'):
+            _nas_stat_show(arg)
+        elif opt in ('-s', '--speed'):
+            _nas_if_configure(argv[1:])
+        else:
+            usage()
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
+

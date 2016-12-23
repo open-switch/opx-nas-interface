@@ -1,0 +1,18 @@
+[Unit]
+Description=This service is to create all interface during system initiation
+After=opx-front-panel-ports.service
+Wants=opx-front-panel-ports.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/opx/opx-environment
+ExecStart=/usr/bin/base_nas_create_interface.sh
+ExecStartPost=/usr/bin/base_nas_fanout_init.sh && /usr/bin/network_restart.sh
+RemainAfterExit=yes
+
+# Resource Limitations
+LimitNOFILE=16384
+
+[Install]
+WantedBy=multi-user.target

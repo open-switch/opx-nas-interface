@@ -1,0 +1,119 @@
+#!/usr/bin/python
+# Copyright (c) 2015 Dell Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+#
+# THIS CODE IS PROVIDED ON AN *AS IS* BASIS, WITHOUT WARRANTIES OR
+# CONDITIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT
+# LIMITATION ANY IMPLIED WARRANTIES OR CONDITIONS OF TITLE, FITNESS
+# FOR A PARTICULAR PURPOSE, MERCHANTABLITY OR NON-INFRINGEMENT.
+#
+# See the Apache Version 2.0 License for specific language governing
+# permissions and limitations under the License.
+
+import sys
+import nas_stat_utils
+import cps
+import cps_utils
+import cps_object
+import nas_ut_framework as nas_ut
+import nas_os_utils
+import nas_os_if_utils as nas_if
+
+cps_utils.add_attr_type("dell-if/clear-counters/input/intf-choice/ifname-case","string")
+def nas_stat_op(op, data_dict, type):
+    qual = "target"
+    if type == 0:
+        qual = "observed"
+    obj = cps_object.CPSObject(qual=qual,
+        module=nas_stat_utils.get_stat_keys()[int(type)],
+        data=data_dict)
+    nas_ut.get_cb_method(op)(obj)
+
+def nas_list_interfaces():
+    """
+    This function iterates through all the interfaces and collects stats for them.
+    """
+    l = []
+    l = nas_if.nas_os_if_state_list()
+    for entry in l:
+        print "------"
+        cps_utils.print_obj(entry)
+        entry_obj = cps_object.CPSObject(obj=entry)
+        name = entry_obj.get_attr_data('if/interfaces-state/interface/name')
+        print ("stats for %s " % name)
+        nas_stat_op(
+            "get",
+            {"if/interfaces-state/interface/name": name,
+             "if/interfaces-state/interface/type":"ianaift:ethernetCsmacd"},
+            0)
+
+
+def usage():
+    print """\n\nopx-show-stats
+           if_stat {iface_name} {filter_list}    - Get stats for all interfaces if no input provided
+                                                 - Get the statistics of given interface
+                                                 - filter_list is the filters if user want
+                                                   only specific statistics
+
+           vlan_stat [vlan_ifname] {filter_list} - Get the statistics of given vlan interface name
+                                                  - filter_list is the filters if user want
+                                                    only specific statistics
+
+            clear [iface_name]                    - Clear the interface statistics
+          """
+    exit()
+
+
+def add_filters(type, filters):
+    fl = filters.split(",")
+    pfl = []
+    for i in fl:
+        pfl.append(nas_stat_utils.get_stat_keys()[int(type)] + "/" + i)
+    nas_stat_utils.add_filters(pfl)
+
+
+if __name__ == '__main__':
+
+    if len(sys.argv) == 1:
+        usage()
+    elif sys.argv[1] == "if_stat":
+        if len(sys.argv) == 2:
+            nas_list_interfaces()
+        if len(sys.argv) == 3:
+            nas_stat_op(
+                "get",
+                {"if/interfaces-state/interface/name": sys.argv[2],
+                "if/interfaces-state/interface/type":"ianaift:ethernetCsmacd"},
+                0)
+        if len(sys.argv) == 4:
+            add_filters(0, sys.argv[3])
+            nas_stat_op(
+                "get",
+                {"if/interfaces-state/interface/name": sys.argv[2],
+                "if/interfaces-state/interface/type":"ianaift:ethernetCsmacd"},
+                0)
+    elif sys.argv[1] == "vlan_stat":
+        if len(sys.argv) == 3:
+            nas_stat_op(
+                "get",
+                {"if/interfaces-state/interface/name": sys.argv[2],
+                "if/interfaces-state/interface/type":"ianaift:l2vlan"},
+                0)
+        if len(sys.argv) == 4:
+            add_filters(1, sys.argv[3])
+            nas_stat_op(
+                "get",
+                {"if/interfaces-state/interface/name": sys.argv[2],
+                "if/interfaces-state/interface/type":"ianaift:l2vlan"},
+                0)
+    elif sys.argv[1] == "clear":
+        if len(sys.argv) == 3:
+            nas_stat_op(
+                "rpc",
+                {"dell-if/clear-counters/input/intf-choice/ifname-case": sys.argv[2]},
+                1)
+    else:
+        usage()
