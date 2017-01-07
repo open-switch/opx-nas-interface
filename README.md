@@ -1,12 +1,4 @@
-opx-nas-interface
-=================
+# opx-nas-interface
+This repository contains the interface portion of the network abstraction service (NAS). This creates interfaces in the Linux kernel corresponding to the network processor unit (NPU) front panel ports, manages VLAN and LAG configurations, statistics managament and control packet handling.
 
-Interface functionality for the Open Swicth Base Module
-
-Description
------------
-
-This repo contains the Interface portion of the Network abstraction service. This creates interfaces in Linux kernel corresponding to NPU front-panel ports, manages VLAN and LAG configurations, statistics managament and control packet handling 
-
-(c) Dell 2016
-
+(c) 2017 Dell
