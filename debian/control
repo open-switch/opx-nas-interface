@@ -2,7 +2,7 @@ Source: libopx-nas-interface
 Section: net
 Priority: optional
 Maintainer: Dell <support@dell.com>
-Build-Depends: debhelper (>= 9),dh-autoreconf,dh-systemd,autotools-dev,libevent-dev,libopx-common-dev,libopx-nas-common-dev,libopx-cps-dev,libopx-logging-dev,libopx-nas-linux-dev,libopx-nas-ndi-dev,opx-ndi-api-dev,libopx-nas-platform1
+Build-Depends: debhelper (>= 9),dh-autoreconf,dh-systemd,autotools-dev,libevent-dev,libopx-common-dev,libopx-nas-common-dev,libopx-cps-dev,libopx-logging-dev,libopx-nas-linux-dev,libopx-nas-ndi-dev,opx-ndi-api-dev
 Standards-Version: 3.9.3
 Vcs-Browser: https://github.com/open-switch/opx-nas-interface
 Vcs-Git: https://github.com/open-switch/opx-nas-interface.git
