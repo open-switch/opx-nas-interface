@@ -13,7 +13,6 @@
 # See the Apache Version 2.0 License for specific language governing
 # permissions and limitations under the License.
 
-export LD_LIBRARY_PATH=/usr/lib/opx:/usr/lib/x86_64-linux-gnu:/usr/lib:/lib
-export PYTHONPATH=/usr/lib/opx  
+. /etc/opx/opx-environment
 
 /usr/bin/base_nas_phy_media_config.py

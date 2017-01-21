@@ -1,6 +1,6 @@
 [Unit]
 Description=Physical media event handler
-After=opx-nas.service
+After=opx-cps.service
 DefaultDependencies=no
 
 [Service]
