@@ -1,7 +1,6 @@
 [Unit]
 Description=Physical media event handler
 After=opx-cps.service
-Wants=opx-cps.service
 DefaultDependencies=no
 
 [Service]

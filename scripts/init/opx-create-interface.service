@@ -1,7 +1,6 @@
 [Unit]
 Description=This service is to create all interface during system initiation
 After=opx-front-panel-ports.service
-Wants=opx-front-panel-ports.service
 DefaultDependencies=no
 
 [Service]
