@@ -13,7 +13,7 @@
 # See the Apache Version 2.0 License for specific language governing
 # permissions and limitations under the License.
 
-. /etc/opx/opx-environment
+. /etc/opx/opx-environment.sh
 
 if [ -f /etc/opx/nas_if_nocreate ] ; then
    exit 0
