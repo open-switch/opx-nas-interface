@@ -13,6 +13,6 @@
 # See the Apache Version 2.0 License for specific language governing
 # permissions and limitations under the License.
 
-. /etc/opx/opx-environment
+. /etc/opx/opx-environment.sh
 
 /usr/bin/base_nas_phy_media_config.py
