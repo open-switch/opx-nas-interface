@@ -1,5 +1,5 @@
 # opx-nas-interface
-This repository contains the interface portion of the network abstraction service (NAS). This creates interfaces in the Linux kernel corresponding to the network processor unit (NPU) front panel ports, manages VLAN and LAG configurations, statistics managament and control packet handling.
+This repository contains the interface portion of the network abstraction service (NAS). This creates interfaces in the Linux kernel corresponding to the network processor unit (NPU) front panel ports, manages VLAN and LAG configurations, statistics management and control packet handling.
 
 ##Packages
 libopx-nas-interface1\_*version*\_*arch*.deb — Utility libraries  
