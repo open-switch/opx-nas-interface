@@ -25,7 +25,7 @@ libopx_nas_interface_la_SOURCES=src/swp_util_tap.c src/nas_int_main.cpp \
          src/port/nas_int_breakout.cpp src/port/nas_int_physical_cps.cpp \
          src/stats/nas_stats_if_cps.cpp src/stats/nas_stats_vlan_cps.cpp \
          src/vlan/nas_vlan_lag_api.cpp
-libopx_nas_interface_la_LIBADD=-lopx_common -lopx_nas_common -lopx_nas_ndi -lopx_cps_api_common -lopx_logging -lopx_nas_linux -lpthread -levent
+libopx_nas_interface_la_LIBADD=-lopx_common -lopx_nas_common -lopx_nas_ndi -lopx_cps_api_common -lopx_logging -lopx_nas_linux -lopx_nas_platform -lpthread -levent
 
 libopx_nas_meta_packet_la_SOURCES=src/nas_packet_meta.c
 libopx_nas_meta_packet_la_LIBADD=-lopx_common -lopx_logging
