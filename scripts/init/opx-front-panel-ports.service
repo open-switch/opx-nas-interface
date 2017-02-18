@@ -1,7 +1,6 @@
 [Unit]
 Description=Front panel port object access handler
 After=opx-nas.service
-Wants=opx-nas.service
 DefaultDependencies=no
 
 [Service]

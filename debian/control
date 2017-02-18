@@ -1,4 +1,4 @@
-Source: libopx-nas-interface
+Source: opx-nas-interface
 Section: net
 Priority: optional
 Maintainer: Dell <support@dell.com>

@@ -1,7 +1,6 @@
 [Unit]
 Description=Physical media configuration function provider
-After=opx-object-library.service
-Wants=opx-object-library.service
+After=opx-cps.service
 DefaultDependencies=no
 
 [Service]

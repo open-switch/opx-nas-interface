@@ -31,7 +31,7 @@ libopx_nas_meta_packet_la_SOURCES=src/nas_packet_meta.c
 libopx_nas_meta_packet_la_LIBADD=-lopx_common -lopx_logging
 
 libopx_nas_packet_io_la_SOURCES=src/packet_io.c
-libopx_nas_packet_io_la_LIBADD=-lopx_common -lopx_logging -lopx_nas_interface -lopx_nas_meta_packet -lopx_nas_ndi -lopx_cps_api_common -lpthread
+libopx_nas_packet_io_la_LIBADD=-lopx_common -lopx_logging libopx_nas_interface.la libopx_nas_meta_packet.la -lopx_nas_ndi -lopx_cps_api_common -lpthread
 
 systemdconfdir=/lib/systemd/system
 systemdconf_DATA = scripts/init/*.service
