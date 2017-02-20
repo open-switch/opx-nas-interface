@@ -1,3 +1,13 @@
+opx-nas-interface (1.0.2) unstable; urgency=medium
+
+  [ J.T. Conklin ]
+  * Add standard copyright boilerplate
+
+  [ Satish Mynam ]
+  * Changes to to depricate opx-nas-platform* repos
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 20 Feb 2017 22:24:28 +0000
+
 opx-nas-interface (1.0.1) unstable; urgency=medium
 
   * Initial release.
