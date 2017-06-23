@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 Dell Inc.
+ * Copyright (c) 2017 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -15,12 +15,12 @@
  */
 
 /*
- * filename: nas_stats.h
+ * filename: nas_fc_stats.h
  */
 
 
-#ifndef NAS_STATS_H_
-#define NAS_STATS_H_
+#ifndef NAS_FC_STATS_H_
+#define NAS_FC_STATS_H_
 
 #include "std_error_codes.h"
 #include "cps_api_operation.h"
@@ -29,16 +29,13 @@
 extern "C" {
 #endif
 
-t_std_error nas_stats_if_init(cps_api_operation_handle_t handle);
-
-t_std_error nas_eee_stats_if_init(cps_api_operation_handle_t handle);
-
-t_std_error nas_stats_vlan_init(cps_api_operation_handle_t handle);
-
-bool nas_stat_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index,bool clear);
+t_std_error nas_stats_fc_if_init(cps_api_operation_handle_t handle);
+cps_api_return_code_t nas_if_fc_stats_clear (void * context,
+                                            cps_api_transaction_params_t * param,
+                                            size_t ix);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* NAS_STATS_H_ */
+#endif /* NAS_FC_STATS_H_ */

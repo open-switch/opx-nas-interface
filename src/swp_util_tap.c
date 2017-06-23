@@ -64,7 +64,7 @@ void swp_util_free_descrs(swp_util_tap_descr  taps) {
 }
 
 int swp_util_tap_descr_get_queue(swp_util_tap_descr p,int queue) {
-    if (queue < p->queues) return p->fds[queue];
+    if ((p != NULL) && (queue < p->queues)) return p->fds[queue];
     return SWP_UTIL_INV_FD;
 }
 

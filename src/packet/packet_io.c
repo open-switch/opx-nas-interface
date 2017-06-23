@@ -38,6 +38,8 @@
 #include "cps_api_operation.h"
 #include "cps_api_object_category.h"
 #include "dell-base-sflow.h"
+#include "dell-base-packet.h"
+#include "nas_packet_filter.h"
 
 #include <sys/socket.h>
 #include <linux/if.h>
@@ -69,12 +71,17 @@
 static int pkt_debug = 0;
 static uint64_t sample_count=0;
 
-static uint64_t packets_txed;
+static uint64_t packets_txed; // cumulative packet txed
+static uint64_t packets_txed_to_pipeline_bypass; // packet txed directly to egress bypassing the pipeline
+static uint64_t packets_txed_to_pipeline_lookup; // packet txed to ingress pipeline
 static uint64_t packets_rxed;
 static uint8_t  pkt_buf[MAX_PKT_LEN];
 
 void pkt_debug_counters(std_parsed_string_t handle) {
-    printf("RX: %llu, TX: %llu \n",(unsigned long long)packets_rxed,(unsigned long long)packets_txed);
+    printf("RX                      : %llu\n", (unsigned long long)packets_rxed);
+    printf("TX (total)              : %llu\n", (unsigned long long)packets_txed);
+    printf("TX (pipeline bypass)    : %llu\n", (unsigned long long)packets_txed_to_pipeline_bypass);
+    printf("TX (pipeline lookup)    : %llu\n", (unsigned long long)packets_txed_to_pipeline_lookup);
 }
 /*
  * Pthread variables
@@ -329,6 +336,101 @@ static cps_api_return_code_t _cps_api_rollback (void                         *co
     return _cps_api_write_int (context, param, index, NULL);
 }
 
+/*
+ * Packet Filter CPS registration APIs
+ */
+static cps_api_return_code_t _cps_api_pf_read (void                 *context,
+                                               cps_api_get_params_t *param,
+                                               size_t                index)
+{
+    cps_api_object_t filt = cps_api_object_list_get(param->filters,index);
+
+    if (cps_api_key_get_subcat (cps_api_object_key (filt)) != BASE_PACKET_RULE_OBJ) {
+        EV_LOGGING (INTERFACE, ERR, "PKT-IO", "Invalid Sub-Category");
+        return cps_api_ret_code_ERR;
+    }
+
+    cps_api_object_t obj = cps_api_object_list_create_obj_and_append (param->list);
+    if (!obj) {
+        EV_LOGGING (INTERFACE, ERR, "PKT-IO","Obj Append failed");
+        return cps_api_ret_code_ERR;
+    }
+
+    if (!cps_api_key_from_attr_with_qual (cps_api_object_key (obj),
+                                          BASE_PACKET_RULE_OBJ,
+                                          cps_api_qualifier_TARGET)) {
+        EV_LOGGING (INTERFACE, ERR, "PKT-IO", "Failed to create Key from Table Object");
+        return cps_api_ret_code_ERR;
+    }
+
+    if(nas_pf_cps_read(filt, obj) != STD_ERR_OK) {
+        return cps_api_ret_code_ERR;
+    }
+
+    return cps_api_ret_code_OK;
+}
+
+static cps_api_return_code_t _cps_api_pf_write_int (void                        *context,
+                                                   cps_api_transaction_params_t *param,
+                                                   size_t                        index,
+                                                   cps_api_object_t              prev)
+{
+    cps_api_object_t          obj;
+
+    obj = cps_api_object_list_get (param->change_list, index);
+    if (obj == NULL) {
+        EV_LOGGING (INTERFACE, ERR, "PKT-IO", "Missing Change Object");
+        return cps_api_ret_code_ERR;
+    }
+
+    if(nas_pf_cps_write(obj) != STD_ERR_OK) {
+        return cps_api_ret_code_ERR;
+    }
+
+    return cps_api_ret_code_OK;
+}
+
+static cps_api_return_code_t _cps_api_pf_write (void                        *context,
+                                               cps_api_transaction_params_t *param,
+                                               size_t                        index)
+{
+    cps_api_object_t prev = cps_api_object_list_create_obj_and_append (param->prev);
+    if (prev == NULL) {
+        return cps_api_ret_code_ERR;
+    }
+
+    return _cps_api_pf_write_int (context, param, index, prev);
+}
+
+static cps_api_return_code_t _cps_api_pf_rollback (void                        *context,
+                                                  cps_api_transaction_params_t *param,
+                                                  size_t                        index)
+{
+    return _cps_api_pf_write_int (context, param, index, NULL);
+}
+
+static t_std_error _cps_packet_filter_init(cps_api_operation_handle_t handle)
+{
+    cps_api_registration_functions_t f;
+
+    memset (&f, 0, sizeof(f));
+
+    f.handle             = handle;
+    f._read_function     = _cps_api_pf_read;
+    f._write_function    = _cps_api_pf_write;
+    f._rollback_function = _cps_api_pf_rollback;
+
+    cps_api_key_from_attr_with_qual(&f.key, BASE_PACKET_RULE_OBJ, cps_api_qualifier_TARGET);
+
+    /* Register for the control Packet Filter object */
+    if (cps_api_register (&f) != cps_api_ret_code_OK) {
+        EV_LOGGING (INTERFACE, ERR, "PKT-IO", "CPS object Register failed");
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+
+    return STD_ERR_OK;
+}
+
 static t_std_error _cps_init ()
 {
     cps_api_operation_handle_t       handle;
@@ -365,7 +467,7 @@ static t_std_error _cps_init ()
         return STD_ERR(INTERFACE, FAIL, rc);
     }
 
-    return STD_ERR_OK;
+    return _cps_packet_filter_init(handle);
 }
 
 /*!
@@ -386,6 +488,11 @@ static t_std_error dn_hal_packet_rx(uint8_t *pkt, uint32_t len, ndi_packet_attr_
     if (p_attr->trap_id == NDI_PACKET_TRAP_ID_SAMPLEPACKET)
         return _sflow_pkt_hdl (pkt, len, p_attr);
 
+    if(nas_pf_ingr_enabled()) {
+        bool stop = nas_pf_in_pkt_hndlr(pkt, len, p_attr);
+        if(stop) return (STD_ERR_OK);
+    }
+
     t_std_error err = hal_virtual_interace_send(p_attr->npu_id,p_attr->rx_port,0,pkt,len);
     PKT_DEBUG("[RX] Data written to fd %d", err);
     return (STD_ERR_OK);
@@ -396,6 +503,8 @@ static void dn_hal_packet_tx(npu_id_t npu, npu_port_t port, void  *pkt, uint32_t
     ndi_packet_attr_t attr;
 
     ++packets_txed;
+    ++packets_txed_to_pipeline_bypass;
+
     PKT_DEBUG("[TX] for npu %d port %d len %d\r\n",npu,port,len);
 
     if (pkt_debug == PKT_DBG_DUMP) hal_packet_io_dump(pkt, len);
@@ -403,10 +512,41 @@ static void dn_hal_packet_tx(npu_id_t npu, npu_port_t port, void  *pkt, uint32_t
     attr.npu_id  = npu;
     attr.tx_port = port;
 
+    /* regular packet tx flow is bypass tx pipeline */
+    attr.tx_type = NDI_PACKET_TX_TYPE_PIPELINE_BYPASS;
+
     if (ndi_packet_tx(pkt, len, &attr) != STD_ERR_OK) {
         PKT_DEBUG("[TX] Pkt txmission FAILED \r\n");
     } else {
         PKT_DEBUG("[TX] Pkt txmission OK \r\n");
+    }
+}
+
+void dn_hal_packet_tx_to_ingress_pipeline (void  *pkt, uint32_t len)
+{
+    npu_id_t npu;
+    ndi_packet_attr_t attr;
+
+    /* for now, npu-id for injecting packet to ingress pipeline
+     * is done using npu-id 0. Needs revisit when handling multi line card.
+     */
+    npu = 0;
+
+    ++packets_txed;
+    ++packets_txed_to_pipeline_lookup;
+
+    if (pkt_debug == PKT_DBG_DUMP) hal_packet_io_dump(pkt, len);
+
+    attr.npu_id  = npu;
+    attr.tx_port = 0;
+
+    /* regular packet tx flow is bypass tx pipeline */
+    attr.tx_type = NDI_PACKET_TX_TYPE_PIPELINE_LOOKUP;
+
+    if (ndi_packet_tx (pkt, len, &attr) != STD_ERR_OK) {
+        PKT_DEBUG("[TX] Pkt txmission to ingress pipeline FAILED \r\n");
+    } else {
+        PKT_DEBUG("[TX] Pkt txmission to ingress pipeline OK \r\n");
     }
 }
 
@@ -422,7 +562,9 @@ t_std_error hal_packet_io_main(void) {
     /* packet transmission from virtual interface is handled via libevent.
      * call to hal_virtual_interface_wait() trigger event dispatcher.
      */
-    if (hal_virtual_interface_wait(dn_hal_packet_tx,pkt_buf,MAX_PKT_LEN)!=STD_ERR_OK) {
+    if (hal_virtual_interface_wait(dn_hal_packet_tx,
+                                   dn_hal_packet_tx_to_ingress_pipeline,
+                                   pkt_buf,MAX_PKT_LEN)!=STD_ERR_OK) {
         EV_LOGGING (INTERFACE,ERR, "PKT-IO", "Error in initializing virtual interface packet tx");
     }
 
@@ -444,6 +586,7 @@ t_std_error hal_packet_io_init(void)
 
     /* Create socket to send SFLOW sample packet */
     _sflow_sock_init ();
+    nas_pf_initialize();
     _cps_init ();
 
     ndi_packet_rx_register(dn_hal_packet_rx);

@@ -14,6 +14,7 @@
 # permissions and limitations under the License.
 
 import sys
+import datetime
 import nas_stat_utils
 import cps
 import cps_utils
@@ -21,58 +22,228 @@ import cps_object
 import nas_ut_framework as nas_ut
 import nas_os_utils
 import nas_os_if_utils as nas_if
+import nas_qos
+
+def cps_convert_attr_data( raw_elem ):
+    d={}
+    obj = cps_utils.CPSObject(obj=raw_elem)
+    for attr in raw_elem['data']:
+        d[attr] = obj.get_attr_data(attr)
+
+    return d
+
+def _get_dict(cps_data, key_attrs):
+    ret = {}
+    d = cps_convert_attr_data(cps_data)
+    for k in d:
+        if k != "cps/key_data":
+            attr = k.split('/')[-1]
+            ret[attr] = d[k]
+        else:
+            for elem in d[k]:
+                attr = elem.split('/')[-1]
+                ret[attr] = d[k][elem]
+                key_attrs.append(attr)
+    key_attrs = list(set(key_attrs))
+    return ret
+
+def print_if_obj(data):
+    key_attrs = []
+    d = _get_dict(data, key_attrs)
+    if 'time-stamp' in d.keys():
+       sec = d['time-stamp']
+       days = datetime.timedelta(seconds = sec)
+       d['time-stamp'] = days
+    for k, v in sorted(d.items()):
+        print k, " " * (40 - len(k)), "| ", str(v)
+
+def populate_colList(key_attrs, l):
+    key_attrs = list(set(key_attrs))
+    colList = key_attrs
+    attrs = [x for x in l[0].keys() if x not in colList]
+    colList.extend(attrs)
+    return colList
+
+def priority_group_stat_getall(port_id, name):
+    l = []
+    key_attrs = []
+    priority_group_id = range(0,8)
+    for id in priority_group_id:
+        ret = priority_group_stat_get(port_id, id)
+        for elem in ret:
+            l.append(_get_dict(elem, key_attrs))
+
+    if l:
+        t = 80 - len(name)
+        print "\n", "*" * 40, "PRIORITY GROUP STATS for ", name, "*" *  t
+        colList = populate_colList(key_attrs, l)
+        colSize = printTableHeader(colList)
+        printTableData(l, colList, colSize)
+
+
+def priority_group_stat_get (port_id, local_id):
+    return_data_list = []
+
+    priority_group_stat_obj = nas_qos.PriorityGroupStatCPSObj (port_id=port_id, local_id=local_id)
+    ret = cps.get ([priority_group_stat_obj.data()], return_data_list)
+
+    if ret == True:
+        return return_data_list
+    else:
+        return []
+
+def custom_print(columnList, colSize):
+    str = []
+    for index, i in enumerate(colSize):
+        length = i if i > len(columnList[0][index]) else len(columnList[0][index])
+        str.append("{{:<{}}}".format(length))
+    formatStr = ' | '.join(str)
+    for item in columnList:
+       print(formatStr.format(*item))
+
+def printTableHeader(column):
+    columnList = [column]
+    colSize = [max(map(len,col)) for col in zip(*columnList)]
+    print "-" * 148
+    custom_print(columnList, colSize)
+    print "-" * 148
+    return colSize
+
+def printTableData(data, column, colSize):
+   columnList = []
+   for item in data:
+       columnList.append([str(item[col]) for col in column])
+   custom_print(columnList, colSize)
+   print "*" * 148
+
+def queue_stat_get_all(port_id, name):
+    queue_number = range(0,8)
+
+    l = []
+    key_attrs = []
+    queue_type = {'2' : 'UCAST', '3' : 'MULTICAST'}
+
+    for type in queue_type.values():
+        for queue_num in queue_number:
+            return_data_list = queue_stat_get(port_id, type, queue_num)
+            for elem in return_data_list:
+                d = _get_dict(elem, key_attrs)
+                if 'type' in d.keys():
+                    d['type'] = queue_type[str(d['type'])]
+                l.append(d)
+
+    if l:
+        print "\n", "*" * 60, "QUEUE STATS for ", name, "*" * 60
+        colList = populate_colList(key_attrs, l)
+        colSize = printTableHeader(colList)
+        printTableData(l, colList, colSize)
+
+
+def queue_stat_get (port_id, queue_type, queue_number ):
+    return_data_list = []
+
+    queue_stat_obj = nas_qos.QueueStatCPSObj (queue_type=queue_type, queue_number=queue_number, port_id=port_id)
+    ret = cps.get ([queue_stat_obj.data()], return_data_list)
+
+    if ret == True:
+        return return_data_list
+    else:
+        return []
+
+
+def buffer_pool_get(buffer_pool_id):
+    return_data_list = []
+    buffer_pool_stat_obj = nas_qos.BufferPoolStatCPSObj(buffer_pool_id)
+    ret = cps.get ([buffer_pool_stat_obj.data()], return_data_list)
+    return return_data_list
+
+def buffer_pool_get_all():
+    l = []
+    key_attrs = []
+    pool_list = []
+    obj = cps_object.CPSObject(module="base-qos/buffer-pool")
+    r = cps.get([obj.get()], pool_list)
+    for elem in pool_list:
+        d = _get_dict(elem, key_attrs)
+        if 'id' in d:
+            bufer_pool_id = d['id']
+            return_data_list = buffer_pool_get(bufer_pool_id)
+            for elem in return_data_list:
+                d = _get_dict(elem, key_attrs)
+                l.append(d)
+
+    if l:
+        print "\n", "*" * 60, "BUFFER POOL STATS", "*" * 70
+        colList = populate_colList(key_attrs, l)
+        colSize = printTableHeader(colList)
+        printTableData(l, colList, colSize)
+
 
 cps_utils.add_attr_type("dell-if/clear-counters/input/intf-choice/ifname-case","string")
-def nas_stat_op(op, data_dict, type):
+def nas_stat_op(op, data_dict, type, detailed):
     qual = "target"
     if type == 0:
         qual = "observed"
     obj = cps_object.CPSObject(qual=qual,
         module=nas_stat_utils.get_stat_keys()[int(type)],
         data=data_dict)
-    nas_ut.get_cb_method(op)(obj)
+    if op == "get" and detailed == True:
+        get = []
+        if cps.get([obj.get()], get):
+            t = 92-len(data_dict["if/interfaces-state/interface/name"])
+            print "\n", "*" * 40, "IF STATS for ", data_dict["if/interfaces-state/interface/name"], "*" * t
+            print "-" * 148
+            print "\n", "counter name" , " " * 28, "| ", "counter value "
+            print "-" * 148
+            for i in get:
+                print_if_obj(i)
+            print "*" * 148
+        else:
+             print "Failure to get stats for ", data_dict["if/interfaces-state/interface/name"]
+    else:
+         nas_ut.get_cb_method(op)(obj)
 
-def nas_list_interfaces():
+
+def nas_list_interfaces(detailed):
     """
     This function iterates through all the interfaces and collects stats for them.
     """
     l = []
     l = nas_if.nas_os_if_state_list()
     for entry in l:
-        print "------"
-        cps_utils.print_obj(entry)
+        if not detailed:
+            print "------"
+            cps_utils.print_obj(entry)
+
         entry_obj = cps_object.CPSObject(obj=entry)
         name = entry_obj.get_attr_data('if/interfaces-state/interface/name')
-        print ("stats for %s " % name)
+        if not detailed: print ("stats for %s " % name)
         nas_stat_op(
             "get",
             {"if/interfaces-state/interface/name": name,
              "if/interfaces-state/interface/type":"ianaift:ethernetCsmacd"},
-            0)
+            0,
+            detailed)
+        if(detailed):
+            port_id = nas_if.name_to_ifindex(name)
+            queue_stat_get_all(port_id, name)
+            priority_group_stat_getall(port_id, name)
+    if(detailed): buffer_pool_get_all()
 
 
 def usage():
     print """\n\nopx-show-stats
-           if_stat {iface_name} {filter_list}    - Get stats for all interfaces if no input provided
+           if_stat {iface_name} [detailed]       - Get stats for all interfaces if no input provided
                                                  - Get the statistics of given interface
-                                                 - filter_list is the filters if user want
-                                                   only specific statistics
+                                                 - Show expanded counters if "detailed" option is specified (if statistics, queue stats and priority group stats)
 
-           vlan_stat [vlan_ifname] {filter_list} - Get the statistics of given vlan interface name
-                                                  - filter_list is the filters if user want
-                                                    only specific statistics
+           vlan_stat [vlan_ifname]               - Get the statistics of given vlan interface name
 
-            clear [iface_name]                    - Clear the interface statistics
+           fc_if_stat [fc_if_ifname]               - Get the fibre channel statistics of given FC interface name
+
+           clear [iface_name]                    - Clear the interface statistics
           """
     exit()
-
-
-def add_filters(type, filters):
-    fl = filters.split(",")
-    pfl = []
-    for i in fl:
-        pfl.append(nas_stat_utils.get_stat_keys()[int(type)] + "/" + i)
-    nas_stat_utils.add_filters(pfl)
 
 
 if __name__ == '__main__':
@@ -81,39 +252,53 @@ if __name__ == '__main__':
         usage()
     elif sys.argv[1] == "if_stat":
         if len(sys.argv) == 2:
-            nas_list_interfaces()
+            nas_list_interfaces(False)
         if len(sys.argv) == 3:
-            nas_stat_op(
-                "get",
-                {"if/interfaces-state/interface/name": sys.argv[2],
-                "if/interfaces-state/interface/type":"ianaift:ethernetCsmacd"},
-                0)
+            if sys.argv[2] == "detailed":
+                nas_list_interfaces(True)
+            else:
+                nas_stat_op(
+                    "get",
+                    {"if/interfaces-state/interface/name": sys.argv[2],
+                    "if/interfaces-state/interface/type":"ianaift:ethernetCsmacd"},
+                    0,
+                    False)
         if len(sys.argv) == 4:
-            add_filters(0, sys.argv[3])
-            nas_stat_op(
-                "get",
-                {"if/interfaces-state/interface/name": sys.argv[2],
-                "if/interfaces-state/interface/type":"ianaift:ethernetCsmacd"},
-                0)
+            if sys.argv[3] == "detailed":
+                nas_stat_op(
+                    "get",
+                    {"if/interfaces-state/interface/name": sys.argv[2],
+                    "if/interfaces-state/interface/type":"ianaift:ethernetCsmacd"},
+                    0,
+                    True)
+                port_id = nas_if.name_to_ifindex(sys.argv[2])
+                queue_stat_get_all(port_id, sys.argv[2])
+                priority_group_stat_getall(port_id, sys.argv[2])
+                buffer_pool_get_all()
+            else:
+                usage()
     elif sys.argv[1] == "vlan_stat":
         if len(sys.argv) == 3:
             nas_stat_op(
                 "get",
                 {"if/interfaces-state/interface/name": sys.argv[2],
                 "if/interfaces-state/interface/type":"ianaift:l2vlan"},
-                0)
-        if len(sys.argv) == 4:
-            add_filters(1, sys.argv[3])
+                0,
+                False)
+    elif sys.argv[1] == "fc_if_stat":
+        if len(sys.argv) == 3:
             nas_stat_op(
                 "get",
                 {"if/interfaces-state/interface/name": sys.argv[2],
-                "if/interfaces-state/interface/type":"ianaift:l2vlan"},
-                0)
+                "if/interfaces-state/interface/type":"ianaift:fibreChannel"},
+                0,
+                False)
     elif sys.argv[1] == "clear":
         if len(sys.argv) == 3:
             nas_stat_op(
                 "rpc",
-                {"dell-if/clear-counters/input/intf-choice/ifname-case": sys.argv[2]},
-                1)
+                {"dell-if/clear-counters/input/intf-choice/ifname-case/ifname": sys.argv[2]},
+                1,
+                False)
     else:
         usage()

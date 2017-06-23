@@ -25,7 +25,6 @@
 #include "ds_common_types.h"
 #include "nas_ndi_common.h"
 #include "std_error_codes.h"
-#include "hal_interface_defaults.h"
 #include "cps_api_operation.h"
 #include "nas_int_bridge.h"
 #include "nas_int_com_utils.h"
@@ -45,7 +44,7 @@ t_std_error nas_add_port_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id,
 
 t_std_error nas_del_port_from_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id, \
                                    ndi_port_t *p_ndi_port, nas_port_mode_t port_mode);
-
+bool nas_ck_port_exist(hal_vlan_id_t vlan_id, hal_ifindex_t port_index);
 t_std_error nas_vlan_delete(npu_id_t npu_id, hal_vlan_id_t vlan_id);
 void nas_pack_vlan_if(cps_api_object_t obj, nas_bridge_t *p_bridge);
 
@@ -134,14 +133,15 @@ t_std_error nas_add_or_del_port_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id,
                                         bool add_port);
 
 t_std_error nas_cps_add_port_to_os(hal_ifindex_t br_index, hal_vlan_id_t vlan_id,
-                                   nas_port_mode_t port_mode, hal_ifindex_t port_idx);
+                                   nas_port_mode_t port_mode, hal_ifindex_t port_idx,uint32_t mtu);
 
 t_std_error nas_lag_add_del_vlan_update(hal_ifindex_t lag_index, hal_vlan_id_t,
                                         nas_port_mode_t port_mode, bool add_flag);
 
-t_std_error nas_handle_lag_update_for_vlan(nas_bridge_t *p_bridge, hal_ifindex_t lag_index,
-                                           hal_vlan_id_t vlan_id, nas_port_mode_t port_mode,
-                                           bool add_flag, bool cps_add);
+t_std_error nas_handle_lag_add_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_t lag_index,
+                              nas_port_mode_t port_mode, bool cps_add, vlan_roll_bk_t *roll_bk);
+t_std_error  nas_handle_lag_del_from_vlan(nas_bridge_t *p_bridge, hal_ifindex_t lag_index,
+                nas_port_mode_t port_mode, bool cps_del ,vlan_roll_bk_t *roll_bk);
 
 t_std_error nas_cps_del_port_from_os(hal_vlan_id_t vlan_id, hal_ifindex_t port_index,
                                      nas_port_mode_t port_mode);
@@ -154,4 +154,7 @@ cps_api_return_code_t nas_publish_vlan_port_list(nas_bridge_t *p_bridge_node, na
 void nas_handle_bridge_mac(nas_bridge_t *pnode);
 void nas_handle_del_vlan_lag(hal_vlan_id_t vlan_id);
 std_mutex_type_t *vlan_lag_mutex_lock();
+t_std_error nas_default_vlan_cache_init(void);
+bool nas_set_vlan_member_port_mtu(hal_ifindex_t ifindex, uint32_t mtu, hal_vlan_id_t vlan_id);
+void nas_vlan_set_taaged_lag_mtu(hal_vlan_id_t vlan_id,uint32_t mtu) ;
 #endif /* NAS_INTF_VLAN_H_ */

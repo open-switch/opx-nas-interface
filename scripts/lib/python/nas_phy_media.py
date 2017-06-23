@@ -59,7 +59,6 @@ media_type_to_str = {
     32: "QSFP 40GBASE PSM4 1490NM 3M",
     33: "QSFP 40GBASE PSM4 1490NM 5M",
     34: "4x1 1000BASE T",
-    35: "QSFP 40GBASE CR4 HALFM",
     36: "QSFP 40GBASE CR4 1M",
     37: "QSFP 40GBASE CR4 2M",
     38: "QSFP 40GBASE CR4 3M",
@@ -68,7 +67,6 @@ media_type_to_str = {
     41: "QSFP 40GBASE CR4 10M",
     42: "QSFP 40GBASE CR4 50M",
     43: "QSFP 40GBASE CR4",
-    44: "4x10 10GBASE CR1 HALFM",
     45: "4x10 10GBASE CR1 1M",
     46: "4x10 10GBASE CR1 3M",
     47: "4x10 10GBASE CR1 5M",
@@ -101,7 +99,6 @@ media_type_to_str = {
     74: "QSFP28 100GBASE PSM4 IR",
     75: "QSFP28 100GBASE CR4",
     76: "QSFP28 100GBASE AOC",
-    77: "QSFP28 100GBASE CR4 HALFM",
     78: "QSFP28 100GBASE CR4 1M",
     79: "QSFP28 100GBASE CR4 2M",
     80: "QSFP28 100GBASE CR4 3M",
@@ -110,20 +107,17 @@ media_type_to_str = {
     83: "QSFP28 100GBASE CR4 7M",
     84: "QSFP28 100GBASE CR4 10M",
     85: "QSFP28 100GBASE CR4 50M",
-    86: "4X25 25GBASE CR1 HALFM",
     87: "4X25 25GBASE CR1 1M",
     88: "4X25 25GBASE CR1 2M",
     89: "4X25 25GBASE CR1 3M",
     90: "4X25 25GBASE CR1 4M",
     91: "4X25 25GBASE CR1",
-    92: "2X50 50GBASE CR2 HALFM",
     93: "2X50 50GBASE CR2 1M",
     94: "2X50 50GBASE CR2 2M",
     95: "2X50 50GBASE CR2 3M",
     96: "2X50 50GBASE CR2 4M",
     97: "2X50 50GBASE CR2",
     98: "SFP28 25GBASE CR1",
-    99: "SFP28 25GBASE CR1 HALFM",
     100: "SFP28 25GBASE CR1 1M",
     101: "SFP28 25GBASE CR1 2M",
     102: "SFP28 25GBASE CR1 3M",
@@ -147,12 +141,140 @@ media_type_to_str = {
     120: "QSFP28 100GBASE PSM4 PIGTAIL",
     121: "QSFP28 100GBASE SWDM4",
     122: "QSFP 40GBASE PSM4 PIGTAIL",
+    123: "QSFP 40GBASE CR4 HALFM",
+    124: "4x10 10GBASE CR1 HALFM",
+    125: "QSFP28 100GBASE CR4 HALFM",
+    126: "4X25 25GBASE CR1 HALFM",
+    127: "2X50 50GBASE CR2 HALFM",
+    128: "SFP28 25GBASE CR1 HALFM",
+    129: "SFPPLUS 8GBASE FC SW",
+    130: "SFPPLUS 8GBASE FC LW",
+    131: "SFPPLUS 16GBASE FC SW",
+    132: "SFPPLUS 16GBASE FC LW",
+    133: "QSFPPLUS 64GBASE FC SW4",
+    134: "QSFPPLUS 4X16 16GBASE FC SW",
+    135: "QSFPPLUS 64GBASE FC LW4",
+    136: "QSFPPLUS 4X16 16GBASE FC LW",
+    137: "QSFP28 128GBASE FC SW4",
+    138: "QSFP28 4X32 32GBASE FC SW",
+    139: "QSFP28 128GBASE FC LW4",
+    140: "QSFP28 4X32 32GBASE FC LW",
+    141: "SFP28 32GBASE FC SW",
+    142: "SFP28 32GBASE FC LW",
+    143: "SFP28 5GBASE SR NOF",
+    144: "SFP28 25GBASE eSR",
+    145: "SFP28 25GBASE LR",
+    146: "SFP28 25GBASE LR LITE",
+    147: "SFP28 25GBASE SR AOCXXM",
+    148: "SFP28 25GBASE CR1 LPBK",
+    149: "QSFP28-DD 200GBASE CR4 HALFM",
+    150: "QSFP28-DD 200GBASE CR4 1M",
+    151: "QSFP28-DD 200GBASE CR4 2M",
+    152: "QSFP28-DD 200GBASE CR4 3M",
+    153: "QSFP28-DD 200GBASE CR4 5M",
+    154: "QSFP28-DD 200GBASE CR4",
+    155: "QSFP28-DD 200GBASE CR4 1.5M",
+    156: "QSFP28-DD 200GBASE CR4 2.5M",
+    157: "QSFP28-DD 2x100GBASE CR4 1M",
+    158: "QSFP28-DD 2x100GBASE CR4 2M",
+    159: "QSFP28-DD 2x100GBASE CR4 3M",
+    160: "QSFP28-DD 8x25GBASE CR4 1M",
+    161: "QSFP28-DD 8x25GBASE CR4 2M",
+    162: "QSFP28-DD 8x25GBASE CR4 3M",
+    163: "QSFP28-DD 200GBASE CR4 LPBK",
+    164: "SFPPLUS 10GBASE CR 1.5M",
+    165: "SFPPLUS 10GBASE CR 2.5M",
+    166: "SFPPLUS 10GBASE CR 1M",
+    167: "SFPPLUS 10GBASE CR 2M",
+    168: "SFPPLUS 10GBASE CR 3M",
+    169: "SFPPLUS 10GBASE CR 4M",
+    170: "SFPPLUS 10GBASE CR 5M",
+    171: "QSFP28-DD 200GBASE SR4 HALFM",
+    172: "QSFP28-DD 200GBASE SR4 1M",
+    173: "QSFP28-DD 200GBASE SR4 2M",
+    174: "QSFP28-DD 200GBASE SR4 3M",
+    175: "QSFP28-DD 200GBASE SR4 5M",
+    176: "QSFP28-DD 200GBASE SR4",
+    177: "QSFP28-DD 200GBASE SR4 1.5M",
+    178: "QSFP28-DD 200GBASE SR4 2.5M"
 }
+
+qsfp28_media_list = {
+    71: "QSFP28 100GBASE SR4",
+    72: "QSFP28 100GBASE LR4",
+    73: "QSFP28 100GBASE CWDM4",
+    74: "QSFP28 100GBASE PSM4 IR",
+    75: "QSFP28 100GBASE CR4",
+    76: "QSFP28 100GBASE AOC",
+    78: "QSFP28 100GBASE CR4 1M",
+    79: "QSFP28 100GBASE CR4 2M",
+    80: "QSFP28 100GBASE CR4 3M",
+    81: "QSFP28 100GBASE CR4 4M",
+    82: "QSFP28 100GBASE CR4 5M",
+    83: "QSFP28 100GBASE CR4 7M",
+    84: "QSFP28 100GBASE CR4 10M",
+    85: "QSFP28 100GBASE CR4 50M",
+    87: "4X25 25GBASE CR1 1M",
+    88: "4X25 25GBASE CR1 2M",
+    89: "4X25 25GBASE CR1 3M",
+    90: "4X25 25GBASE CR1 4M",
+    91: "4X25 25GBASE CR1",
+    93: "2X50 50GBASE CR2 1M",
+    94: "2X50 50GBASE CR2 2M",
+    95: "2X50 50GBASE CR2 3M",
+    96: "2X50 50GBASE CR2 4M",
+    97: "2X50 50GBASE CR2",
+    98: "SFP28 25GBASE CR1",
+    100: "SFP28 25GBASE CR1 1M",
+    101: "SFP28 25GBASE CR1 2M",
+    102: "SFP28 25GBASE CR1 3M",
+    109: "QSFP28 100GBASE LR4 LITE",
+    110: "QSFP28 100GBASE ER4",
+    111: "QSFP28 100GBASE ACC",
+    112: "SFP28 25GBASE SR",
+    120: "QSFP28 100GBASE PSM4 PIGTAIL",
+    121: "QSFP28 100GBASE SWDM4",
+    125: "QSFP28 100GBASE CR4 HALFM",
+    126: "4X25 25GBASE CR1 HALFM",
+    127: "2X50 50GBASE CR2 HALFM",
+    128: "SFP28 25GBASE CR1 HALFM",
+    149: "QSFP28-DD 200GBASE CR4 HALFM",
+    150: "QSFP28-DD 200GBASE CR4 1M",
+    151: "QSFP28-DD 200GBASE CR4 2M",
+    152: "QSFP28-DD 200GBASE CR4 3M",
+    153: "QSFP28-DD 200GBASE CR4 5M",
+    154: "QSFP28-DD 200GBASE CR4",
+    155: "QSFP28-DD 200GBASE CR4 1.5M",
+    156: "QSFP28-DD 200GBASE CR4 2.5M",
+    157: "QSFP28-DD 2x100GBASE CR4 1M",
+    158: "QSFP28-DD 2x100GBASE CR4 2M",
+    159: "QSFP28-DD 2x100GBASE CR4 3M",
+    160: "QSFP28-DD 8x25GBASE CR4 1M",
+    161: "QSFP28-DD 8x25GBASE CR4 2M",
+    162: "QSFP28-DD 8x25GBASE CR4 3M",
+    163: "QSFP28-DD 200GBASE CR4 LPBK",
+    171: "QSFP28-DD 200GBASE SR4 HALFM",
+    172: "QSFP28-DD 200GBASE SR4 1M",
+    173: "QSFP28-DD 200GBASE SR4 2M",
+    174: "QSFP28-DD 200GBASE SR4 3M",
+    175: "QSFP28-DD 200GBASE SR4 5M",
+    176: "QSFP28-DD 200GBASE SR4",
+    177: "QSFP28-DD 200GBASE SR4 1.5M",
+    178: "QSFP28-DD 200GBASE SR4 2.5M"
+    }
+
+
 
 cps_utils.add_attr_type('base-pas/media/port', 'uint8_t')
 cps_utils.add_attr_type('base-pas/media/slot', 'uint8_t')
 cps_utils.add_attr_type('base-pas/media/present', 'uint8_t')
 cps_utils.add_attr_type('base-pas/media/type', 'uint32_t')
+
+def is_qsfp28_media_type(media_type):
+    if media_type in qsfp28_media_list:
+        return True
+    else:
+        return False
 
 def get_media_str(media_type):
     return media_type_to_str[media_type]
@@ -209,12 +331,13 @@ def get_base_media_info(media_type):
     cps.get([obj.get()], base_media_info_list)
     return base_media_info_list
 
-def nas_set_media_type_by_phy_port(npu, phy_port, media_type):
+def nas_set_media_type_by_phy_port(npu, phy_port, media_type, fp_port):
     port = cps_object.CPSObject(
         module='base-if-phy/physical',
         data={'npu-id': npu,
               'port-id': phy_port,
-              'phy-media': media_type})
+              'phy-media': media_type,
+              'front-panel-number': fp_port})
     nas_if.log_info(" port id : "+str(port.get_attr_data('port-id'))+". media type: "+str(media_type))
     ch = {'operation': 'set', 'change': port.get()}
     cps.transaction([ch])
@@ -265,7 +388,7 @@ def if_media_type_set(pas_media_obj):
         media_id = pas_media_obj.get_attr_data('port')
         media_type = pas_media_obj.get_attr_data('type')
     except:
-        nas_if.log_err("media Id or media type is not present in the media event")
+        nas_if.log_info("media Id or media type is not present in the media event")
         return
     # fetch FP info from media ID
     l = nas_if.nas_os_fp_list(d={'media-id':media_id})
@@ -297,7 +420,7 @@ def if_media_type_set(pas_media_obj):
         'if/interfaces/interface/type':"ianaift:ethernetCsmacd"})
         ch = {'operation': 'rpc', 'change': ifobj.get()}
         cps.transaction([ch])
-        if_name = ba.ba_to_str(ch['change']['data']['if/interfaces/interface/name'], len(_if_name))
+        if_name = str(ch['change']['data']['if/interfaces/interface/name'])[:-1]
         if_details = nas_if.nas_os_if_list(d={'if/interfaces/interface/name':if_name})
         enable = ba.from_ba(if_details[0]['data']['if/interfaces/interface/enabled'],"uint64_t")
         fp_details = fp.find_port_by_hwport(npu, hwport)
@@ -360,6 +483,8 @@ def led_control_get():
 
 def get_default_media_setting(_media_type, def_param):
     base_media_info_list = get_base_media_info(_media_type)
+    if len(base_media_info_list) == 0:
+        return None
     for j in base_media_info_list:
         obj = cps_object.CPSObject(obj=j)
         if def_param == 'speed':
@@ -368,6 +493,8 @@ def get_default_media_setting(_media_type, def_param):
             _def_attr = nas_if.get_cps_attr(obj,'duplex')
         elif def_param == 'autoneg':
             _def_attr = nas_if.get_cps_attr(obj,'autoneg')
+        elif def_param == 'supported-phy-mode':
+            _def_attr = nas_if.get_cps_attr(obj,'supported-phy-mode')
     return _def_attr
 
 

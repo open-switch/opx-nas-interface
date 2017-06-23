@@ -21,17 +21,29 @@ import nas_front_panel_map as fp
 import cps_utils
 import time
 import base_qos_init
+from nas_common_header import *
 
 _g_if_name = 'if/interfaces/interface/name'
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print "Invalid arguments specified.... %s [port] [true/false]" % sys.argv[0]
+        print "Invalid arguments specified.... %s [port] [true/false/mode] [speed]" % sys.argv[0]
         sys.exit(0)
-    elif sys.argv[2].lower() != 'true':
-        if sys.argv[2].lower() != 'false':
-            print "Invalid arguments specified.... %s [port] [true/false]" % sys.argv[0]
+    br_mode = sys.argv[2].lower()
+    if br_mode == 'true':
+        br_mode = '4x1'
+    elif br_mode == 'false':
+        br_mode = '1x1'
+    if not is_key_valid(yang_breakout, br_mode):
+        print 'Invalid breakout mode %s' % br_mode
+        sys.exit(0)
+    if len(sys.argv) > 3:
+        port_speed = sys.argv[3].upper()
+        if not is_key_valid(yang_speed, port_speed):
+            print 'Invalid port speed %s' % port_speed
             sys.exit(0)
+    else:
+        port_speed = None
 
     nas_fp_cache = nas_if.FpPortCache()
     if_cache = nas_if.IfCache()
@@ -50,26 +62,29 @@ if __name__ == '__main__':
         nas_fp_cache.print_keys()
         exit(0)
 
-    mode = '1x1'
-
-    if sys.argv[2].lower() == 'true':
-        mode = '4x1'
-
     npu = fp_obj.get_attr_data('npu-id')
     phy_port_list = nas_if.physical_ports_for_front_panel_port(fp_obj)
 
-    if mode == '4x1':
-        _mode = 2
+    allowed_speed = get_value(breakout_allowed_speed, br_mode)
+    if port_speed != None:
+        if port_speed not in allowed_speed:
+           print 'Invalid break mode and port speed combination'
+           sys.exit(0)
     else:
-        _mode = 4
+        # Use first allowed speed as default speed
+        port_speed = allowed_speed[0]
+    _speed = get_value(yang_speed, port_speed)
+    _mode = get_value(yang_breakout, br_mode)
 
     breakout_cap = phy_port_list[0].get_attr_data('breakout-capabilities')
     if _mode not in breakout_cap:
-        print mode + ' breakout mode not supported on this port'
+        print 'breakout mode %d not supported on this port' % _mode
         sys.exit(1)
-    current_mode =  phy_port_list[0].get_attr_data('fanout-mode')
-    if current_mode == _mode:
-        print 'Port already configure in the ' + mode + ' fanout mode'
+    current_mode = phy_port_list[0].get_attr_data('fanout-mode')
+    current_speed = phy_port_list[0].get_attr_data('speed')
+    if current_mode == _mode and current_speed == _speed:
+        print 'Port already configured in the as breakoout mode %d and speed %d' % (
+              _mode, _speed)
         sys.exit(1)
 
     l = []
@@ -92,15 +107,32 @@ if __name__ == '__main__':
     obj = cps_object.CPSObject(module='base-if-phy/breakout',
                                data={
                                'base-if-phy/breakout/input/front-panel-port':
-                               fp_obj.get_attr_data(
-                                   'base-if-phy/front-panel-port/front-panel-port'),
-                                   'base-if-phy/breakout/input/breakout-mode':
-                                   _mode
+                                    fp_obj.get_attr_data(
+                                        'base-if-phy/front-panel-port/front-panel-port'),
+                               'base-if-phy/breakout/input/breakout-mode': _mode,
+                               'base-if-phy/breakout/input/port-speed': _speed
                                })
     tr = cps_utils.CPSTransaction([('rpc', obj.get())])
 
     if tr.commit() == False:
         print "Failed..."
+
+        # revert ports delete
+        l = []
+        # add ports to a transaction
+        for phy_port in phy_port_list:
+            ifobj = nas_if.make_interface_from_phy_port(phy_port, current_mode, current_speed)
+            print "Creating interface " + ifobj.get_attr_data(_g_if_name)
+            l.append(('rpc', ifobj.get()))
+
+        # do the actual port create
+        tr = cps_utils.CPSTransaction(l)
+
+        # commit
+        if tr.commit() == False:
+            print "Failed to create interfaces"
+        else:
+            print "Successfully created interfaces..."
     else:
         print "Completed..."
 
@@ -110,8 +142,12 @@ if __name__ == '__main__':
             fp_obj.get()['data']['base-if-phy/front-panel-port/port'])
 
         # if the mode is breakin... then need to create one port only
-        if mode == '1x1':  # 1x1
+        if _mode == 4:  # 1x1
             target_number_of_ports = 1
+        elif _mode == 3: # 2x1
+            target_number_of_ports = 2
+        else: # 4x1
+            target_number_of_ports = 4
 
         # wait for all of the physical ports to appear - depends on timing
         phy_port_list = []
@@ -127,7 +163,8 @@ if __name__ == '__main__':
             print "Creating interface " + ifobj.get_attr_data(_g_if_name)
             l.append(('rpc', ifobj.get()))
             ifnames.append(ifobj.get_attr_data(_g_if_name))
-            if mode == '1x1':
+            target_number_of_ports -= 1
+            if target_number_of_ports == 0:
                 break
 
         # do the actual port create

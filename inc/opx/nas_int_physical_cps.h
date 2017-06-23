@@ -37,13 +37,6 @@ extern "C" {
  */
 t_std_error nas_int_cps_init(cps_api_operation_handle_t handle);
 
-/**
- * Initialize the breakout logic
- * @param handle the CPS service instance handle
- * @return STD_ERR_OK on success
- */
-t_std_error nas_int_breakout_init(cps_api_operation_handle_t handle);
-
 
 #ifdef __cplusplus
 }

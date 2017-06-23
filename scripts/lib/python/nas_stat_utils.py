@@ -17,7 +17,7 @@ import bytearray_utils as ba
 import cps_utils
 
 stat_key_string = ["dell-base-if-cmn/if/interfaces-state/interface/statistics",
-                   "dell-if/clear-counters"]
+                   "dell-base-if-cmn/dell-if/clear-counters/input"]
 
 filters = []
 

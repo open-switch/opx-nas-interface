@@ -81,6 +81,9 @@ t_std_error hal_virtual_interace_send(npu_id_t npu, npu_port_t port, int queue,
 typedef void (*hal_virt_pkt_transmit)(npu_id_t npu, npu_port_t port,
         void *data, unsigned int len);
 
+//! the callback that will be used to process a packet and transmit to ingress pipeline
+typedef void (*hal_virt_pkt_transmit_to_ingress_pipeline)(void *data, unsigned int len);
+
 /**
  * Wait for a packet and call the callback function based on the correct npu,port
  * @param fun callback function to call with the correct params
@@ -88,7 +91,8 @@ typedef void (*hal_virt_pkt_transmit)(npu_id_t npu, npu_port_t port,
  * @param len is the length of the packet
  * @return standard return code
  */
-t_std_error hal_virtual_interface_wait(hal_virt_pkt_transmit fun,
+t_std_error hal_virtual_interface_wait(hal_virt_pkt_transmit tx_fun,
+        hal_virt_pkt_transmit_to_ingress_pipeline tx_to_ingress_fun,
         void *buff, unsigned int len);
 
 /**
@@ -112,7 +116,6 @@ void hal_interface_link_debug_init(void);
  */
 void hal_interface_send_event(cps_api_object_t obj);
 bool nas_int_ev_handler_cb(cps_api_object_t obj, void *param);
-t_std_error nas_if_get_base_mac(char *mac_base, size_t mac_buf_size);
 t_std_error nas_if_get_assigned_mac(const char *if_type,
                                     const char *if_name, hal_vlan_id_t vlan_id,
                                     char *mac_addr, size_t mac_buf_size);

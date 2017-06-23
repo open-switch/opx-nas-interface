@@ -34,20 +34,48 @@
 #include "cps_api_operation.h"
 #include "event_log.h"
 #include "nas_switch.h"
+#include "nas_interface_fc.h"
 
+#include <vector>
 #include <unordered_map>
 
 struct _port_cache {
      uint32_t front_panel_port;
-     uint32_t sub_port;
-     uint32_t media_type;
      uint32_t loopback;
+     BASE_IF_SPEED_t speed;
+     BASE_IF_PHY_MODE_TYPE_t phy_mode;
 };
 
 using NasPhyPortMap = std::unordered_map<uint_t, _port_cache>;
 static NasPhyPortMap _phy_port;
 
+#define MAX_HWPORT_PER_PORT 10
 
+static  cps_api_return_code_t nas_fc_to_eth_speed(BASE_IF_SPEED_t speed, size_t hwp_count, BASE_IF_SPEED_t *npu_speed) {
+    switch (speed) {
+        case BASE_IF_SPEED_8GFC:
+            *npu_speed = BASE_IF_SPEED_10GIGE;  // 4x8G mode  40G
+            break;
+        case BASE_IF_SPEED_16GFC:
+            if (hwp_count == 1)    // 4x16G mode 100G
+                *npu_speed = BASE_IF_SPEED_25GIGE;
+            else if (hwp_count == 2) // 2x16G mode  40G
+                *npu_speed = BASE_IF_SPEED_20GIGE;
+            else
+                return cps_api_ret_code_ERR;
+            break;
+        case BASE_IF_SPEED_32GFC:
+            if (hwp_count == 2)  // 2x32G mode 100G
+                *npu_speed = BASE_IF_SPEED_50GIGE;
+            if (hwp_count == 4)  // 1x32G Mode 40G
+                *npu_speed = BASE_IF_SPEED_40GIGE;
+            break;
+        default:
+                return cps_api_ret_code_ERR;
+    }
+    return cps_api_ret_code_OK;
+
+}
 static bool _is_cpu_port(npu_id_t npu, port_t port) {
     npu_port_t cpu_port = 0;
     if (ndi_cpu_port_get(npu, &cpu_port)==STD_ERR_OK && port==cpu_port) {
@@ -56,8 +84,8 @@ static bool _is_cpu_port(npu_id_t npu, port_t port) {
     return false;
 }
 
-static bool get_hw_port(npu_id_t npu, port_t port, uint32_t &hwport) {
-    return ndi_hwport_list_get(npu,port,&hwport)==STD_ERR_OK;
+static bool get_hw_port(npu_id_t npu, port_t port, uint32_t& hwport) {
+    return ndi_hwport_list_get(npu, port, &hwport) == STD_ERR_OK;
 }
 
 static void init_phy_port_obj(npu_id_t npu, port_t port, cps_api_object_t obj) {
@@ -80,6 +108,31 @@ static void _if_fill_in_supported_speeds_attrs(npu_id_t npu, port_t port,
     }
 }
 
+static _port_cache* get_phy_port_cache(npu_id_t npu, uint_t port)
+{
+    uint32_t hwport;
+    if (!get_hw_port(npu, port, hwport)) {
+        return nullptr;
+    }
+    auto it = _phy_port.find(hwport);
+    if (it == _phy_port.end()) {
+        _phy_port[hwport].front_panel_port = 0;
+        _phy_port[hwport].loopback = 0;
+        _phy_port[hwport].phy_mode = BASE_IF_PHY_MODE_TYPE_ETHERNET;
+
+        BASE_IF_SPEED_t speed;
+        if (ndi_port_speed_get_nocheck(npu, port, &speed) == STD_ERR_OK) {
+            _phy_port[hwport].speed = speed;
+        } else {
+            EV_LOGGING(INTERFACE, ERR, "NAS-PHY", "Failed to get speed of physical port %d",
+                       port);
+            _phy_port[hwport].speed = BASE_IF_SPEED_0MBPS;
+        }
+    }
+
+    return &_phy_port[hwport];
+}
+
 static void make_phy_port_details(npu_id_t npu, port_t port, cps_api_object_t obj) {
     init_phy_port_obj(npu,port,obj);
 
@@ -95,7 +148,6 @@ static void make_phy_port_details(npu_id_t npu, port_t port, cps_api_object_t ob
     //should be size_t
     int mode_count = BASE_IF_PHY_BREAKOUT_MODE_BREAKOUT_1X1+1;
     BASE_IF_PHY_BREAKOUT_MODE_t mode_list[BASE_IF_PHY_BREAKOUT_MODE_BREAKOUT_1X1+1];
-
     if (ndi_port_supported_breakout_mode_get(npu,port,
             &mode_count,mode_list)==STD_ERR_OK) {
         size_t ix = 0;
@@ -104,19 +156,30 @@ static void make_phy_port_details(npu_id_t npu, port_t port, cps_api_object_t ob
             cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_BREAKOUT_CAPABILITIES,mode_list[ix]);
         }
     }
+
+    uint32_t hwport_list[MAX_HWPORT_PER_PORT] = {0};
+    size_t count = MAX_HWPORT_PER_PORT;
+    if (ndi_hwport_list_get_list(npu, port, hwport_list, &count) == STD_ERR_OK) {
+        for (size_t idx = 0; idx < count; idx ++) {
+            cps_api_object_attr_add_u32(obj, BASE_IF_PHY_PHYSICAL_HARDWARE_PORT_LIST,
+                                        hwport_list[idx]);
+        }
+    }
+
     BASE_IF_PHY_BREAKOUT_MODE_t cur_mode;
-    if (ndi_port_breakout_mode_get(npu,port,&cur_mode)==STD_ERR_OK) {
-        cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_FANOUT_MODE,cur_mode);
+    if (ndi_port_breakout_mode_get(npu, port, &cur_mode) == STD_ERR_OK) {
+        cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_FANOUT_MODE, cur_mode);
     }
 
     _if_fill_in_supported_speeds_attrs(npu,port,obj);
 
-    auto it = _phy_port.find(hwport);
-
-    if (it!=_phy_port.end()) {
-        cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_FRONT_PANEL_NUMBER, it->second.front_panel_port);
-        cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_PHY_MEDIA, it->second.media_type);
-        cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_LOOPBACK, it->second.loopback);
+    auto phy_port = get_phy_port_cache(npu, port);
+    if(phy_port != nullptr) {
+        cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_FRONT_PANEL_NUMBER,
+                                    phy_port->front_panel_port);
+        cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_LOOPBACK, phy_port->loopback);
+        cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_SPEED, phy_port->speed);
+        cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_PHY_MODE, phy_port->phy_mode);
     }
 }
 
@@ -160,91 +223,6 @@ static cps_api_return_code_t _phy_int_get (void * context, cps_api_get_params_t 
     return cps_api_ret_code_OK;
 }
 
-static t_std_error dn_nas_get_phy_media_default_setting(PLATFORM_MEDIA_TYPE_t media_type, cps_api_object_t obj)
-{
-    cps_api_get_params_t gp;
-    cps_api_get_request_init(&gp);
-    cps_api_get_request_guard rg(&gp);
-
-    cps_api_object_t media_obj = cps_api_object_list_create_obj_and_append(gp.filters);
-    t_std_error rc = STD_ERR_MK(e_std_err_INTERFACE, e_std_err_code_FAIL, 0);
-
-    do {
-        if (!cps_api_key_from_attr_with_qual(cps_api_object_key(media_obj),
-                                BASE_MEDIA_MEDIA_INFO_OBJ, cps_api_qualifier_OBSERVED)) {
-            break;
-        }
-        cps_api_set_key_data_uint(media_obj, BASE_MEDIA_MEDIA_INFO_MEDIA_TYPE, &media_type, sizeof(media_type));
-        cps_api_object_attr_add_u32(media_obj, BASE_MEDIA_MEDIA_INFO_MEDIA_TYPE, media_type);
-        if (cps_api_get(&gp) != cps_api_ret_code_OK)
-            break;
-
-        if (0 == cps_api_object_list_size(gp.list))
-            break;
-
-        media_obj = cps_api_object_list_get(gp.list,0);
-        if (!cps_api_object_clone(obj, media_obj)) {
-            break;
-        }
-        rc = STD_ERR_OK;
-    } while(0);
-    return rc;
-}
-static t_std_error _phy_media_type_with_default_config_set(npu_id_t npu, port_t port,
-                                        PLATFORM_MEDIA_TYPE_t media_type)
-{
-    t_std_error rc;
-    if ((rc = ndi_port_media_type_set(npu, port, media_type)) != STD_ERR_OK) {
-        return rc;
-    }
-    /*  set default speed and autoneg setting  corresponding to the media type */
-    cps_api_object_t obj = cps_api_object_create();
-    cps_api_object_guard og(obj);
-    if ((rc = dn_nas_get_phy_media_default_setting(media_type, obj)) != STD_ERR_OK) {
-        return rc;
-    }
-
-    /* First set AN and then speed */
-    cps_api_object_attr_t autoneg_attr = cps_api_object_attr_get(obj, BASE_MEDIA_MEDIA_INFO_AUTONEG);
-    if (autoneg_attr != nullptr) {
-        bool autoneg = (bool)cps_api_object_attr_data_u32(autoneg_attr);
-        if (ndi_port_auto_neg_set(npu,port,autoneg)!=STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set autoneg %d for "
-                   "npu %d port %d return Error 0x%x",autoneg,npu,port,rc);
-            return STD_ERR(INTERFACE,FAIL,0);
-        }
-    }
-
-    BASE_IF_PHY_BREAKOUT_MODE_t cur_mode;
-    if ((rc = ndi_port_breakout_mode_get(npu, port, &cur_mode)) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to get breakout mode for "
-                   "npu %d port %d return error 0x%x",npu,port, rc);
-            return STD_ERR(INTERFACE,FAIL,0);
-    }
-    /* if the port is fanout skip setting the default speed say 40G */
-    if (BASE_IF_PHY_BREAKOUT_MODE_BREAKOUT_1X1 == cur_mode) {
-        cps_api_object_attr_t speed_attr = cps_api_object_attr_get(obj, BASE_MEDIA_MEDIA_INFO_SPEED);
-        if (speed_attr != nullptr) {
-            BASE_IF_SPEED_t speed = (BASE_IF_SPEED_t)cps_api_object_attr_data_u32(speed_attr);
-            if ((rc = ndi_port_speed_set(npu,port,speed))!=STD_ERR_OK) {
-                EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set speed %d for "
-                       "npu %d port %d return error 0x%x",speed,npu,port, rc);
-                return STD_ERR(INTERFACE,FAIL,0);
-            }
-        }
-    }
-    cps_api_object_attr_t duplex_attr = cps_api_object_attr_get(obj, BASE_MEDIA_MEDIA_INFO_DUPLEX);
-    if (duplex_attr != nullptr) {
-        BASE_CMN_DUPLEX_TYPE_t duplex = (BASE_CMN_DUPLEX_TYPE_t)cps_api_object_attr_data_u32(duplex_attr);
-        if ((rc = ndi_port_duplex_set(npu,port,duplex))!=STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set duplex %d for "
-                   "npu %d port %d return error 0x%x",duplex,npu,port, rc);
-            return STD_ERR(INTERFACE,FAIL,0);
-        }
-    }
-    return STD_ERR_OK;
-}
-
 static cps_api_return_code_t _phy_set(cps_api_object_t req, cps_api_object_t prev) {
     STD_ASSERT(prev!=nullptr && req!=nullptr);
 
@@ -264,33 +242,17 @@ static cps_api_return_code_t _phy_set(cps_api_object_t req, cps_api_object_t pre
         return cps_api_ret_code_ERR;
     }
 
-    uint32_t hwport;
-    if (!get_hw_port(npu,port,hwport)) {
+    auto phy_port = get_phy_port_cache(npu, port);
+    if (phy_port == nullptr) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-PHY", "Can't find phy port cache");
         return cps_api_ret_code_ERR;
     }
 
     cps_api_object_attr_t _fp = cps_api_get_key_data(req,BASE_IF_PHY_PHYSICAL_FRONT_PANEL_NUMBER);
-    cps_api_object_attr_t _media_type = cps_api_get_key_data(req,BASE_IF_PHY_PHYSICAL_PHY_MEDIA);
     cps_api_object_attr_t _loopback = cps_api_get_key_data(req,BASE_IF_PHY_PHYSICAL_LOOPBACK);
 
-    auto it = _phy_port.find(hwport);
-    if (it == _phy_port.end()) {
-        _phy_port[hwport].front_panel_port = 0;
-        _phy_port[hwport].sub_port = 0;
-        _phy_port[hwport].media_type = 0;
-        _phy_port[hwport].loopback = 0;
-    }
-
     if (_fp!=nullptr) {
-        _phy_port[hwport].front_panel_port = cps_api_object_attr_data_u32(_fp);
-    }
-
-    if (_media_type != nullptr) {
-        PLATFORM_MEDIA_TYPE_t media_type = (PLATFORM_MEDIA_TYPE_t) cps_api_object_attr_data_u32(_media_type);
-		if (_phy_media_type_with_default_config_set(npu, port, media_type) != STD_ERR_OK)  {
-			EV_LOGGING(INTERFACE,ERR,"NAS-PHY","Failed to set phy media type for %d:%d",npu,port);
-			return cps_api_ret_code_ERR;
-		}
+        phy_port->front_panel_port = cps_api_object_attr_data_u32(_fp);
     }
 
     if (_loopback != nullptr) {
@@ -299,11 +261,135 @@ static cps_api_return_code_t _phy_set(cps_api_object_t req, cps_api_object_t pre
             EV_LOGGING(INTERFACE,ERR,"NAS-PHY","Failed to set loopback for %d:%d",npu,port);
             return cps_api_ret_code_ERR;
         }
-        _phy_port[hwport].loopback = cps_api_object_attr_data_u32(_loopback);
+        phy_port->loopback = cps_api_object_attr_data_u32(_loopback);
     }
+
     cps_api_key_set(cps_api_object_key(req),CPS_OBJ_KEY_INST_POS,cps_api_qualifier_OBSERVED);
     hal_interface_send_event(req);
     cps_api_key_set(cps_api_object_key(req),CPS_OBJ_KEY_INST_POS,cps_api_qualifier_TARGET);
+
+    return cps_api_ret_code_OK;
+}
+
+static cps_api_return_code_t _phy_create(cps_api_object_t cur, cps_api_object_t pref)
+{
+    cps_api_object_attr_t npu_attr = cps_api_object_attr_get(cur, BASE_IF_PHY_PHYSICAL_NPU_ID);
+    cps_api_object_attr_t speed_attr = cps_api_object_attr_get(cur, BASE_IF_PHY_PHYSICAL_SPEED);
+    BASE_IF_PHY_MODE_TYPE_t phy_mode = BASE_IF_PHY_MODE_TYPE_ETHERNET;
+
+    if (npu_attr == nullptr || speed_attr == nullptr) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-PHY-CREATE", "Required attribute not present");
+        return cps_api_ret_code_ERR;
+    }
+
+    npu_id_t npu_id = cps_api_object_attr_data_u32(npu_attr);
+    BASE_IF_SPEED_t speed =
+            (BASE_IF_SPEED_t)cps_api_object_attr_data_u32(speed_attr);
+    BASE_IF_SPEED_t npu_speed = speed;
+
+    std::vector<uint32_t> hw_ports;
+    cps_api_object_it_t it;
+    cps_api_object_it_begin(cur, &it);
+    while(cps_api_object_it_attr_walk(&it, BASE_IF_PHY_PHYSICAL_HARDWARE_PORT_LIST)) {
+        uint32_t port_id = cps_api_object_attr_data_u32(it.attr);
+        hw_ports.push_back(port_id);
+        cps_api_object_it_next(&it);
+    }
+    if (hw_ports.size() == 0) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-PHY-CREATE", "No hardware port present");
+        return cps_api_ret_code_ERR;
+    }
+     cps_api_object_attr_t _phy_mode_attr = cps_api_object_attr_get(cur, BASE_IF_PHY_PHYSICAL_PHY_MODE);
+    if (_phy_mode_attr != nullptr) {
+        phy_mode = (BASE_IF_PHY_MODE_TYPE_t) cps_api_object_attr_data_u32(_phy_mode_attr);
+    }
+    if (phy_mode == BASE_IF_PHY_MODE_TYPE_FC) {
+        if (nas_fc_to_eth_speed(speed, hw_ports.size(), &npu_speed) == cps_api_ret_code_ERR) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-PHY-CREATE", "Wrong FC Speed ");
+            return cps_api_ret_code_ERR;
+        }
+    }
+
+    npu_port_t phy_port_id;
+    t_std_error rc = ndi_phy_port_create(npu_id, npu_speed,
+                                         hw_ports.data(), hw_ports.size(),
+                                         &phy_port_id);
+    if (rc != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-PHY-CREATE", "Failure on NDI port creation");
+        return cps_api_ret_code_ERR;
+    }
+
+    cps_api_object_attr_add_u32(cur, BASE_IF_PHY_PHYSICAL_PORT_ID, phy_port_id);
+
+    if (phy_mode == BASE_IF_PHY_MODE_TYPE_FC) {
+
+        if (nas_cps_create_fc_port(npu_id, phy_port_id, speed, hw_ports.data(), hw_ports.size()) != cps_api_ret_code_OK) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-PHY-CREATE", "Failure on NDI FC port creation");
+            return cps_api_ret_code_ERR;
+         }
+    }
+
+    uint32_t hwport;
+    if (!get_hw_port(npu_id, phy_port_id, hwport)) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-PHY-CREATE", "Failed to get hw port for port %d",
+                   phy_port_id);
+        return cps_api_ret_code_ERR;
+    }
+
+    auto phy_it = _phy_port.find(hwport);
+    if (phy_it == _phy_port.end()) {
+        _phy_port[hwport].front_panel_port = 0;
+        _phy_port[hwport].loopback = 0;
+    }
+    _phy_port[hwport].speed = speed;
+    _phy_port[hwport].phy_mode = phy_mode;
+
+    make_phy_port_details(npu_id, phy_port_id, cur);
+
+    return cps_api_ret_code_OK;
+}
+
+static cps_api_return_code_t _phy_delete(cps_api_object_t cur, cps_api_object_t pref)
+{
+    cps_api_return_code_t rc = cps_api_ret_code_ERR;
+    cps_api_object_attr_t npu_attr = cps_api_object_attr_get(cur, BASE_IF_PHY_PHYSICAL_NPU_ID);
+    cps_api_object_attr_t port_attr = cps_api_object_attr_get(cur, BASE_IF_PHY_PHYSICAL_PORT_ID);
+
+    if (npu_attr == nullptr || port_attr == nullptr) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-PHY-DELETE", "Required attribute not present");
+        return cps_api_ret_code_ERR;
+    }
+
+    npu_id_t npu_id = cps_api_object_attr_data_u32(npu_attr);
+    npu_port_t port_id = cps_api_object_attr_data_u32(port_attr);
+
+    uint32_t hwport;
+    if (!get_hw_port(npu_id, port_id, hwport)) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-PHY-DELETE", "Failed to get hw port for port %d",
+                   port_id);
+        return cps_api_ret_code_ERR;
+    }
+
+    auto phy_it = _phy_port.find(hwport);
+    if (phy_it != _phy_port.end() &&  (_phy_port[hwport].phy_mode == BASE_IF_PHY_MODE_TYPE_FC)) {
+        if ((rc = nas_cps_delete_fc_port(npu_id, port_id)) !=cps_api_ret_code_OK ){
+            EV_LOGGING(INTERFACE, ERR, "NAS-PHY-DELETE", "Failure on NDI FC port delete");
+            return rc;
+
+        }
+    }
+
+
+    t_std_error ret = ndi_phy_port_delete(npu_id, port_id);
+    if (ret != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-PHY-DELETE", "Failure on NDI port delete");
+        return cps_api_ret_code_ERR;
+    }
+
+    auto it = _phy_port.find(hwport);
+    if (it != _phy_port.end()) {
+        _phy_port.erase(it);
+    }
 
     return cps_api_ret_code_OK;
 }
@@ -317,7 +403,9 @@ static cps_api_return_code_t _phy_int_set(void * context, cps_api_transaction_pa
 
     cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
 
+    if (op==cps_api_oper_CREATE) return _phy_create(obj,prev);
     if (op==cps_api_oper_SET) return _phy_set(obj,prev);
+    if (op==cps_api_oper_DELETE) return _phy_delete(obj,prev);
 
     EV_LOGGING(INTERFACE,ERR,"NAS-PHY","Invalid operation");
 
@@ -367,8 +455,6 @@ t_std_error nas_int_cps_init(cps_api_operation_handle_t handle) {
         rc = ndi_port_event_cb_register(npu,_ndi_port_event_update_);
         if (rc!=STD_ERR_OK) return rc;
     }
-
-    if ((rc=nas_int_breakout_init(handle))!=STD_ERR_OK) return rc;
 
     return nas_int_logical_init(handle);
 }

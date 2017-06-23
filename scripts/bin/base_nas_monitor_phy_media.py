@@ -18,11 +18,13 @@ import threading
 import cps
 import cps_object
 import cps_utils
+import nas_fp_port_utils as fp_utils
 import nas_front_panel_map as fp
 import nas_phy_media as media
 import nas_os_if_utils as nas_if
 import time
 import event_log as ev
+import systemd.daemon
 
 _fp_port_key = cps.key_from_name('target','base-if-phy/front-panel-port')
 _media_key = cps.key_from_name('observed', 'base-pas/media')
@@ -36,22 +38,6 @@ def _get_obj_attr_value(obj, attr_name):
         return value
     except:
         return None
-
-def set_media_type_on_port_create(phy_obj):
-    hwport = phy_obj.get_attr_data('hardware-port-id')
-    if hwport <= 0:
-        return
-    npu = phy_obj.get_attr_data('npu-id')
-    port_id = phy_obj.get_attr_data('port-id')
-    fp_port_details = fp.find_port_by_hwport(npu, hwport)
-    if fp_port_details is None:
-        return
-    # Fetch media info from PAS
-    pas_media_list = media.get_media_info(fp_port_details.media_id)
-    pas_media_obj = cps_object.CPSObject(obj=pas_media_list[0])
-    media.nas_set_media_type_by_phy_port(npu, port_id,
-                                         pas_media_obj.get_attr_data('type'))
-
 
 def set_media_transceiver(interface_obj):
     # get front panel port from ifindex
@@ -118,6 +104,13 @@ class mediaMonitorThread(threading.Thread):
     def __str__(self):
         return ' %s %d ' %(self.name, self.threadID)
 
+def _update_fp(fp_obj):
+    fr_port = nas_if.get_cps_attr(fp_obj, 'front-panel-port')
+    fp_db = fp.find_front_panel_port(fr_port)
+    fp_db.set_breakout_mode(nas_if.get_cps_attr(fp_obj, 'breakout-mode'))
+    fp_db.set_speed(nas_if.get_cps_attr(fp_obj, 'port-speed'))
+
+
 def monitor_interface_event():
     handle = cps.event_connect()
     cps.event_register(handle, _physical_key)
@@ -126,11 +119,11 @@ def monitor_interface_event():
     while True:
         o = cps.event_wait(handle)
         obj = cps_object.CPSObject(obj=o)
+
+        if _fp_port_key == obj.get_key():
+            _update_fp(obj)
         if _physical_key == obj.get_key():
-            if o['operation'] != 'create':
-                continue
-            nas_if.log_info("physical port creation event")
-            set_media_type_on_port_create(obj)
+            continue
         elif _logical_if_state_key == obj.get_key():
             if_index = _get_obj_attr_value(obj, 'if/interfaces-state/interface/if-index')
             # check if if_index is present
@@ -165,21 +158,42 @@ class interfaceMonitorThread(threading.Thread):
     def __str__(self):
         return ' %s %d ' %(self.name, self.threadID)
 
+def sigterm_hdlr(signum, frame):
+    global shutdwn
+    shutdwn = True
 
 if __name__ == '__main__':
+
+    shutdwn = False
+    # Install signal handlers.
+    import signal
+    signal.signal(signal.SIGTERM, sigterm_hdlr)
+
     while cps.enabled(_media_key)  == False or cps.enabled(_fp_port_key)  == False:
         #wait for media and front panel port objects to be ready
         nas_if.log_err('Media or front panel port object is not yet ready')
         time.sleep(1)
 
-    f = '/etc/opx/base_port_physical_mapping_table.xml'
-    fp.init(f)
+    fp_utils.init()
 
     if_thread = interfaceMonitorThread(1, "Interface event Monitoring Thread")
     media_thread = mediaMonitorThread(2, "Media event Monitoring Thread")
+    if_thread.daemon = True
+    media_thread.daemon = True
     if_thread.start()
     media_thread.start()
 
-    if_thread.join()
-    media_thread.join()
+    # Initialization complete
+    # Notify systemd: Daemon is ready
+    systemd.daemon.notify("READY=1")
+
+    # Wait until a signal is received
+    while False == shutdwn:
+        signal.pause()
+
+    systemd.daemon.notify("STOPPING=1")
+    #Cleanup code here
+
+    # No need to specifically call sys.exit(0).
+    # That's the default behavior in Python.
 

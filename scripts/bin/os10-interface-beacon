@@ -1,0 +1,45 @@
+#!/usr/bin/python
+
+import sys
+import cps
+import cps_object
+
+HELP_STRING = """
+Set the state of the interface location/beacon LED
+"""
+
+USAGE_STRING = """
+Usage: os10-interface-beacon <interface name> {on | off}
+"""
+
+def main():
+    state = None
+
+    if len(sys.argv) < 3:
+        print HELP_STRING
+        print USAGE_STRING
+        sys.exit(1)
+
+    if sys.argv[2].lower() == 'on':
+        state = 1
+    elif sys.argv[2].lower() == 'off':
+        state = 0
+    else:
+        print USAGE_STRING
+        sys.exit(1)
+
+
+    ch = {'operation': 'rpc', 'change': {}}
+    cur_obj = cps_object.CPSObject(qual='target', module='dell-base-if-cmn/set-interface')
+    cur_obj.add_attr('dell-base-if-cmn/set-interface/input/operation', '3')
+    cur_obj.add_attr('if/interfaces/interface/name', sys.argv[1])
+    cur_obj.add_attr('base-if-phy/if/interfaces/interface/identification-led', state)
+
+    ch['change'] = cur_obj.get()
+
+    if not cps.transaction([ch]):
+        print 'Not supported or error setting interface location LED for %s' % sys.argv[1]
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()

@@ -298,7 +298,7 @@ t_std_error nas_register_lag_intf(nas_lag_master_info_t *nas_lag_entry, hal_intf
 {
     interface_ctrl_t details;
 
-    EV_LOGGING(INTERFACE, INFO, "NAS-Lag", "Registering LAG %d %d with ifCntrl",
+    EV_LOGGING(INTERFACE, DEBUG, "NAS-Lag", "Registering LAG %d %d with ifCntrl",
                nas_lag_entry->ifindex, nas_lag_entry->lag_id);
     memset(&details,0,sizeof(details));
     details.q_type = HAL_INTF_INFO_FROM_IF;
@@ -460,7 +460,7 @@ t_std_error nas_lag_block_port(nas_lag_master_info_t  *nas_lag_entry ,hal_ifinde
                nas_lag_entry->ifindex, slave_ifindex,block_state);
     auto it_index = nas_lag_entry->port_list.find(slave_ifindex);
     if( it_index == nas_lag_entry->port_list.end()){
-        EV_LOGGING(INTERFACE, ERR, "NAS-LAG", "%d Port does not exist",
+        EV_LOGGING(INTERFACE, INFO, "NAS-LAG", "%d Port does not exist",
                    slave_ifindex);
         return STD_ERR_OK;
     }

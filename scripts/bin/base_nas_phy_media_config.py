@@ -20,7 +20,9 @@ import cps_utils
 import nas_os_if_utils as nas_if
 import bytearray_utils as ba
 import event_log as ev
+import systemd.daemon
 
+from nas_common_header import *
 
 import xml.etree.ElementTree as ET
 import nas_phy_media as media
@@ -39,9 +41,13 @@ class PHY_Media:
         self.autoneg = autoneg
         self.duplex = duplex
         self.supported_speed = []
+        self.supported_phy_mode = []
 
     def add_supported_speed(self, speed):
         self.supported_speed.append(int(speed))
+
+    def set_supported_phy_modes(self, phy_modes):
+        self.supported_phy_mode = phy_modes[:]
 
     def show(self):
         nas_if.log_info("Name "  + str(self.name))
@@ -52,6 +58,7 @@ class PHY_Media:
         if self.duplex != None:
             nas_if.log_info("duplex "  + str(self.duplex))
         nas_if.log_info("supported speed :" + str(self.supported_speed))
+        nas_if.log_info("supported Phy mode :" + str(self.supported_phy_mode))
 
 
 def get_media_info(media_type):
@@ -64,6 +71,7 @@ def add_media_info(media_type, media_str, speed, autoneg, duplex):
     return MEDIA_LIST[media_type]
 
 def process_file(root):
+    _default_supported_phy_mode = [ 'ether' ]
     for i in root.findall('media-type'):
         _media_str = i.get('id')
         _media_type = media.get_media_type_from_str(_media_str)
@@ -81,10 +89,21 @@ def process_file(root):
             _duplex = _duplex_str
         if _media_type not in MEDIA_LIST:
             media_info = add_media_info(_media_type, _media_str, _speed, _autoneg, _duplex)
+            phy_modes = []
             if media_info is not None:
                 for e in i:
-                    _supported_speed = int(e.get('supported-speed'))
-                    media_info.add_supported_speed(_supported_speed)
+                    _supported_speed = e.get('supported-speed')
+                    if _supported_speed != None:
+                        media_info.add_supported_speed(int(_supported_speed))
+                for e in i:
+                    _phy_mode = e.get('supported-phy-mode')
+                    if _phy_mode != None:
+                        phy_modes.append(_phy_mode)
+                if len(phy_modes) != 0:
+                    media_info.set_supported_phy_modes(phy_modes)
+                else:
+                    media_info.set_supported_phy_modes(_default_supported_phy_mode)
+
                 media_info.show()
 
 
@@ -109,12 +128,16 @@ def _gen_media_list(media_obj, resp):
         return
     _data = {}
     _data['media-type'] = _media_type
+    _data['supported-phy-mode'] = []
     if _m_info.speed != None:
         _data['speed'] = nas_if.to_yang_speed(_m_info.speed)
     if _m_info.autoneg != None:
         _data['autoneg'] = nas_if.to_yang_autoneg(_m_info.autoneg)
     if _m_info.duplex != None:
         _data['duplex'] = nas_if.to_yang_duplex(_m_info.duplex)
+    for mode in _m_info.supported_phy_mode:
+        _phy_mode = get_value(yang_phy_mode, mode)
+        _data['supported-phy-mode'].append(_phy_mode)
 
     elem = cps_object.CPSObject(module='base-media/media-info', data= _data)
     resp.append(elem.get())
@@ -130,7 +153,17 @@ def get_cb(methods, params):
         return False
     return True
 
+def sigterm_hdlr(signum, frame):
+    global shutdwn
+    shutdwn = True
+
 if __name__ == '__main__':
+
+    shutdwn = False
+    # Install signal handlers.
+    import signal
+    signal.signal(signal.SIGTERM, sigterm_hdlr)
+
     init('/etc/opx/phy_media_default_npu_setting.xml')
 
     handle = cps.obj_init()
@@ -139,8 +172,20 @@ if __name__ == '__main__':
     d['get'] = get_cb
 
     cps.obj_register(handle, _media_key, d)
-    while True:
-        time.sleep(1)
 
+    # Initialization complete
+    # Notify systemd: Daemon is ready
+    systemd.daemon.notify("READY=1")
+
+    #Wait until a signal is received
+    while False == shutdwn:
+        signal.pause()
+
+    systemd.daemon.notify("STOPPING=1")
+
+    #cleanup code here
+
+    # No need to specifically call sys.exit(0).
+    # That's the default behavior in Python.
 
 

@@ -1,3 +1,20 @@
+opx-nas-interface (4.4.1) unstable; urgency=medium
+
+  * Update: Added support for configuration rollback on failure
+  * Feature: Support for Fiber Channel interfaces
+  * Feature: Support for 25G/50G/100G interfaces
+  * Update: Added support for 25G/50G/100G media
+  * Feature: Added 25G/50G Fan-out support
+  * Feature: Support for Management VLAN
+  * Feature: Introduced Port Profile and Port Group features
+  * Update: Added FEC Support for 25G/50G/100G
+  * Update: Support for configuring MTU on VLAN
+  * Update: Packet-IO
+  * Update: Miscellaneous performance improvements
+  * Bugfix: Miscellaneous bug fixes
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Wed, 22 June 2017  16:47:07 -0700
+
 opx-nas-interface (1.0.2) unstable; urgency=medium
 
   [ J.T. Conklin ]

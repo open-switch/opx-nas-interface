@@ -15,7 +15,6 @@
 
 import sys
 import getopt
-import nas_lag_utils
 import cps_object
 import cps_utils
 import nas_ut_framework as nas_ut
@@ -25,13 +24,13 @@ intf_rpc_key_id = 'dell-base-if-cmn/set-interface'
 intf_rpc_op_attr_id = 'dell-base-if-cmn/set-interface/input/operation'
 intf_rpc_op_type_map = {'create': 1, 'delete': 2, 'set': 3}
 
+intf_lag_key = "dell-base-if-cmn/if/interfaces/interface"
+
 learn_mode_to_val = {"drop":1,"disable":2,"hw":3,"cpu_trap":4,"cpu_log":5}
 
 def nas_lag_op(op, data_dict,commit=True):
     if op == 'get':
-        obj = cps_object.CPSObject(
-            module=nas_lag_utils.get_lag_keys()[0],
-            data=data_dict)
+        obj = cps_object.CPSObject(module=intf_lag_key, data=data_dict)
     else:
         if op in intf_rpc_op_type_map:
             data_dict[intf_rpc_op_attr_id] = intf_rpc_op_type_map[op]

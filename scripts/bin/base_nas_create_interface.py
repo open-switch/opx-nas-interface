@@ -14,14 +14,13 @@
 # permissions and limitations under the License.
 
 import cps
-import bytearray_utils as ba
 import cps_object
 import cps_utils
-import event_log as ev
 import nas_os_if_utils as nas_if
-import nas_front_panel_map as fp
+import nas_common_header as nas_comm
 
 import time
+import logging
 
 front_panel_ports = None
 port_cache = None
@@ -42,27 +41,27 @@ def create_interface(obj):
 
 if __name__ == '__main__':
 
-    _max_loop_count = 50
-    _loop_count = 0
-    for _loop_count in range(_max_loop_count):
-        front_panel_ports = nas_if.FpPortCache()
-        if front_panel_ports.len() == 0:
-            nas_if.log_err('fetch front panel port info  not ready ')
-            time.sleep(1) #in seconds
-        else:
-            break
+    while cps.enabled(nas_comm.get_value(nas_comm.keys_id, "fp_key")) == False:
+        nas_if.log_err('fetch front panel port info  not ready ')
+        time.sleep(1) #in seconds
+    front_panel_ports = nas_if.FpPortCache()
+    if front_panel_ports.len() == 0:
+        nas_if.log_err('front panel port info  not present')
 
-    for _loop_count in range(_max_loop_count):
-        port_cache = nas_if.PhyPortCache()
-        if port_cache.len() ==0:
-            nas_if.log_err('fetch physical port info  not ready ')
-            time.sleep(1)
-        else:
-            break;
+    while cps.enabled(nas_comm.get_value(nas_comm.keys_id, "physical_key")) == False:
+        nas_if.log_err('physical port info  not ready ')
+        time.sleep(1) #in seconds
+    port_cache = nas_if.PhyPortCache()
+    if port_cache.len() ==0:
+        nas_if.log_err('physical port info  not present')
 
     if_cache = nas_if.IfCache()
 
     # walk through the list of physical ports
     for port in port_cache.get_port_list():
         obj = cps_object.CPSObject(obj=port)
-        create_interface(obj)
+        try:
+            create_interface(obj)
+        except:
+            logging.exception('Interface Creation failure:')
+            pass

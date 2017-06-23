@@ -82,6 +82,182 @@ void nas_print_vlan_object(cps_api_object_t obj){
     }
 }
 
+/* The next 3 cases use e101-005-0 which has ip assigned so the SAI fails to add it to a vlan hence roll_back is hit */
+TEST(std_vlan_test , lag_add_roll_bk) {
+/* DO SAME TEST WITH UNTAGGED PORTS TOO */
+    if(system("ip link add name bo33 type bond miimon 100 mode 4 lacp_rate 1 min_links 1")){}
+    if(system("ip link add name bo30 type bond miimon 100 mode 4 lacp_rate 1 min_links 1")){}
+    if(system("ip link set e101-001-0 master bo33")){}
+    if(system("ip link set e101-002-0 master bo33")){}
+    if(system(" ip link set e101-003-0 master bo30")){}
+    if(system("ip link set e101-004-0 master bo30")){}
+    if(system("ifconfig e101-005-0 1.1.1.1/8")){}
+    sleep (5);
+    cps_api_object_t obj = cps_api_object_create();
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
+                                    DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_OBJ,
+                                    cps_api_qualifier_TARGET);
+    cps_api_object_attr_add(obj,IF_INTERFACES_INTERFACE_TYPE,
+           (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN,
+           sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN));
+
+    cps_api_object_attr_add_u32(obj,BASE_IF_VLAN_IF_INTERFACES_INTERFACE_ID,44);
+    cps_api_object_attr_add(obj, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS,
+             "bo30", strlen("bo44")+1);
+    cps_api_object_attr_add(obj, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS,
+             "e101-011-0", strlen("e101-011-0")+1);
+    cps_api_transaction_params_t tr;
+    ASSERT_TRUE(cps_api_transaction_init(&tr)==cps_api_ret_code_OK);
+    cps_api_create(&tr,obj);
+    ASSERT_TRUE(cps_api_commit(&tr)==cps_api_ret_code_OK);
+    cps_api_object_t recvd_obj = cps_api_object_list_get(tr.change_list,0);
+
+    cps_api_object_attr_t vlan_attr = cps_api_object_attr_get(recvd_obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+
+    int ifindex = cps_api_object_attr_data_u32(vlan_attr);
+
+    cout <<"Roll_back lag_add vlan id 44 ifindex %d "<< ifindex <<  endl;
+
+    sleep(2);
+    //system("hshell -c \"vlan show\"");
+    //system("hshell -c \"trunk show\"");
+    //system("brctl show");
+    //system("ip link show | grep bo");
+    //sleep(15);
+    cps_api_object_t obj2 = cps_api_object_create();
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj2),
+                                    DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_OBJ,
+                                    cps_api_qualifier_TARGET);
+    cps_api_object_attr_add(obj2,IF_INTERFACES_INTERFACE_TYPE,
+           (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN,
+           sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN));
+
+
+    const char *br_name = "br44";
+
+    cps_api_set_key_data(obj2, IF_INTERFACES_INTERFACE_NAME, cps_api_object_ATTR_T_BIN,
+                             br_name, strlen(br_name) + 1 );
+
+
+    cps_api_object_attr_add(obj2, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS,
+             "e101-005-0", strlen("e101-004-12")+1);
+    cps_api_object_attr_add(obj2, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS,
+             "bo33", strlen("bo43")+1);
+    cps_api_transaction_params_t tr2;
+    ASSERT_TRUE(cps_api_transaction_init(&tr2)==cps_api_ret_code_OK);
+    cps_api_set(&tr2,obj2);
+    ASSERT_TRUE(cps_api_commit(&tr2)==cps_api_ret_code_ERR);
+    cps_api_transaction_close(&tr2);
+    sleep(2);
+}
+
+
+TEST(std_vlan_test, ROLL_BK_CREATE_VLAN)
+{
+
+    if(system("ifconfig e101-005-0 1.1.1.1/8")){}
+    sleep(2);
+    cps_api_object_t obj = cps_api_object_create();
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
+                                    DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_OBJ,
+                                    cps_api_qualifier_TARGET);
+    cps_api_object_attr_add(obj,IF_INTERFACES_INTERFACE_TYPE,
+           (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN,
+           sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN));
+
+    cps_api_object_attr_add_u32(obj,BASE_IF_VLAN_IF_INTERFACES_INTERFACE_ID,23);
+    cps_api_object_attr_add(obj, DELL_IF_IF_INTERFACES_INTERFACE_UNTAGGED_PORTS,
+             "e101-005-0", strlen("e101-004-1")+1);
+    cps_api_object_attr_add(obj, DELL_IF_IF_INTERFACES_INTERFACE_UNTAGGED_PORTS,
+             "e101-006-0", strlen("e101-004-1")+1);
+
+    cps_api_transaction_params_t tr;
+    ASSERT_TRUE(cps_api_transaction_init(&tr)==cps_api_ret_code_OK);
+    cps_api_create(&tr,obj);
+    ASSERT_TRUE(cps_api_commit(&tr)==cps_api_ret_code_ERR);
+
+    cout <<"Roll_back for bridge create done" <<  endl;
+    sleep(5);
+
+}
+
+
+TEST(std_vlan_test, roll_back_set_vlan_params)
+{
+
+    const char * mac =  "22:22:22:22:22:22";
+    cps_api_object_t obj = cps_api_object_create();
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
+                                    DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_OBJ,
+                                    cps_api_qualifier_TARGET);
+    cps_api_object_attr_add(obj,IF_INTERFACES_INTERFACE_TYPE,
+           (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN,
+           sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN));
+
+    cps_api_object_attr_add_u32(obj,BASE_IF_VLAN_IF_INTERFACES_INTERFACE_ID,22);
+    cps_api_object_attr_add(obj, DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, mac, strlen(mac) + 1);
+
+    cps_api_object_attr_add_u32(obj,IF_INTERFACES_INTERFACE_ENABLED,false);
+    cps_api_object_attr_add_u32(obj,DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, true);
+    cps_api_object_attr_add(obj, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS,
+             "e101-007-0", strlen("e101-004-1")+1);
+
+    cps_api_transaction_params_t tr;
+    ASSERT_TRUE(cps_api_transaction_init(&tr)==cps_api_ret_code_OK);
+    cps_api_create(&tr,obj);
+    ASSERT_TRUE(cps_api_commit(&tr)==cps_api_ret_code_OK);
+    cps_api_object_t recvd_obj = cps_api_object_list_get(tr.change_list,0);
+
+    cps_api_object_attr_t vlan_attr = cps_api_object_attr_get(recvd_obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+
+    int ifindex = cps_api_object_attr_data_u32(vlan_attr);
+
+    cout <<"IF Index from Kernel is "<< ifindex << endl;
+    cps_api_transaction_close(&tr);
+
+    sleep(5);
+    if(system("ip link show br22")){}
+    if(system("hshell -c \"vlan show\"")){}
+    sleep(30);
+
+    const char *br_name = "br22";
+    const char * mac2 =  "22:22:22:22:11:11";
+    cps_api_object_t obj2 = cps_api_object_create();
+
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj2),
+                                    DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_OBJ,
+                                    cps_api_qualifier_TARGET);
+    cps_api_object_attr_add(obj2,IF_INTERFACES_INTERFACE_TYPE,
+           (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN,
+           sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN));
+
+    cps_api_set_key_data(obj2, IF_INTERFACES_INTERFACE_NAME, cps_api_object_ATTR_T_BIN,
+                             br_name, strlen(br_name) + 1 );
+
+    cps_api_object_attr_add(obj2, DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, mac2, strlen(mac2) + 1);
+    cps_api_object_attr_add_u32(obj2,IF_INTERFACES_INTERFACE_ENABLED,true);
+    cps_api_object_attr_add_u32(obj2,DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, false);
+    cps_api_object_attr_add(obj2, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS,
+             "e101-005-0", strlen("e101-004-1")+1);
+
+    cps_api_object_attr_add(obj2, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS,
+             "e101-009-0", strlen("e101-004-1")+1);
+
+    cps_api_object_attr_add(obj2, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS,
+             "e101-008-0", strlen("e101-009-1")+1);
+
+    cps_api_transaction_params_t tr2;
+    ASSERT_TRUE(cps_api_transaction_init(&tr2)==cps_api_ret_code_OK);
+    cps_api_set(&tr2,obj2);
+    ASSERT_TRUE(cps_api_commit(&tr2)==cps_api_ret_code_ERR);
+
+
+    cps_api_transaction_close(&tr2);
+    if(system("ip link show br22")){}
+    if(system("hshell -c \"vlan show\"")){}
+    cout <<"Roll_back teste for seti params done "<<  endl;
+}
+
 TEST(std_vlan_test, create_vlan)
 {
     cps_api_object_t obj = cps_api_object_create();

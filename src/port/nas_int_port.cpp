@@ -23,6 +23,7 @@
 
 #include "hal_if_mapping.h"
 #include "hal_interface_common.h"
+#include "nas_os_interface.h"
 #include "dell-base-if-phy.h"
 
 #include "swp_util_tap.h"
@@ -32,7 +33,7 @@
 #include "std_assert.h"
 #include "std_rw_lock.h"
 #include "std_time_tools.h"
-
+#include "std_ip_utils.h"
 
 #include <vector>
 #include <stdio.h>
@@ -44,9 +45,12 @@
 #include <unordered_map>
 
 
+
 #define MAX_QUEUE          1
 /* num packets to read on fd event */
 #define NAS_PKT_COUNT_TO_READ 10
+/* num packets to read from nflog fd */
+#define NAS_NFLOG_PKT_COUNT_TO_READ 1
 
 
 //Lock for a interface structures
@@ -94,17 +98,40 @@ static NasListOfPortList _ports;
 typedef std::unordered_map<int,struct event *> _fd_to_event_info_map_t;
 
 typedef struct _nas_vif_pkt_tx_t {
-    struct event_base *nas_evt_base; // Pointer to event base
-    struct event *nas_signal_event;  // Pointer to our signal event
-    hal_virt_pkt_transmit tx_cb;     // Pointer to packet tx callback function
-    void *tx_buf; // Pointer to packet tx buffer
-    unsigned int tx_buf_len; // packet tx buffer len
+    struct event_base *nas_evt_base;    // Pointer to event base
+    struct event *nas_signal_event;     // Pointer to our signal event
+    hal_virt_pkt_transmit egress_tx_cb; // Pointer to packet tx callback function
+    // Pointer to packet tx to ingress pipeline callback function
+    hal_virt_pkt_transmit_to_ingress_pipeline tx_to_ingress_fun;
+    void *tx_buf;                      // Pointer to packet tx buffer
+    unsigned int tx_buf_len;           // packet tx buffer len
+    struct event *nas_nflog_fd_ev;     // nflog fd event struct
+    int nas_nflog_fd;                  // fd for packet copy thru nflog
     _fd_to_event_info_map_t _tap_fd_to_event_info_map; //fd to event base info
 } nas_vif_pkt_tx_t;
 
 nas_vif_pkt_tx_t g_vif_pkt_tx; //global virtual interface packet tx information
 
+static int     nas_nflog_pkts_tx_to_ingress_pipeline = 0;
+static int     nas_nflog_pkts_tx_to_ingress_pipeline_dropped = 0;
+uint8_t        dest_ipv4_from_last_pkt[4];
+static struct timespec ts_last_pkt_sent = {0,0};
+
+typedef struct _arp_header {
+    uint16_t htype;
+    uint16_t ptype;
+    uint8_t  hlen;
+    uint8_t  plen;
+    uint16_t operation;
+    uint8_t  sender_hw_addr[6];
+    uint8_t  sender_ip[4];
+    uint8_t  target_hw_addr[6];
+    uint8_t  target_ip[4];
+} arp_header_t;
+
+
 void process_packets (evutil_socket_t fd, short evt, void *arg);
+void process_nflog_packets (evutil_socket_t fd, short evt, void *arg);
 
 /* Add the tap fd to event info map */
 t_std_error nas_add_fd_to_evt_info_map (int fd, struct event *fd_evt)
@@ -341,10 +368,155 @@ void nas_evt_signal_cb (evutil_socket_t sig_num, short evt, void *arg)
         event_del(nas_fd_ev);
         event_free(nas_fd_ev);
     }
+    //@@TODO de-init nas_nflog_fd
+    event_del (g_vif_pkt_tx.nas_nflog_fd_ev);
+    event_free (g_vif_pkt_tx.nas_nflog_fd_ev);
+    g_vif_pkt_tx.nas_nflog_fd = -1;
 
     event_del (p_vif_pkt_tx->nas_signal_event);
     event_free (p_vif_pkt_tx->nas_signal_event);
     event_base_loopbreak(p_vif_pkt_tx->nas_evt_base);
+}
+
+int nas_process_payload_and_form_packet (uint8_t *pkt_buf,
+                                         nas_nflog_params_t *p_nas_nflog_params)
+{
+#define NSEC_PER_SEC 1000000000
+    int               pkt_len = 0;
+    uint16_t          vlan_id = 0;
+    uint16_t          vlan_protocol = htons (0x8100);
+    uint16_t          arp_protocol = htons (0x0806);
+    uint16_t          ip_protocol = htons (0x0800); //ipv4
+    interface_ctrl_t  intf_ctrl;
+    unsigned char     dest_mac[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    arp_header_t      *p_arp_header = NULL;
+    struct timespec   ts_cur_pkt;
+    struct timespec   ts_diff;
+
+    memset(&intf_ctrl, 0, sizeof(interface_ctrl_t));
+    intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF;
+    intf_ctrl.if_index = p_nas_nflog_params->out_ifindex;
+
+    /* retrieve the VLAN id from interface index */
+    if ((dn_hal_get_interface_info(&intf_ctrl)) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"TAP-TX", "Processing payload failed. Invalid interface %d. ifInfo get failed",
+                   p_nas_nflog_params->out_ifindex);
+        return 0;
+    }
+
+//@@TODO handle for ipv6 ND
+
+    /* reference arp header from nflog payload */
+    p_arp_header = (arp_header_t *) p_nas_nflog_params->payload;
+
+    if ((p_nas_nflog_params->hw_protocol != arp_protocol) ||
+        (p_arp_header->ptype != ip_protocol))
+    {
+        /* return 0, if its not IPv4 ARP */
+        return 0;
+    }
+
+    clock_gettime (CLOCK_MONOTONIC, &ts_cur_pkt);
+
+    ts_diff.tv_nsec = (ts_cur_pkt.tv_nsec - ts_last_pkt_sent.tv_nsec);
+    ts_diff.tv_sec = (ts_cur_pkt.tv_sec - ts_last_pkt_sent.tv_sec);
+
+    while (ts_diff.tv_nsec >= NSEC_PER_SEC)
+    {
+        ts_diff.tv_nsec -= NSEC_PER_SEC;
+        ++ts_diff.tv_sec;
+    }
+    while (ts_diff.tv_nsec < 0)
+    {
+        ts_diff.tv_nsec += NSEC_PER_SEC;
+        --ts_diff.tv_nsec;
+    }
+
+    /* For ARP requests, check the following and drop the packets by returning length as 0:
+     * 1) check if the target-ip of this ARP request and previous ARP request is same
+     * 2) check if the time elapsed between two ARP request packet for same destination
+     *    less than a second,
+     * if yes, then drop this packet as this could be a copy that Kernel replicated
+     * for other VLAN member ports in the bridge.
+     */
+    if ((memcmp (&dest_ipv4_from_last_pkt, &p_arp_header->target_ip, 4) == 0) &&
+        (ts_diff.tv_sec < 1))
+    {
+        return 0;
+    }
+    ts_last_pkt_sent = ts_cur_pkt;
+    memcpy (&dest_ipv4_from_last_pkt, &p_arp_header->target_ip, 4);
+
+    memcpy ((pkt_buf + pkt_len), &dest_mac, 6);
+    pkt_len += 6;
+
+    /* copy the ethernet header source-mac same as the ARP payload sender mac */
+    memcpy ((pkt_buf + pkt_len), p_arp_header->sender_hw_addr, 6);
+    pkt_len += 6;
+
+    if(intf_ctrl.int_type == nas_int_type_VLAN)
+    {
+        vlan_id = htons (intf_ctrl.vlan_id);
+
+        memcpy ((pkt_buf + pkt_len), &vlan_protocol, 2);
+        pkt_len += 2;
+
+        memcpy ((pkt_buf + pkt_len), &vlan_id, 2);
+        pkt_len += 2;
+    }
+    memcpy ((pkt_buf + pkt_len), &p_nas_nflog_params->hw_protocol, 2);
+    pkt_len += 2;
+
+    memcpy ((pkt_buf + pkt_len), p_nas_nflog_params->payload, p_nas_nflog_params->payload_len);
+    pkt_len += p_nas_nflog_params->payload_len;
+
+    return pkt_len;
+}
+
+
+/*
+ * Callback function from event for read event from nflog fd.
+ * Here we are not interested in any of the context information.
+ */
+void process_nflog_packets (evutil_socket_t fd, short evt, void *arg)
+{
+    int pkt_len = 0;
+    int pkt_count = 0;
+    nas_nflog_params_t nflog_params;
+
+    /* event is received in level-triggered mode,
+     * so read data as required and w/o starving other ports
+     */
+    while (pkt_count < NAS_NFLOG_PKT_COUNT_TO_READ)
+    {
+        pkt_len = read(fd, g_vif_pkt_tx.tx_buf, g_vif_pkt_tx.tx_buf_len);
+
+        if (pkt_len <=0)
+        {
+            /* no more data to read */
+            break;
+        }
+        pkt_count++;
+
+        nflog_params.out_ifindex = 0;
+        nflog_params.payload_len = 0;
+
+        nas_os_nl_get_nflog_params ((uint8_t *) g_vif_pkt_tx.tx_buf,
+                                    pkt_len, &nflog_params);
+
+        pkt_len = nas_process_payload_and_form_packet ((uint8_t *) g_vif_pkt_tx.tx_buf,
+                                                       &nflog_params);
+
+        /* send packet for transmission to ingress pipeline processing
+         * to the registered callback function with registered packet buffer
+         */
+        if (pkt_len > 0) {
+            nas_nflog_pkts_tx_to_ingress_pipeline++;
+            g_vif_pkt_tx.tx_to_ingress_fun (g_vif_pkt_tx.tx_buf,pkt_len);
+        } else {
+            nas_nflog_pkts_tx_to_ingress_pipeline_dropped++;
+        }
+    }
 }
 
 
@@ -386,7 +558,7 @@ void process_packets (evutil_socket_t fd, short evt, void *arg)
         }
         pkt_count++;
         /* send packet for transmission to registered callback function with registered packet buffer */
-        g_vif_pkt_tx.tx_cb(npu,port,g_vif_pkt_tx.tx_buf,pkt_len);
+        g_vif_pkt_tx.egress_tx_cb(npu,port,g_vif_pkt_tx.tx_buf,pkt_len);
     }
 }
 
@@ -394,14 +566,18 @@ void process_packets (evutil_socket_t fd, short evt, void *arg)
 /* packet transmission from virtual interface is handled via libevent.
  * call to hal_virtual_interface_wait() trigger event dispatcher.
  */
-extern "C" t_std_error hal_virtual_interface_wait (hal_virt_pkt_transmit fun,
+extern "C" t_std_error hal_virtual_interface_wait (hal_virt_pkt_transmit tx_fun,
+                                                   hal_virt_pkt_transmit_to_ingress_pipeline tx_to_ingress_fun,
                                                    void *data, unsigned int len)
 {
     /* initialize global virtual interface packet tx information with given input params */
     g_vif_pkt_tx.nas_evt_base = NULL;
     g_vif_pkt_tx.nas_signal_event = NULL;
+    g_vif_pkt_tx.nas_nflog_fd_ev = NULL;
+    g_vif_pkt_tx.nas_nflog_fd = -1;
 
-    g_vif_pkt_tx.tx_cb = fun;
+    g_vif_pkt_tx.egress_tx_cb = tx_fun;
+    g_vif_pkt_tx.tx_to_ingress_fun = tx_to_ingress_fun;
     g_vif_pkt_tx.tx_buf = data;
     g_vif_pkt_tx.tx_buf_len = len;
 
@@ -414,12 +590,40 @@ extern "C" t_std_error hal_virtual_interface_wait (hal_virt_pkt_transmit fun,
         return STD_ERR(INTERFACE,FAIL,0);
     }
 
+    g_vif_pkt_tx.nas_nflog_fd = nas_os_nl_nflog_init ();
+    if (g_vif_pkt_tx.nas_nflog_fd == -1)
+    {
+        EV_LOGGING(INTERFACE,ERR,"TAP-TX", "NAS NFLOG Packet read initialization failed.");
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
+
+    // Setup the events for nflog fd
+    g_vif_pkt_tx.nas_nflog_fd_ev = event_new(g_vif_pkt_tx.nas_evt_base, g_vif_pkt_tx.nas_nflog_fd,
+                          EV_READ | EV_PERSIST, process_nflog_packets, NULL);
+
+    //@@TODO de-init nas_nflog_fd on failure
+    if (!g_vif_pkt_tx.nas_nflog_fd_ev) {
+        EV_LOGGING(INTERFACE,ERR,"TAP-TX", "NAS Packet read event create failed for nflog fd (%d).",
+                   g_vif_pkt_tx.nas_nflog_fd);
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
+
+    if (event_add(g_vif_pkt_tx.nas_nflog_fd_ev, NULL) < 0) {
+        EV_LOGGING(INTERFACE,ERR,"TAP-TX", "NAS Packet read event add failed for nflog fd (%d).",
+                   g_vif_pkt_tx.nas_nflog_fd);
+        event_free (g_vif_pkt_tx.nas_nflog_fd_ev);
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
+
+
     /* initialize event for sigint */
     g_vif_pkt_tx.nas_signal_event = event_new (g_vif_pkt_tx.nas_evt_base, SIGINT,
                     EV_SIGNAL | EV_PERSIST, nas_evt_signal_cb, (void *)&g_vif_pkt_tx);
 
     if (!g_vif_pkt_tx.nas_signal_event || event_add(g_vif_pkt_tx.nas_signal_event, NULL)<0) {
         EV_LOGGING(INTERFACE,ERR,"TAP-TX", "NAS Packet signal event initialization failed.");
+        event_del (g_vif_pkt_tx.nas_nflog_fd_ev);
+        event_free (g_vif_pkt_tx.nas_nflog_fd_ev);
         return STD_ERR(INTERFACE,FAIL,0);
     }
 
@@ -431,6 +635,9 @@ extern "C" t_std_error hal_virtual_interface_wait (hal_virt_pkt_transmit fun,
         EV_LOGGING(INTERFACE,ERR,"TAP-TX", "NAS Packet event dispath failed...Aborting...");
         event_del (g_vif_pkt_tx.nas_signal_event);
         event_free (g_vif_pkt_tx.nas_signal_event);
+        //@@TODO de-init nas_nflog_fd on failure
+        event_del (g_vif_pkt_tx.nas_nflog_fd_ev);
+        event_free (g_vif_pkt_tx.nas_nflog_fd_ev);
         event_base_free (g_vif_pkt_tx.nas_evt_base);
         return STD_ERR(INTERFACE,FAIL,0);
     }
@@ -482,7 +689,7 @@ extern "C" void nas_int_port_link_change(npu_id_t npu, port_t port,
     EV_LOGGING(INTERFACE,INFO,"INT-STATE", "Interface state change %d:%d to %d",(int)npu,(int)port,(int)state);
 }
 
-extern "C" t_std_error nas_int_port_create(npu_id_t npu, port_t port, const char *name) {
+extern "C" t_std_error nas_int_port_create(npu_id_t npu, port_t port, const char *name, nas_int_type_t type) {
 
     std_rw_lock_write_guard l(&ports_lock);
 
@@ -505,7 +712,7 @@ extern "C" t_std_error nas_int_port_create(npu_id_t npu, port_t port, const char
     details.npu_id = npu;
     details.port_id = port;
     details.tap_id = (npu << 16) + port;
-    details.int_type = nas_int_type_PORT;
+    details.int_type = type;
 
     if (dn_hal_if_register(HAL_INTF_OP_REG,&details)!=STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"INT-CREATE", "Not created %d:%d:%s - mapping error",
@@ -569,4 +776,20 @@ void nas_dbg_dump_tap_fd_to_nas_port_map_tbl ()
     }
 
     return;
+}
+
+void nas_nflog_dbg_counters ()
+{
+    printf("\rNAS NFLOG DEBUG COUNTERS\r\n");
+    printf("\r========================\r\n");
+    printf("\rTotal packets received                        : %d\r\n",
+           nas_nflog_pkts_tx_to_ingress_pipeline);
+    printf("\rTotal flood packets dropped                   : %d\r\n",
+           nas_nflog_pkts_tx_to_ingress_pipeline_dropped);
+}
+
+void nas_nflog_dbg_reset_counters ()
+{
+    nas_nflog_pkts_tx_to_ingress_pipeline = 0;
+    nas_nflog_pkts_tx_to_ingress_pipeline_dropped = 0;
 }

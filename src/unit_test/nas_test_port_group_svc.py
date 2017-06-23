@@ -1,5 +1,5 @@
-#!/bin/sh
-# Copyright (c) 2015 Dell Inc.
+#!/usr/bin/python
+# Copyright (c) 2017 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -13,6 +13,29 @@
 # See the Apache Version 2.0 License for specific language governing
 # permissions and limitations under the License.
 
-. /etc/opx/opx-environment.sh
 
-/usr/bin/base_nas_phy_media_config.py
+import cps
+import cps_object
+import cps_utils
+import event_log as ev
+import nas_fp_port_utils as fp_utils
+import nas_front_panel_map as fp
+import nas_os_if_utils as nas_if
+
+import nas_port_group_utils as nas_pg
+
+import sys
+import time
+import xml.etree.ElementTree as ET
+
+if __name__ == '__main__':
+    fp_utils.init()
+    fp.show_all_fp_ports()
+    fp.show_all_port_groups()
+
+    handle = cps.obj_init()
+
+    nas_pg.nas_pg_cps_register(handle)
+    while True:
+        time.sleep(1)
+

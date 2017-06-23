@@ -292,23 +292,33 @@ static cps_api_return_code_t nas_cps_add_port_to_lag(nas_lag_master_info_t *nas_
     cps_api_return_code_t rc = cps_api_ret_code_OK;
     char buff[MAX_CPS_MSG_BUFF];
 
-    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "Add Ports to Lag");
+    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "Add Port %d to Lag", port_idx);
 
+    bool block_port = true;
+    if(nas_lag_entry->block_port_list.find(port_idx) == nas_lag_entry->block_port_list.end()) {
+        block_port = false;
+    }
     cps_api_object_t name_obj = cps_api_object_init(buff, sizeof(buff));
-    cps_api_object_attr_add_u32(name_obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, nas_lag_entry->ifindex);
+    cps_api_object_attr_add_u32(name_obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
+                                nas_lag_entry->ifindex);
     cps_api_object_attr_add_u32(name_obj,DELL_IF_IF_INTERFACES_INTERFACE_MEMBER_PORTS, port_idx);
 
     if(nas_os_add_port_to_lag(name_obj) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
-                   "Error adding port %d to lag  %d in the Kernel",
+        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "Error adding port %d to lag  %d in the Kernel",
                    port_idx,nas_lag_entry->ifindex);
         return cps_api_ret_code_ERR;
     }
+
 
     if(nas_lag_member_add(nas_lag_entry->ifindex,port_idx,0) != STD_ERR_OK)
     {
         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
                    "Error inserting index %d in list", port_idx);
+        return cps_api_ret_code_ERR;
+    }
+
+    if (block_port && nas_lag_block_port(nas_lag_entry, port_idx, block_port) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "Error Block/unblock Port %d",port_idx);
         return cps_api_ret_code_ERR;
     }
 
@@ -765,6 +775,10 @@ static void nas_pack_lag_if(cps_api_object_t obj, nas_lag_master_info_t *nas_lag
     }
 
     cps_api_object_attr_add_u32(obj,IF_INTERFACES_INTERFACE_ENABLED ,nas_lag_entry->admin_status);
+    /*
+     * Get MTU on LAG Interface
+     */
+    nas_os_get_interface_mtu(nas_lag_entry->name, obj);
 
     nas::ndi_obj_id_table_t lag_opaque_data_table;
     //@TODO to retrive NPU ID in multi npu case
@@ -981,7 +995,7 @@ void nas_lag_port_oper_state_cb(npu_id_t npu, npu_port_t port, IF_INTERFACES_STA
 
     if (nas_lag_block_port(nas_lag_entry, slave_index, block_status) != STD_ERR_OK){
             EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
-                "Error Block/unblock Port %s lag %s ",slave_index, master_index);
+                "Error Block/unblock Port %d lag %d ",slave_index, master_index);
         return ;
     }
 

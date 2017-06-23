@@ -24,6 +24,7 @@
 #define NAS_INTERFACE_INC_NAS_INT_PORT_H_
 
 #include "nas_ndi_port.h"
+#include "hal_if_mapping.h"
 
 static inline IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t ndi_to_cps_oper_type(ndi_port_oper_status_t ndi) {
     //ignore the other test and fail cases since if reacted on - could effect hardware
@@ -34,8 +35,7 @@ static inline IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t ndi_to_cps_oper_type(n
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-t_std_error nas_int_port_create(npu_id_t npu, port_t port, const char *name);
+t_std_error nas_int_port_create(npu_id_t npu, port_t port, const char *name, nas_int_type_t type);
 t_std_error nas_int_port_delete(npu_id_t npu, port_t port);
 
 void nas_int_port_link_change(npu_id_t npu, port_t port,

@@ -16,7 +16,6 @@
 import sys
 import getopt
 import cps_utils
-import nas_vlan_utils as vlan_util
 import nas_ut_framework as nas_ut
 import nas_os_utils
 import cps_object
@@ -59,6 +58,7 @@ def usage():
     print '--addmac  : add a mac address to the VLAN '
     print '-s, --show: show the VLAN parameter, when no VLAN ID given show all'
     print '-t, --tagged: If user want to add the port as tagged port, default untagged\n'
+    print '--vlantype : Type of vlan (data/management)'
 
     print 'Example:'
     print 'cps_config_vlan.py  --add --id 100 --port e101-001-0,e101-004-0'
@@ -75,6 +75,7 @@ vlan_attr_id = 'base-if-vlan/if/interfaces/interface/id'
 mac_attr_id =  'dell-if/if/interfaces/interface/phys-address'
 tagged_port_attr_id = 'dell-if/if/interfaces/interface/tagged-ports'
 untagged_port_attr_id = 'dell-if/if/interfaces/interface/untagged-ports'
+vlan_type_attr_id = 'dell-if/if/interfaces/interface/vlan-type'
 
 vlan_if_type = 'ianaift:l2vlan'
 
@@ -90,6 +91,7 @@ def main(argv):
     command line argument and  process the request  '''
 
     vlan_id = ''
+    vlan_type = ''
     choice = ''
     ports = ''
     if_name = ''
@@ -97,8 +99,8 @@ def main(argv):
     mac_id = ''
 
     try:
-        opts, args = getopt.getopt(argv, "hadtsp:i:m:",
-                                   ["help", "add", "del", "tagged", "port=", "show", "id=", "name=", "addport", "mac=", "addmac"])
+        opts, args = getopt.getopt(argv, "hadtsp:i:m:v:",
+                                   ["help", "add", "del", "tagged", "port=", "show", "id=", "name=", "addport", "mac=", "addmac", "vlantype="])
 
     except getopt.GetoptError:
         usage()
@@ -138,11 +140,14 @@ def main(argv):
         elif opt in ('-m', '--mac'):
             mac_id = arg
 
+        elif opt == '--vlantype':
+            vlan_type = arg
+
     if choice == 'add' and vlan_id != '':
         ifname_list = []
         if ports != '':
             ifname_list = _port_name_list(ports)
-        nas_vlan_op("create", {vlan_attr_id: vlan_id, type_attr_id:vlan_if_type, port_type: ifname_list})
+        nas_vlan_op("create", {vlan_attr_id: vlan_id, type_attr_id:vlan_if_type, port_type: ifname_list, vlan_type_attr_id: vlan_type})
 
     elif choice == 'del' and if_name != '':
         nas_vlan_op("delete", {name_attr_id: if_name})

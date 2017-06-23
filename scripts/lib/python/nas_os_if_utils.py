@@ -19,6 +19,9 @@ import cps_object
 import bytearray_utils
 import event_log as ev
 
+from nas_common_header import *
+import nas_common_header as nas_comm
+
 nas_os_if_keys = {'interface': 'dell-base-if-cmn/if/interfaces/interface',
         'interface-state': 'dell-base-if-cmn/if/interfaces-state/interface',
         'physical': 'base-if-phy/physical',
@@ -33,7 +36,7 @@ _g_cpu_if_type = "base-if:cpu"
 # TODO default values should go to a common file and ideally it should be generated from yang file  just like C headers
 _yang_auto_speed = 8  # default value for auto speed
 _yang_auto_neg = 1    # default value for negotiation
-_yang_auto_dup = 3      #auto - default value for duplex
+#_yang_auto_dup = 3      #auto - default value for duplex
 
 def log_err(msg):
     ev.logging("INTERFACE",ev.ERR,"INTERFACE-HANDLER","","",0,msg)
@@ -41,6 +44,13 @@ def log_err(msg):
 def log_info(msg):
     ev.logging("INTERFACE",ev.INFO,"INTERFACE-HANDLER","","",0,msg)
 
+# note: Enable log for DSAPI
+def log_obj(cps_obj):
+    try:
+        cps_utils.log_obj(cps_obj, ev.INFO)
+    except:
+        log_info('CPS obj logging is not successful completely')
+        pass
 
 def get_if_key():
     return nas_os_if_keys['interface']
@@ -209,6 +219,9 @@ class FpPortCache(IfComponentCache):
         l = self._list(get_fp_key())
         for e in l:
             obj = cps_object.CPSObject(obj=e)
+
+            if get_cps_attr(obj,'default-name') == None:
+                continue
             self.m[obj.get_attr_data('default-name')] = obj
             self.m[obj.get_attr_data('front-panel-port')] = obj
             self.m[self.make_media_key(
@@ -276,7 +289,24 @@ class IfCache(IfComponentCache):
 def get_interface_name(chassis, slot, port, lane):
     return 'e%d%02d-%03d-%d' % (chassis, slot, port, lane)
 
-def make_interface_from_phy_port(obj):
+def is_40g_mode_on_100g_port(phy_obj):
+    try:
+        supp_speed = phy_obj.get_attr_data('supported-speed')
+    except ValueError:
+        log_err('Unable to find supported-speed from cps object')
+        return False
+    max_speed = max([get_value(yang_to_mbps_speed, x) for x in supp_speed])
+    try:
+        speed = phy_obj.get_attr_data('speed')
+        speed = get_value(yang_to_mbps_speed, speed)
+        if max_speed == 100000 and speed == 40000:
+            log_info('100G physical port was configured as 40G breakout mode')
+            return True
+    except ValueError:
+        pass
+    return False
+
+def make_interface_from_phy_port(obj, mode = None, speed = None):
     npu = obj.get_attr_data('npu-id')
     hw_port_id = obj.get_attr_data('hardware-port-id')
 
@@ -287,9 +317,9 @@ def make_interface_from_phy_port(obj):
     })
     cps.get([elem.get()], l)
     if len(l) == 0:
-        log_err("Invalid port specified... ")
+        log_err('No object found for hardware port %d' % hw_port_id)
         log_err(str(elem.get()))
-        raise Exception("Invalid port - no matching hardware-port")
+        raise Exception('Invalid port %d - no matching hardware-port' % hw_port_id)
 
     elem = cps_object.CPSObject(obj=l[0])
 
@@ -297,10 +327,14 @@ def make_interface_from_phy_port(obj):
     slot_id = default_slot_id
     fp_port_id = elem.get_attr_data('front-panel-port')
     lane = elem.get_attr_data('subport-id')
-    mode = elem.get_attr_data('fanout-mode')
-    _subport = lane
-    if mode != 4:  # 1x1
-        _subport += 1
+    if mode == None:
+        mode = elem.get_attr_data('fanout-mode')
+    if speed == None:
+        speed = _yang_auto_speed
+    _subport = lane_to_subport(mode, lane, is_40g_mode_on_100g_port(obj))
+    if _subport == None:
+        raise Exception('Failed to get subport id from br_mode %d lane %d' % (
+                        mode, lane))
     name = get_interface_name(chassis_id, slot_id, fp_port_id, _subport)
 
     # extract the port number from the phy port strcture (based on the hwid)
@@ -317,8 +351,8 @@ def make_interface_from_phy_port(obj):
         'base-if-phy/if/interfaces/interface/port-id': port,
         'dell-if/if/interfaces/interface/mtu': _mtu,
         'dell-if/if/interfaces/interface/negotiation':_yang_auto_neg,
-        'dell-if/if/interfaces/interface/speed':_yang_auto_speed,
-        'dell-if/if/interfaces/interface/duplex':_yang_auto_dup,
+        'dell-if/if/interfaces/interface/speed':speed,
+        'dell-if/if/interfaces/interface/duplex':nas_comm.get_value(yang_duplex,'auto'),
         'if/interfaces/interface/type':_g_if_type})
 
     return ifobj
@@ -337,6 +371,7 @@ def physical_ports_for_front_panel_port(fp_obj):
     ports = fp_obj.get()['data']['base-if-phy/front-panel-port/port']
 
     npu = fp_obj.get_attr_data('npu-id')
+    fp_port = fp_obj.get_attr_data('front-panel-port')
 
     l = []
     phy_port_list = []
@@ -349,6 +384,7 @@ def physical_ports_for_front_panel_port(fp_obj):
         phy_port = phy_port_cache.get_by_hw_port(npu, _port)
         if phy_port is None:
             continue
+        phy_port.add_attr('front-panel-number', fp_port)
         phy_port_list.append(phy_port)
 
     return phy_port_list
@@ -398,9 +434,12 @@ def get_media_id_from_fp_port(fp_port):
     media_id = None
     for fp in fp_port_list:
         obj = cps_object.CPSObject(obj=fp)
-        if fp_port == obj.get_attr_data('front-panel-port'):
-            media_id =  obj.get_attr_data('media-id')
-            break
+        try:
+            if fp_port == obj.get_attr_data('front-panel-port'):
+                media_id =  obj.get_attr_data('media-id')
+                break
+        except Exception:
+            pass
     return media_id
 
 admin_status_to_str = {
@@ -443,7 +482,15 @@ to_yang_speed_map = {
         25000: 5,  # 25 GBPS
         40000: 6,  # 40GBps
         100000: 7, # 100Gbps
-        'auto': 8  # deafault speed
+        'auto': 8, # default speed
+        20000: 9,  # 20 GBPS
+        50000: 10, # 50 GBPS
+        200000: 11,# 200 GBPS
+        400000: 12,# 400 GBPS
+        4000: 13,  # 4 GFC
+        8000: 14,  # 8 GFC
+        16000: 15,  # 16 GFC
+        32000: 16  # 32 GFC
         }
 from_yang_speed_map = {
         0: 0,      # 0 Mbps
@@ -454,7 +501,15 @@ from_yang_speed_map = {
         5: 25000,  # 25 Gbps
         6: 40000,  # 40Gbps
         7: 100000, # 100Gbps
-        8: 'auto'  # default speed
+        8: 'auto',  # default speed
+        9: 20000, # 20 Gbps
+       10: 50000, # 50 Gbps
+       11: 200000, # 200 Gbps
+       12: 400000, # 400 Gbps
+       13: 4000,    # 4GFC
+       14: 8000,    # 8 GFC
+       15: 16000,  # 16 GFC
+       16: 32000  # 32 GFC
         }
 
 def to_yang_speed(speed):
@@ -548,6 +603,22 @@ def get_media_id_from_phy_port(npu, port):
     fp_port =  get_fp_from_hw_port(npu, hwp.hw_port)
     media_id = get_media_id_from_fp_port(fp_port)
     return media_id
+
+def get_lag_id_from_name(lag_name):
+    idx = 0
+    while idx < len(lag_name):
+        if lag_name[idx].isdigit():
+            break
+        idx += 1
+    if idx >= len(lag_name):
+        lag_id = 0
+    else:
+        lag_id_str = lag_name[idx:]
+        if lag_id_str.isdigit():
+            lag_id = int(lag_id_str)
+        else:
+            lag_id = 0
+    return lag_id
 
 
 def get_media_id_from_if_index(if_index):

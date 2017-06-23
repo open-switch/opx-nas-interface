@@ -175,7 +175,7 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
         /*   Check if Member port is present then add the members in the lag */
         if (_mem_attr != nullptr) {
             if(nas_lag_member_add(bond_idx,mem_idx,lag_id) != STD_ERR_OK) {
-                EV_LOGGING(INTERFACE,ERR, "NAS-LAG",
+                EV_LOGGING(INTERFACE,INFO, "NAS-LAG",
                     "Failed to Add member %s to the Lag %s", mem_name, bond_name);
                 return ;
             }
@@ -220,7 +220,7 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
         if (_mem_attr != nullptr) {
             /*  delete the member from the lag */
             if(nas_lag_member_delete(bond_idx, mem_idx,lag_id) != STD_ERR_OK) {
-                EV_LOGGING(INTERFACE,ERR, "NAS-LAG",
+                EV_LOGGING(INTERFACE,INFO, "NAS-LAG",
                     "Failed to Delete member %s to the Lag %d", mem_name, bond_idx);
                 return ;
             }
@@ -286,6 +286,7 @@ void nas_send_admin_state_event(hal_ifindex_t if_index, IF_INTERFACES_STATE_INTE
 {
 
     char buff[CPS_API_MIN_OBJ_LEN];
+    char if_name[HAL_IF_NAME_SZ];    //! the name of the interface
     cps_api_object_t obj = cps_api_object_init(buff,sizeof(buff));
     if (!cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
                 DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_OBJ,
@@ -293,6 +294,11 @@ void nas_send_admin_state_event(hal_ifindex_t if_index, IF_INTERFACES_STATE_INTE
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Could not translate to logical interface key ");
         return;
     }
+    if (nas_int_get_if_index_to_name(if_index, if_name, sizeof(if_name)) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-INT","Could not find interface name for if_index %d", if_index);
+        return;
+    }
+    cps_api_object_attr_add(obj, IF_INTERFACES_STATE_INTERFACE_NAME, if_name, strlen(if_name) + 1);
     cps_api_object_attr_add_u32(obj, IF_INTERFACES_STATE_INTERFACE_IF_INDEX, if_index);
     cps_api_object_attr_add_u32((obj), IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS, state);
     hal_interface_send_event(obj);
@@ -376,7 +382,11 @@ void nas_int_ev_handler(cps_api_object_t obj) {
     if (attr==nullptr) return ; // if index not present
     if_index = cps_api_object_attr_data_u32(attr);
     if (nas_int_get_npu_port(if_index, &ndi_port) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-INT","if_index %d is wrong or Interface has NO slot port ", if_index);
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-INT","if_index %d is wrong or Interface has NO slot port ", if_index);
+        return;
+    }
+
+    if ((ndi_port.npu_id == 0) && (ndi_port.npu_port == 0)) {
         return;
     }
     /*

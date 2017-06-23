@@ -33,6 +33,7 @@
 #include "event_log.h"
 #include "nas_ndi_plat_stat.h"
 #include "nas_stats.h"
+#include "nas_fc_stats.h"
 #include "nas_ndi_port.h"
 #include "nas_int_utils.h"
 #include "std_utils.h"
@@ -91,13 +92,21 @@ nas_stat_get_name_from_obj(cps_api_object_t obj, char *if_name, size_t name_sz) 
 
 bool nas_stat_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index, bool clear){
     cps_api_attr_id_t attr_id;
-    if(clear){
-        attr_id = DELL_IF_CLEAR_COUNTERS_INPUT_INTF_CHOICE_IFNAME_CASE;
-    }else{
+
+    if (clear) {
+        attr_id = DELL_IF_CLEAR_COUNTERS_INPUT_INTF_CHOICE_IFNAME_CASE_IFNAME;
+    } else {
         attr_id = IF_INTERFACES_STATE_INTERFACE_NAME;
     }
+
     cps_api_object_attr_t if_name_attr = cps_api_get_key_data(obj,attr_id);
-    cps_api_object_attr_t if_index_attr = cps_api_object_attr_get(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX );
+
+    if (clear) {
+        attr_id = DELL_IF_CLEAR_COUNTERS_INPUT_INTF_CHOICE_IFINDEX_CASE_IFINDEX;
+    } else {
+        attr_id = DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX;
+    }
+    cps_api_object_attr_t if_index_attr = cps_api_object_attr_get(obj, attr_id);
 
     if(if_index_attr == NULL && if_name_attr == NULL) {
         EV_LOG(ERR, INTERFACE, ev_log_s_CRITICAL, "NAS-STAT",
@@ -361,6 +370,11 @@ static cps_api_return_code_t if_stats_clear (void * context, cps_api_transaction
         return (cps_api_return_code_t)STD_ERR(INTERFACE,FAIL,0);
     }
 
+    if (intf_ctrl.int_type == nas_int_type_FC)
+    {
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-FC-STAT","clearing FC stat");
+        return (nas_if_fc_stats_clear(context, param, ix));
+    }
     if(ndi_port_clear_all_stat(intf_ctrl.npu_id,intf_ctrl.port_id) != STD_ERR_OK) {
         return (cps_api_return_code_t)STD_ERR(INTERFACE,FAIL,0);
     }
@@ -388,11 +402,12 @@ t_std_error nas_stats_if_init(cps_api_operation_handle_t handle) {
     char buff[CPS_API_KEY_STR_MAX];
     memset(buff,0,sizeof(buff));
 
-
-    if (!cps_api_key_from_attr_with_qual(&f.key,DELL_IF_CLEAR_COUNTERS_OBJ,
-                                         cps_api_qualifier_TARGET)) {
+    if (!cps_api_key_from_attr_with_qual(&f.key,
+                DELL_BASE_IF_CMN_DELL_IF_CLEAR_COUNTERS_INPUT_OBJ,
+                cps_api_qualifier_TARGET)) {
         EV_LOG(ERR,INTERFACE,0,"NAS-STATS","Could not translate %d to key %s",
-               (int)(DELL_IF_CLEAR_COUNTERS_OBJ),cps_api_key_print(&f.key,buff,sizeof(buff)-1));
+               (int)(DELL_BASE_IF_CMN_DELL_IF_CLEAR_COUNTERS_INPUT_OBJ),
+               cps_api_key_print(&f.key,buff,sizeof(buff)-1));
         return STD_ERR(INTERFACE,FAIL,0);
     }
 

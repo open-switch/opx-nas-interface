@@ -27,7 +27,9 @@
 #include "ietf-interfaces.h"
 #include "hal_if_mapping.h"
 #include "hal_interface_common.h"
+#include "hal_interface_defaults.h"
 #include <unordered_map>
+#include <unordered_set>
 
 
 #ifdef __cplusplus
@@ -44,10 +46,24 @@ typedef struct nas_bridge_s{
     char name[HAL_IF_NAME_SZ]; //Just store it for now.
     IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_t admin_status;
     bool learning_disable;     //learning disable state.
+    unsigned int int_sub_type; //vlan type (mgmt/data)
     nas_list_t untagged_list; //untagged vlan ports in this bridge
     nas_list_t tagged_list; //tagged vlan ports in this bridge
     nas_list_t untagged_lag; //Untagged LAG index to handle
+    uint32_t mtu;
 }nas_bridge_t;
+
+/* For roll back of vlan/bridge */
+
+typedef std::unordered_map <hal_ifindex_t, nas_port_mode_t> mem_list_t;
+typedef struct vlan_roll_bk_s {
+    mem_list_t port_del_list;
+    mem_list_t port_add_list;
+    mem_list_t lag_add_list;
+    mem_list_t lag_del_list;
+} vlan_roll_bk_t;
+
+
 
 typedef std::unordered_map <hal_ifindex_t, nas_bridge_t> bridge_list_t;
 /**

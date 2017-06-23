@@ -76,10 +76,54 @@ static t_std_error _if_type_from_if_index_or_name(obj_intf_cat_t obj_cat, cps_ap
     return STD_ERR_OK;
 }
 
+static void cps_api_object_list_swap(cps_api_object_list_t &a, cps_api_object_list_t &b) {
+    cps_api_object_list_t t = a;
+    a = b;
+    b = t;
+}
+
+static cps_api_return_code_t _if_get_all_interfaces(obj_intf_cat_t obj_cat, void* context,
+                                             cps_api_get_params_t* param, size_t key_ix) {
+    cps_api_attr_id_t _type_attr_id = (obj_cat == obj_INTF) ?
+                       (cps_api_attr_id_t) IF_INTERFACES_INTERFACE_TYPE :
+                       (cps_api_attr_id_t) IF_INTERFACES_STATE_INTERFACE_TYPE ;
+
+    cps_api_object_t filt = cps_api_object_list_get(param->filters,key_ix);
+
+    cps_api_object_list_t list = cps_api_object_list_create();
+    char if_type[256];
+    for (auto& iter: _intf_handlers[obj_cat]) {
+        if (iter.second != NULL && iter.second->obj_rd != NULL) {
+            if (!nas_to_ietf_if_type_get(iter.first, if_type, sizeof(if_type))) {
+                EV_LOGGING(INTERFACE, ERR, "NAS-COM-INT-GET", "Failed to get IETF type for NAS type %d",
+                           iter.first);
+                continue;
+            }
+            cps_api_object_attr_add(filt, _type_attr_id, if_type, strlen(if_type) + 1);
+            cps_api_object_list_swap(param->list, list);
+            if (iter.second->obj_rd(context, param, key_ix) != cps_api_ret_code_OK) {
+                EV_LOGGING(INTERFACE, ERR, "NAS-COM-INT-GET", "Failed to get interfaces for type %d",
+                           iter.first);
+                cps_api_object_attr_delete(filt, _type_attr_id);
+                cps_api_object_list_destroy(list, true);
+                return cps_api_ret_code_ERR;
+            }
+            cps_api_object_list_swap(param->list, list);
+            cps_api_object_list_merge(param->list, list);
+            cps_api_object_attr_delete(filt, _type_attr_id);
+            cps_api_object_list_clear(list, true);
+        }
+    }
+    cps_api_object_list_destroy(list, true);
+
+    return cps_api_ret_code_OK;
+}
+
 static cps_api_return_code_t _if_gen_interface_get(obj_intf_cat_t obj_cat, void * context,
                                              cps_api_get_params_t * param, size_t key_ix) {
 
     nas_int_type_t  _type;
+    bool _type_found = false;
 
     cps_api_attr_id_t _type_attr_id = (obj_cat == obj_INTF) ?
                        (cps_api_attr_id_t) IF_INTERFACES_INTERFACE_TYPE :
@@ -94,20 +138,29 @@ static cps_api_return_code_t _if_gen_interface_get(obj_intf_cat_t obj_cat, void 
             EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-GET","Could not convert the %s type to nas if type",ietf_intf_type);
             return cps_api_ret_code_ERR; //Not supported interface type
         }
+        _type_found = true;
     } else {
     /*  extract type from if_name or if_index if present otherwise return*/
-        if (_if_type_from_if_index_or_name(obj_cat, filt, &_type) != STD_ERR_OK) {
-           EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-GET","No interface name or index passed to process "
-                                                             "common interface set request");
-            return cps_api_ret_code_ERR;
+        if (_if_type_from_if_index_or_name(obj_cat, filt, &_type) == STD_ERR_OK) {
+            _type_found = true;
         }
     }
-    if ((_intf_handlers[obj_cat][_type] == NULL) || (_intf_handlers[obj_cat][_type]->obj_rd == NULL))  {
-        EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-GET","Get request handler not present for obj "
-                                "Category %d and type %d", obj_cat, _type);
-        return cps_api_ret_code_ERR; //Handler not registered for this interface type
+    if (_type_found) {
+        auto iter = _intf_handlers[obj_cat].find(_type);
+        if (iter == _intf_handlers[obj_cat].end()) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-GET","Get request handler was not registered for obj "
+                                    "Category %d and type %d", obj_cat, _type);
+            return cps_api_ret_code_ERR; //Handler not registered for this interface type
+        }
+        if ((_intf_handlers[obj_cat][_type] == NULL) || (_intf_handlers[obj_cat][_type]->obj_rd == NULL))  {
+            EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-GET","Get request handler not present for obj "
+                                    "Category %d and type %d", obj_cat, _type);
+            return cps_api_ret_code_ERR; //Handler not present for this interface type
+        }
+        return(_intf_handlers[obj_cat][_type]->obj_rd(context, param,key_ix));
+    } else {
+        return (_if_get_all_interfaces(obj_cat, context, param, key_ix));
     }
-    return(_intf_handlers[obj_cat][_type]->obj_rd(context, param,key_ix));
 }
 
 static cps_api_return_code_t _if_gen_interface_set (obj_intf_cat_t obj_cat, void * context,
@@ -128,14 +181,20 @@ static cps_api_return_code_t _if_gen_interface_set (obj_intf_cat_t obj_cat, void
     } else {
         /*  extract type from if_name or if_index */
         if (_if_type_from_if_index_or_name(obj_cat, obj, &_type) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-SET","No interface name or index passed to process "
+            EV_LOGGING(INTERFACE,DEBUG,"NAS-COM-INT-SET","No interface name or index passed to process "
                                                  "common interface set request");
             return cps_api_ret_code_ERR;
         }
     }
+    auto iter = _intf_handlers[obj_cat].find(_type);
+    if (iter == _intf_handlers[obj_cat].end()) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-SET","Set request handler was not registered for obj "
+                                "Category %d and type %d", obj_cat, _type);
+        return cps_api_ret_code_ERR; //Handler not registered for this interface type
+    }
     if ((_intf_handlers[obj_cat][_type] == NULL) || (_intf_handlers[obj_cat][_type]->obj_wr == NULL)) {
         EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-SET","No CPS Set handler for interface cat %d and type %d",obj_cat,_type);
-        return cps_api_ret_code_ERR; //Handler not registered for this interface type
+        return cps_api_ret_code_ERR; //Handler not present for this interface type
     }
 
     EV_LOGGING(INTERFACE,INFO,"NAS-COM-INT-SET","Interface Set request received for obj category %d type %d.",obj_cat, _type);

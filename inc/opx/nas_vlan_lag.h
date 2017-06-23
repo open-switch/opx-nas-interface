@@ -25,7 +25,6 @@
 
 #include "ds_common_types.h"
 #include "nas_ndi_common.h"
-#include "hal_interface_defaults.h"
 #include "nas_int_bridge.h"
 
 #include <stdbool.h>
@@ -60,7 +59,7 @@ typedef struct nas_vlan_lag_t{
 }nas_vlan_lag_t;
 
 t_std_error nas_handle_lag_index_in_cps_set(nas_bridge_t *p_bridge, nas_port_list_t &port_index_list,
-                                            nas_port_mode_t port_mode);
+                                            nas_port_mode_t port_mode, vlan_roll_bk_t *roll_bk);
 
 
 #ifdef __cplusplus

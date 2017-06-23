@@ -31,7 +31,7 @@
 #include "dell-interface.h"
 #include "iana-if-type.h"
 #include "nas_ndi_switch.h"
-#include "nas_os_vlan.h"
+#include "nas_os_interface.h"
 #include "cps_api_object_key.h"
 #include "cps_api_events.h"
 #include "cps_class_map.h"
@@ -90,7 +90,7 @@ t_std_error nas_vlan_create(npu_id_t npu_id, hal_vlan_id_t vlan_id)
     EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
                 "Creating VLAN %d in NPU %d", vlan_id, npu_id);
 
-    return ndi_create_vlan(npu_id, vlan_id);
+    return (ndi_create_vlan(npu_id, vlan_id));
 }
 
 void nas_handle_bridge_mac(nas_bridge_t *b_node)
@@ -268,9 +268,8 @@ static t_std_error nas_add_all_ut_lags_to_vlan(nas_bridge_t *p_bridge_node)
                     "Found untagged bond %d in bridge %d", p_iter_node->ifindex,
                     p_bridge_node->ifindex);
 
-        if((rc = nas_handle_lag_update_for_vlan(p_bridge_node, p_iter_node->ifindex,
-                                                p_bridge_node->vlan_id, NAS_PORT_UNTAGGED,
-                                                true, false)) != STD_ERR_OK) {
+        if((rc = nas_handle_lag_add_to_vlan(p_bridge_node, p_iter_node->ifindex,
+                                 NAS_PORT_UNTAGGED, false, nullptr)) != STD_ERR_OK) {
             rc = STD_ERR(INTERFACE,FAIL, rc);
         }
         p_iter_node = nas_get_next_link_node(&p_bridge_node->untagged_lag.port_list,
@@ -369,7 +368,7 @@ void nas_process_del_vlan_mem_from_os (hal_ifindex_t bridge_id, nas_port_list_t 
         }
 
         if (intf_type == nas_int_type_PORT) {
-            EV_LOGGING(INTERFACE, NOTICE, "NAS-Vlan",
+            EV_LOGGING(INTERFACE, INFO ,"NAS-Vlan",
                         "Delete Port %d from bridge %d ", if_index, bridge_id);
 
             //check the untagged list first
@@ -381,7 +380,7 @@ void nas_process_del_vlan_mem_from_os (hal_ifindex_t bridge_id, nas_port_list_t 
 
             publish_list.insert(if_index); // TODO combine with LAG members
         } else if (intf_type == nas_int_type_LAG) {
-            EV_LOGGING(INTERFACE, NOTICE, "NAS-Vlan",
+            EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
                         "Delete LAG %d from Bridge %d ", if_index, bridge_id);
             std_mutex_simple_lock_guard lock_t(vlan_lag_mutex_lock());
             nas_base_handle_lag_del(p_bridge_node->ifindex, if_index, p_bridge_node->vlan_id);
@@ -541,8 +540,8 @@ t_std_error nas_process_member_addition_to_vlan(nas_bridge_t *p_bridge_node, hal
             }
         }
         else if(intf_type == nas_int_type_LAG){
-            if((rc = nas_handle_lag_update_for_vlan(p_bridge_node, port_idx, p_bridge_node->vlan_id,
-                                       port_mode, true, false)) != STD_ERR_OK) {
+            if((rc = nas_handle_lag_add_to_vlan(p_bridge_node, port_idx,
+                                       port_mode, false, nullptr)) != STD_ERR_OK) {
                 rc= (STD_ERR(INTERFACE, FAIL,rc));
             }
         }
@@ -613,6 +612,14 @@ void nas_process_add_vlan_mem_from_os(hal_ifindex_t bridge_id, nas_port_list_t &
                            "Error finding index %d in intf_ctrl ", if_index);
                 break;
             }
+            if (port_mode == NAS_PORT_TAGGED && vlan_id != 0) {
+                /*Check if the tagged port exist in the os else don't add, it may have been deleted n this netlik message is stale */
+                if (nas_ck_port_exist(vlan_id, if_index) !=true ) {
+                    EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
+                        "Tagged Port doesn't exists %d in os for bridge %d", if_index, p_bridge_node->ifindex);
+                    break;
+                }
+            }
             if((nas_process_member_addition_to_vlan(p_bridge_node, if_index,
                                                     intf_type, port_mode, vlan_id))
                     != STD_ERR_OK) {
@@ -671,6 +678,12 @@ void nas_pack_vlan_if(cps_api_object_t obj, nas_bridge_t *p_bridge)
 
     cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, learning_mode);
 
+    cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_VLAN_TYPE,
+                                 p_bridge->int_sub_type);
+    /*
+     * Get MTU on vlan Interface
+     */
+    nas_os_get_interface_mtu(p_bridge->name, obj);
 }
 
 
@@ -706,6 +719,7 @@ t_std_error nas_register_vlan_intf(nas_bridge_t *p_bridge, hal_intf_reg_op_type_
     details.if_index = p_bridge->ifindex;
     details.vlan_id = p_bridge->vlan_id;
     details.int_type = nas_int_type_VLAN;
+    details.int_sub_type = p_bridge->int_sub_type;
     strncpy(details.if_name, p_bridge->name, sizeof(details.if_name)-1);
 
     if (dn_hal_if_register(op, &details)!=STD_ERR_OK) {
@@ -732,6 +746,9 @@ cps_api_return_code_t nas_publish_vlan_object(nas_bridge_t *p_bridge_node, cps_a
 
     cps_api_object_attr_add_u32(obj_pub, BASE_IF_VLAN_IF_INTERFACES_INTERFACE_ID, p_bridge_node->vlan_id);
 
+    cps_api_object_attr_add_u32(obj_pub, DELL_IF_IF_INTERFACES_INTERFACE_VLAN_TYPE,
+            p_bridge_node->int_sub_type);
+
     nas_pack_vlan_port_list(obj_pub, &p_bridge_node->tagged_list, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS);
     nas_pack_vlan_port_list(obj_pub, &p_bridge_node->untagged_list, DELL_IF_IF_INTERFACES_INTERFACE_UNTAGGED_PORTS);
 
@@ -742,4 +759,27 @@ cps_api_return_code_t nas_publish_vlan_object(nas_bridge_t *p_bridge_node, cps_a
         return cps_api_ret_code_ERR;
     }
     return cps_api_ret_code_OK;
+}
+
+t_std_error nas_default_vlan_cache_init(void)
+{
+    const nas_switches_t *switches = nas_switch_inventory();
+
+    for (size_t ix = 0; ix < switches->number_of_switches; ++ix) {
+        const nas_switch_detail_t * sd = nas_switch((nas_switch_id_t) ix);
+
+        if (sd == NULL) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-VLAN","Switch Details Configuration file is erroneous");
+            return STD_ERR(INTERFACE,PARAM,0);
+        }
+
+        for (size_t sd_ix = 0; sd_ix < sd->number_of_npus; ++sd_ix) {
+            if(ndi_del_new_member_from_default_vlan(sd->npus[sd_ix],0,true) != STD_ERR_OK) {
+                EV_LOGGING(INTERFACE,ERR,"NAS-VLAN","Failed to remove members"
+                        " from default vlan for NPU %d.",sd->npus[sd_ix]);
+            }
+        }
+    }
+
+    return STD_ERR_OK;
 }

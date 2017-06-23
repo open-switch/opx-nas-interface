@@ -16,6 +16,7 @@
 import sys
 import cps_utils
 import nas_front_panel_map as fp
+import nas_fp_port_utils as fp_utils
 import nas_phy_media as media
 import cps_object
 
@@ -30,7 +31,7 @@ def media_show_usage():
 
 def display_media_inventory(verbose=False):
     media_list = media.get_all_media_info()
-    print '%4s  %24s   %18s   %18s   %4s' % ("Front Panel Port", "Media Type", "Part Number", "Serial Number", "DellQualified")
+    print '%4s  %24s   %18s   %18s   %4s' % ("Front Panel Port", "Media Type", "Part Number", "Serial Number", "Qualified")
     for m in media_list:
         try:
             obj = cps_object.CPSObject(obj=m)
@@ -43,7 +44,7 @@ def display_media_inventory(verbose=False):
             else:
                 _vendor_pn = obj.get_attr_data('base-pas/media/vendor-pn')
                 _serial_no = obj.get_attr_data('base-pas/media/serial-number')
-                _qualified = obj.get_attr_data('base-pas/media/dell-qualified')
+                _qualified = obj.get_attr_data('base-pas/media/qualified')
                 if _qualified == 1:
                     _qualified = 'Yes'
                 else:

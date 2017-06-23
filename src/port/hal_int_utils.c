@@ -22,6 +22,8 @@
 #include "event_log.h"
 #include "nas_int_utils.h"
 #include "std_utils.h"
+#include "stdio.h"
+#include "hal_shell.h"
 
 #include <net/if.h>
 #include <string.h>
@@ -57,7 +59,7 @@ t_std_error nas_int_get_npu_port(hal_ifindex_t port_index, ndi_port_t *ndi_port)
     intf_ctrl.if_index = port_index;
 
     if((rc= dn_hal_get_interface_info(&intf_ctrl)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, CRIT, "NAS-INT",
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-INT",
                    "Interface %d returned error %d", \
                     intf_ctrl.if_index, rc);
 
@@ -103,7 +105,7 @@ t_std_error nas_int_get_if_index_to_name(hal_ifindex_t if_index, char * name, si
     intf_ctrl.if_index = if_index;
 
     if((rc= dn_hal_get_interface_info(&intf_ctrl)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, CRIT, "NAS-INT",
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-INT",
                    "Interface %d returned error %d", \
                     intf_ctrl.if_index, rc);
 
@@ -125,7 +127,7 @@ t_std_error nas_get_int_type(hal_ifindex_t index, nas_int_type_t *type)
     intf_ctrl.if_index = index;
 
     if((rc= dn_hal_get_interface_info(&intf_ctrl)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, CRIT, "NAS-INT",
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-INT",
                    "Interface %d returned error %d", \
                     intf_ctrl.if_index, rc);
 
@@ -134,4 +136,40 @@ t_std_error nas_get_int_type(hal_ifindex_t index, nas_int_type_t *type)
 
     *type = intf_ctrl.int_type;
     return STD_ERR_OK;
+}
+
+/*Initialize the debug command*/
+void nas_shell_command_init(void) {
+    hal_shell_cmd_add("nas-port-dump",nas_intf_to_npu_port_map_dump,
+                                    "<port> example::nas-port-dump e101-005-0");
+}
+
+/*Dump the interface info*/
+void nas_intf_to_npu_port_map_dump(std_parsed_string_t handle)
+{
+    if(std_parse_string_num_tokens(handle)==0) return;
+    size_t ix = 0;
+    const char *token = NULL;
+    t_std_error rc = STD_ERR_OK;
+    interface_ctrl_t intf_ctrl;
+
+    token = std_parse_string_next(handle,&ix);
+    if(NULL != token) {
+        memset(&intf_ctrl, 0, sizeof(interface_ctrl_t));
+        intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+        safestrncpy(intf_ctrl.if_name, token, strlen(token)+1);
+
+        if((rc= dn_hal_get_interface_info(&intf_ctrl)) != STD_ERR_OK) {
+            printf("Interface %s returned error %d\r\n", token, rc);
+        } else {
+            printf("Interface if_index : %d\r\n",intf_ctrl.if_index);
+            printf("Interface NPU_ID   : %d\r\n",intf_ctrl.npu_id);
+            printf("Interface npu_port : 0x%x\r\n",intf_ctrl.port_id);
+            printf("Interface tap_id   : %d\r\n",intf_ctrl.tap_id);
+            printf("Interface lag_id   : 0x%x\r\n",intf_ctrl.lag_id);
+            nas_ndi_port_map_dump(intf_ctrl.npu_id,intf_ctrl.port_id);
+        }
+    } else {
+        printf("Enter the interface name\r\n");
+    }
 }
