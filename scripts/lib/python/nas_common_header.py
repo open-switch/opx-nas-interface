@@ -45,7 +45,7 @@ attr_name = {
     'media_type' :    'base-if-phy/if/interfaces/interface/phy-media',
     'vlan_id' :       'base-if-vlan/if/interfaces/interface/id',
     'op' :            'dell-base-if-cmn/set-interface/input/operation',
-    'fanout_config' : '/etc/opt/dell/os10/dn_nas_fanout_init_config.xml'
+    'fanout_config' : '/etc/opx/dn_nas_fanout_init_config.xml'
 }
 
 yang_speed = {

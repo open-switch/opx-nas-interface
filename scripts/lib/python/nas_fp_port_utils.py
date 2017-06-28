@@ -349,7 +349,7 @@ def init_profile():
         nas_if.log_info("Current profile missing in CPS get")
         return False
      nas_if.log_info('Get profile returned ' +str(profile))
-     profile = '/etc/opt/dell/os10/' + profile + '-base_port_physical_mapping_table.xml'
+     profile = '/etc/opx/' + profile + '-base_port_physical_mapping_table.xml'
      if os.path.isfile(profile):
         fp.init(profile)
         return True

@@ -9,7 +9,7 @@ Set the state of the interface location/beacon LED
 """
 
 USAGE_STRING = """
-Usage: os10-interface-beacon <interface name> {on | off}
+Usage: opx-interface-beacon <interface name> {on | off}
 """
 
 def main():
