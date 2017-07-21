@@ -91,8 +91,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     opt = sys.argv[1]
-    f = '/etc/opx/base_port_physical_mapping_table.xml'
-    fp.init(f)
+    fp_utils.init()
     if opt == 'summary':
         display_media_inventory()
     elif opt == 'all':

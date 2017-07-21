@@ -46,7 +46,7 @@ def ethtool_show_interface(argv):
     _media_type = 0
     _vendor_pn = ""
     _serial_no = ""
-    _dell_qualified = ""
+    _qualified = ""
 
     if_name = argv[0]
     l = []
@@ -80,10 +80,10 @@ def ethtool_show_interface(argv):
         else:
             _vendor_pn = obj.get_attr_data('base-pas/media/vendor-pn')
             _serial_no = obj.get_attr_data('base-pas/media/serial-number')
-            if obj.get_attr_data('base-pas/media/dell-qualified') == 1:
-                _dell_qualified = 'Yes'
+            if obj.get_attr_data('base-pas/media/qualified') == 1:
+                _qualified = 'Yes'
             else:
-                _dell_qualified = 'No'
+                _qualified = 'No'
 
     print 'Settings for ' + if_name + ':'
     # Transceiver Status
@@ -122,7 +122,7 @@ def ethtool_show_interface(argv):
     print '    Media Type: ' + media.get_media_str(_media_type)
     print '    Part Number: ' + _vendor_pn
     print '    Serial Number: ' + _serial_no
-    print '    Dell Qualified: '  + _dell_qualified
+    print '    Qualified: '  + _qualified
     print '    Administrative State: ' + nas_if.admin_status_str_get(_admin_status)
     print '    Operational State: ' + nas_if.oper_status_str_get(_oper_status)
     print '    Supported Speed (in Mbps):  '  + str(_str)

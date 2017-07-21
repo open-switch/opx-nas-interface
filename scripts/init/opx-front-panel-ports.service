@@ -1,7 +1,7 @@
 [Unit]
 Description=Front panel port object access handler
-After=opx-cps.service
-Wants=opx-cps.service
+After=opx-cps.service opx-nas.service
+Wants=opx-cps.service opx-nas.service
 OnFailure=service_onfailure@%n.service
 
 [Service]
