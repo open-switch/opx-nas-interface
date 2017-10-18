@@ -46,7 +46,8 @@ extern "C" {
 typedef enum nas_port_mode_t {
     NAS_PORT_UNTAGGED = 1,
     NAS_PORT_TAGGED,
-    NAS_PORT_HYBRID
+    NAS_PORT_HYBRID,
+    NAS_PORT_NONE
 } nas_port_mode_t;
 
 #ifdef __cplusplus

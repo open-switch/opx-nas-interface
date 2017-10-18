@@ -49,7 +49,7 @@
 #define LPBK_STATS_PATH "/proc/net/dev"
 #define ARRAY_SIZE(a)   (sizeof(a)/sizeof((a)[0]))
 #define BUF_SIZE         1024
-std::vector<ndi_stat_id_t> if_stat_ids;
+static auto if_stat_ids = new std::vector<ndi_stat_id_t>;
 
 
 static const struct {
@@ -68,7 +68,7 @@ static const struct {
     {"output_discards",IF_INTERFACES_STATE_INTERFACE_STATISTICS_OUT_DISCARDS, 11}
 };
 
-static bool
+bool
 nas_stat_get_name_from_obj(cps_api_object_t obj, char *if_name, size_t name_sz) {
 
     hal_ifindex_t index;
@@ -148,7 +148,7 @@ static t_std_error populate_if_stat_ids(){
     }
 
     for(unsigned int ix = 0 ; ix < max_if_stat_id ; ++ix ){
-        if_stat_ids.push_back(ids_list[ix]);
+        if_stat_ids->push_back(ids_list[ix]);
     }
 
     return STD_ERR_OK;
@@ -177,18 +177,18 @@ static bool get_stats(hal_ifindex_t ifindex, cps_api_object_list_t list){
         return false;
     }
 
-    const size_t max_port_stat_id = if_stat_ids.size();
+    const size_t max_port_stat_id = if_stat_ids->size();
     uint64_t stat_values[max_port_stat_id];
     memset(stat_values,0,sizeof(stat_values));
 
     if(ndi_port_stats_get(intf_ctrl.npu_id, intf_ctrl.port_id,
-                          (ndi_stat_id_t *)&if_stat_ids[0],
+                          (ndi_stat_id_t *)&(if_stat_ids->at(0)),
                           stat_values,max_port_stat_id) != STD_ERR_OK) {
         return false;
     }
 
     for(unsigned int ix = 0 ; ix < max_port_stat_id ; ++ix ){
-        cps_api_object_attr_add_u64(obj, if_stat_ids[ix], stat_values[ix]);
+        cps_api_object_attr_add_u64(obj, if_stat_ids->at(ix), stat_values[ix]);
     }
 
     cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,time(NULL));
@@ -196,7 +196,7 @@ static bool get_stats(hal_ifindex_t ifindex, cps_api_object_list_t list){
     return true;
 }
 
-static bool fill_cps_lpbk_stats (cps_api_object_t obj, char *ptr, const char *name) {
+static bool fill_cps_stats (cps_api_object_t obj, char *ptr, const char *name) {
 
     char *save_ptr, *p;
     uint_t cnt = 0;
@@ -204,7 +204,7 @@ static bool fill_cps_lpbk_stats (cps_api_object_t obj, char *ptr, const char *na
     uint64_t   stats_arr[16];
     memset(stats_arr, 0, sizeof(stats_arr));
     if ((p = strstr(ptr, name)) == NULL) {
-        EV_LOGGING(INTERFACE, ERR ,"NAS-STAT", "lpbk :fill_cps_lpbk_stats error");
+        EV_LOGGING(INTERFACE, ERR ,"NAS-STAT", "lpbk :fill_cps_stats error");
         return false;
     }
     p = strtok_r(p, " ", &save_ptr);
@@ -220,7 +220,7 @@ static bool fill_cps_lpbk_stats (cps_api_object_t obj, char *ptr, const char *na
     return ret;
 }
 
-static bool get_lpbk_stats( const char *name, cps_api_object_list_t list) {
+bool get_intf_stats_from_os( const char *name, cps_api_object_list_t list) {
 
     char stats_buf[BUF_SIZE];
     char intf_name[HAL_IF_NAME_SZ];
@@ -245,7 +245,7 @@ static bool get_lpbk_stats( const char *name, cps_api_object_list_t list) {
     stats_buf[0] = ' ';
     while (fgets(&stats_buf[1], sizeof(stats_buf) -1, fp) == &stats_buf[1]) {
         if (strstr(stats_buf, intf_name) != NULL) {
-            ret = fill_cps_lpbk_stats(obj, stats_buf, intf_name);
+            ret = fill_cps_stats(obj, stats_buf, intf_name);
             break;
         }
     }
@@ -263,7 +263,7 @@ static cps_api_return_code_t if_lpbk_stats_get (void * context, cps_api_get_para
     if (!nas_stat_get_name_from_obj(obj, name, sizeof(name))) {
         return (cps_api_return_code_t)STD_ERR(INTERFACE,CFG,0);
     }
-    if (get_lpbk_stats((const char *)name, param->list)) return cps_api_ret_code_OK;
+    if (get_intf_stats_from_os((const char *)name, param->list)) return cps_api_ret_code_OK;
 
     return (cps_api_return_code_t)STD_ERR(INTERFACE,FAIL,0);
 
@@ -324,8 +324,8 @@ static cps_api_return_code_t if_stats_set (void * context, cps_api_transaction_p
         for (; cps_api_object_it_valid(&it); cps_api_object_it_next(&it)) {
 
             ndi_stat_id_t id = (ndi_stat_id_t)cps_api_object_attr_id(it.attr);
-            auto id_it = std::find(if_stat_ids.begin(),if_stat_ids.end(),id);
-            if(id_it != if_stat_ids.end()){
+            auto id_it = std::find(if_stat_ids->begin(),if_stat_ids->end(),id);
+            if(id_it != if_stat_ids->end()){
                 del_stat_ids.push_back(id);
             }
         }

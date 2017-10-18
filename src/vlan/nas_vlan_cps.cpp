@@ -41,6 +41,7 @@
 #include "std_utils.h"
 #include "hal_interface_common.h"
 #include "nas_int_com_utils.h"
+#include "nas_if_utils.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -83,14 +84,70 @@ static inline cps_api_return_code_t nas_vlan_get_mtu(cps_api_object_t obj, nas_b
 
 }
 
-static const std::unordered_map<cps_api_attr_id_t,
-    cps_api_return_code_t (*)(cps_api_object_t, nas_bridge_t *)> get_vlan_attr = {
-        { IF_INTERFACES_INTERFACE_ENABLED, nas_vlan_get_admin_status },
-        { DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, nas_vlan_get_learning_mode },
-        { DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, nas_vlan_get_mac},
-        { DELL_IF_IF_INTERFACES_INTERFACE_MTU, nas_vlan_get_mtu},
-    };
+static bool nas_vlan_process_port_assoication(hal_ifindex_t ifindex, npu_id_t npu, port_t port,bool add){
 
+    auto  m_list = nas_intf_get_master(ifindex);
+    for(auto it : m_list){
+        if(it.type == nas_int_type_LAG){
+            nas_vlan_apply_lag_port_mapping_update(it.m_if_idx, ifindex,npu, port, add);
+        }else if(it.type == nas_int_type_VLAN){
+
+            nas_bridge_lock();
+            ndi_port_t ndi_port;
+            ndi_port.npu_id = npu;
+            ndi_port.npu_port = port;
+            nas_bridge_t * br_m = nas_get_bridge_node(it.m_if_idx);
+
+            if(br_m == NULL){
+                EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-MAP","No bridge for ifindex %d",br_m->ifindex);
+                nas_bridge_unlock();
+                return false;
+            }
+
+            if((nas_add_or_del_port_to_vlan(npu,br_m->vlan_id,&ndi_port, it.mode,add)) != STD_ERR_OK){
+                EV_LOGGING(INTERFACE, ERR, "NAS-VLAN-MAP","Error adding port <%d %d> to NPU",
+                        ndi_port.npu_id, ndi_port.npu_port);
+                nas_bridge_unlock();
+                return false;
+            }
+            nas_bridge_unlock();
+        }
+    }
+    return true;
+}
+
+
+static bool nas_vlan_if_set_handler(cps_api_object_t obj, void *context)
+{
+    EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN-MAP","Got Interface event");
+    nas_int_port_mapping_t port_mapping;
+    if(!nas_get_phy_port_mapping_change( obj, &port_mapping)){
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN-MAP","Interface event is not an "
+                "association/dis-association event");
+        return true;
+    }
+
+    cps_api_object_attr_t npu_attr = cps_api_object_attr_get(obj,
+                                    BASE_IF_PHY_IF_INTERFACES_INTERFACE_NPU_ID);
+    cps_api_object_attr_t port_attr = cps_api_object_attr_get(obj,
+                                    BASE_IF_PHY_IF_INTERFACES_INTERFACE_PORT_ID);
+    cps_api_object_attr_t if_index_attr = cps_api_get_key_data(obj,
+                                    DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+
+    if (npu_attr == nullptr || port_attr == nullptr || if_index_attr == nullptr) {
+        EV_LOGGING(INTERFACE,DEBUG, "NAS-VLAN-MAP", "Interface object does not have if-index/npu/port");
+        return true;
+    }
+
+    hal_ifindex_t ifidx = cps_api_object_attr_data_u32(if_index_attr);
+    npu_id_t npu = cps_api_object_attr_data_u32(npu_attr);
+    npu_port_t port = cps_api_object_attr_data_u32(port_attr);
+
+    bool add = (port_mapping == nas_int_phy_port_MAPPED) ? true : false;
+
+    return nas_vlan_process_port_assoication(ifidx,npu,port,add);
+
+}
 
 
 static cps_api_return_code_t nas_vlan_set_admin_status(cps_api_object_t obj, nas_bridge_t *p_bridge)
@@ -190,7 +247,7 @@ cps_api_return_code_t nas_cps_set_vlan_mtu(cps_api_object_t obj, nas_bridge_t *p
            p_link_node = nas_get_next_link_node(&p_bridge->tagged_list.port_list, p_link_node);
        }
 
-    nas_vlan_set_taaged_lag_mtu(p_bridge->vlan_id,mtu);
+    nas_vlan_set_tagged_lag_mtu(p_bridge->vlan_id,mtu);
     if(nas_os_interface_set_attribute(obj,DELL_IF_IF_INTERFACES_INTERFACE_MTU) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR ,"NAS-Vlan", "Failure setting  MTU for VLAN %d  in OS",
                p_bridge->ifindex);
@@ -201,13 +258,23 @@ cps_api_return_code_t nas_cps_set_vlan_mtu(cps_api_object_t obj, nas_bridge_t *p
     return cps_api_ret_code_OK;
 }
 
-static const std::unordered_map<cps_api_attr_id_t,
-    cps_api_return_code_t (*)(cps_api_object_t, nas_bridge_t *)> set_vlan_attr = {
-        { IF_INTERFACES_INTERFACE_ENABLED, nas_vlan_set_admin_status },
-        { DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, nas_cps_set_vlan_learning_mode },
-        { DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, nas_cps_set_vlan_mac},
-        { DELL_IF_IF_INTERFACES_INTERFACE_MTU, nas_cps_set_vlan_mtu},
-    };
+static auto set_vlan_attr = new std::unordered_map<cps_api_attr_id_t,
+    cps_api_return_code_t (*)(cps_api_object_t, nas_bridge_t *)>
+{
+    { IF_INTERFACES_INTERFACE_ENABLED, nas_vlan_set_admin_status },
+    { DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, nas_cps_set_vlan_learning_mode },
+    { DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, nas_cps_set_vlan_mac},
+    { DELL_IF_IF_INTERFACES_INTERFACE_MTU, nas_cps_set_vlan_mtu},
+};
+
+static auto get_vlan_attr = new  std::unordered_map<cps_api_attr_id_t,
+    cps_api_return_code_t (*)(cps_api_object_t, nas_bridge_t *)>
+{
+    { IF_INTERFACES_INTERFACE_ENABLED, nas_vlan_get_admin_status },
+    { DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, nas_vlan_get_learning_mode },
+    { DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, nas_vlan_get_mac},
+    { DELL_IF_IF_INTERFACES_INTERFACE_MTU, nas_vlan_get_mtu},
+};
 
 void handle_vlan_create_roll_bk(nas_bridge_t *p_bridge_node) {
 
@@ -249,8 +316,8 @@ void handle_roll_bak(nas_bridge_t *p_bridge, vlan_roll_bk_t &p_roll_bk, cps_api_
 
     for ( ; cps_api_object_it_valid(&it) ; cps_api_object_it_next(&it) ) {
         int id = (int) cps_api_object_attr_id(it.attr);
-        auto func = set_vlan_attr.find(id);
-        if (func == set_vlan_attr.end()) continue;
+        auto func = set_vlan_attr->find(id);
+        if (func == set_vlan_attr->end()) continue;
         cps_api_return_code_t ret = func->second(obj,p_bridge);
         if (ret != cps_api_ret_code_OK) {
              EV_LOGGING(INTERFACE, ERR, "NAS-Vlan","Rollback failure for the attribute %d vlan index %d", id,
@@ -387,14 +454,14 @@ static cps_api_return_code_t nas_cps_update_vlan(nas_bridge_t *p_bridge, cps_api
         case DELL_IF_IF_INTERFACES_INTERFACE_MTU:
         case IF_INTERFACES_INTERFACE_ENABLED:
             {
-                auto get_func = get_vlan_attr.find(id);
-                auto set_func = set_vlan_attr.find(id);
+                auto get_func = get_vlan_attr->find(id);
+                auto set_func = set_vlan_attr->find(id);
                 // save previous value in the rollback obj
-                get_func = get_vlan_attr.find(id);
-                if (get_func == get_vlan_attr.end()) break;
+                get_func = get_vlan_attr->find(id);
+                if (get_func == get_vlan_attr->end()) break;
                 (void)get_func->second(obj_roll_bk,p_bridge);
                 // Now set the vlan attribute
-                if (set_func == set_vlan_attr.end()) break;
+                if (set_func == set_vlan_attr->end()) break;
                 if (set_func->second(obj,p_bridge) != cps_api_ret_code_OK) {
                     roll_back = true;
                 }
@@ -556,12 +623,15 @@ static cps_api_return_code_t nas_cps_create_vlan(cps_api_object_t obj)
                    p_bridge_node->ifindex, p_bridge_node->vlan_id);
             break;
         }
+        std_mutex_simple_lock_guard lock_t(vlan_lag_mutex_lock());
+
         if(nas_register_vlan_intf(p_bridge_node, HAL_INTF_OP_REG) != STD_ERR_OK) {
             break;
         }
-        std_mutex_simple_lock_guard lock_t(vlan_lag_mutex_lock());
-
-
+        if (nas_intf_handle_intf_mode_change(br_index, BASE_IF_MODE_MODE_NONE) == false) {
+             EV_LOGGING(INTERFACE, DEBUG, "NAS-CPS-LAG",
+                    "Update to NAS-L3 about interface mode change failed(%d)", br_index);
+        }
         if (nas_cps_update_vlan(p_bridge_node, obj) != cps_api_ret_code_OK) {
             EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                    "VLAN Attribute configuration failed for create bridge interface %d vlan %d",
@@ -633,6 +703,10 @@ static cps_api_return_code_t nas_cps_delete_vlan(cps_api_object_t obj)
     cps_api_set_key_data(idx_obj,IF_INTERFACES_INTERFACE_NAME, cps_api_object_ATTR_T_BIN,
             p_bridge_node->name, strlen(p_bridge_node->name)+1);
 
+    if (nas_intf_handle_intf_mode_change(p_bridge_node->ifindex, BASE_IF_MODE_MODE_L2) == false) {
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "Update to NAS-L3 about interface mode change failed(%d)",
+                p_bridge_node->ifindex);
+    }
     if (nas_os_del_vlan(idx_obj) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR , "NAS-Vlan",
                "Failure deleting vlan %s from kernel", p_bridge_node->name);
@@ -727,10 +801,10 @@ static cps_api_return_code_t nas_process_cps_vlan_get(void * context,
     size_t iix = 0;
     size_t mx = cps_api_object_list_size(param->list);
 
-     EV_LOGGING(INTERFACE, DEBUG, "NAS-Vlan",
+    EV_LOGGING(INTERFACE, DEBUG, "NAS-Vlan",
             "nas_process_cps_vlan_get");
-
-     do {
+    nas_bridge_lock();
+    do {
          cps_api_object_t filter = cps_api_object_list_get(param->filters, ix);
          cps_api_object_attr_t name_attr = cps_api_get_key_data(filter,
                                             IF_INTERFACES_INTERFACE_NAME);
@@ -744,8 +818,9 @@ static cps_api_return_code_t nas_process_cps_vlan_get(void * context,
           }
 
          ++iix;
-     }while (iix < mx);
+    }while (iix < mx);
 
+    nas_bridge_unlock();
     return cps_api_ret_code_OK;
 }
 
@@ -757,6 +832,28 @@ t_std_error nas_cps_vlan_init(cps_api_operation_handle_t handle) {
         EV_LOGGING(INTERFACE, ERR, "NAS-VLAN-INIT", "Failed to register VLAN interface CPS handler");
         return STD_ERR(INTERFACE,FAIL,0);
     }
+
+    cps_api_event_reg_t reg;
+    cps_api_key_t key;
+
+    memset(&reg, 0, sizeof(cps_api_event_reg_t));
+
+    if (!cps_api_key_from_attr_with_qual(&key,
+            DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_OBJ,
+            cps_api_qualifier_OBSERVED)) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-VLAN-INIT", "Cannot create a key for interface event");
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
+
+    reg.objects = &key;
+    reg.number_of_objects = 1;
+
+    if (cps_api_event_thread_reg(&reg, nas_vlan_if_set_handler, NULL)
+            != cps_api_ret_code_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-VLAN-INIT", "Cannot register interface operation event");
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
+
     return STD_ERR_OK;
 }
 
@@ -798,6 +895,8 @@ static t_std_error nas_cps_add_port_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_
     /* During add ports etc, application isn't passing the vlan id but just the index */
 
     vlan_id = p_bridge->vlan_id;
+    if_master_info_t master_info = { nas_int_type_VLAN, port_mode, p_bridge->ifindex};
+    BASE_IF_MODE_t intf_mode = nas_intf_get_mode(port_idx);
 
     //add to kernel
     if(nas_cps_add_port_to_os(p_bridge->ifindex, p_bridge->vlan_id, port_mode,
@@ -807,12 +906,24 @@ static t_std_error nas_cps_add_port_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_
         rc = (STD_ERR(INTERFACE,FAIL, 0));
     }
 
+    if(!nas_intf_add_master(port_idx, master_info)){
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN","Failed to add master for vlan memeber port");
+    } else {
+        BASE_IF_MODE_t new_mode = nas_intf_get_mode(port_idx);
+
+        if (new_mode != intf_mode) {
+            if (nas_intf_handle_intf_mode_change(port_idx, new_mode) == false) {
+                EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "Update to NAS-L3 about interface mode change failed(%d)", port_idx);
+            }
+        }
+    }
+
     bool create_flag = false;
     ///Kernel add successful, insert in the local data structure
     p_link_node = nas_create_vlan_port_node(p_bridge, port_idx,
                                             port_mode, &create_flag);
 
-    if ((p_link_node != NULL) && (p_link_node->ndi_port.npu_port != 0)) {
+    if ((p_link_node != NULL) && (!nas_is_virtual_port(port_idx))) {
         if((rc = nas_add_or_del_port_to_vlan(p_link_node->ndi_port.npu_id, vlan_id,
                                       &(p_link_node->ndi_port), port_mode, true)) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
@@ -883,7 +994,21 @@ static t_std_error nas_cps_del_port_from_vlan(nas_bridge_t *p_bridge, nas_list_n
         p_list = &p_bridge->untagged_list;
     }
 
-    if (p_link_node->ndi_port.npu_port != 0) {
+    if_master_info_t master_info = { nas_int_type_VLAN, port_mode, p_bridge->ifindex};
+    BASE_IF_MODE_t intf_mode = nas_intf_get_mode(p_link_node->ifindex);
+    if(!nas_intf_del_master(p_link_node->ifindex, master_info)){
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN","Failed to del master for vlan memeber port");
+    } else {
+        BASE_IF_MODE_t new_mode = nas_intf_get_mode(p_link_node->ifindex);
+        if (new_mode != intf_mode) {
+            if (nas_intf_handle_intf_mode_change(p_link_node->ifindex, new_mode) == false) {
+                EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "Update to NAS-L3 about interface mode change failed(%d)",
+                                                        p_link_node->ifindex);
+            }
+        }
+    }
+
+    if (!nas_is_virtual_port(p_link_node->ifindex)) {
     //delete the port from NPU
         if (nas_add_or_del_port_to_vlan(p_link_node->ndi_port.npu_id, p_bridge->vlan_id,
                                     &(p_link_node->ndi_port), port_mode, false) != STD_ERR_OK) {
@@ -1012,11 +1137,13 @@ static t_std_error nas_process_cps_ports(nas_bridge_t *p_bridge, nas_port_mode_t
                 EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
                        "Received new port %d in bridge %d, VLAN %d", *it, p_bridge->ifindex,
                        p_bridge->vlan_id);
+
                 if ((rc = nas_cps_add_port_to_vlan(p_bridge, *it, port_mode)) != STD_ERR_OK) {
                     EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                            "Error adding port %d to bridge %d in vlan", *it, p_bridge->ifindex);
                     return rc;
                 }
+
                 p_roll_bk->port_add_list[*(it)] = port_mode;
                 publish_list.insert(*it);
             }

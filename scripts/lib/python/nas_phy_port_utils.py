@@ -40,7 +40,8 @@ def get_phy_port_cache_hw_keys(npu, port):
     return "hw-%d-%d" % (npu, port)
 
 def get_first_hw_port(port_obj):
-    return min(port_obj.get_attr_data('hardware-port-list'))
+    hwport_list = port_obj.get_attr_data('hardware-port-list')
+    return hwport_list[0]
 
 def phy_port_cache_init(port_list):
     if port_list:
@@ -122,10 +123,12 @@ def cps_del_nas_port(port_obj):
     return cps.transaction([ch])
 
 
-def cps_create_nas_port(npu, hwports, speed, phy_mode):
+def cps_create_nas_port(npu, hwports, speed, phy_mode, fr_port = None):
     nas_if.log_info(' Create physical port hwports %s speed %d phy mode %d' % (str(hwports), speed, phy_mode))
-    phy_obj = cps_object.CPSObject(module='base-if-phy/physical',qual='target',
-            data={'npu-id':npu,'hardware-port-list':hwports,'speed':speed, 'phy-mode': phy_mode})
+    attr_list = {'npu-id':npu,'hardware-port-list':hwports,'speed':speed, 'phy-mode': phy_mode}
+    if fr_port != None:
+        attr_list['front-panel-number'] = fr_port
+    phy_obj = cps_object.CPSObject(module='base-if-phy/physical',qual='target', data=attr_list)
     data = cps_utils.CPSTransaction([('create', phy_obj.get())]).commit()
     if data == False:
         nas_if.log_err('Failed to create Phy port %s ' % str(hwports))
@@ -144,13 +147,12 @@ breakout_to_hwp_count = {_yang_breakout_1x1:4,
                          }
 
 # Create npu ports (physical ports ) based on the breakout mode and port speed and returns newly created npu ports
-def create_nas_ports(npu, hwports, br_mode,speed, phy_mode, created_phy_ports):
+def create_nas_ports(npu, hwports, br_mode,speed, phy_mode, fr_port, created_phy_ports):
     if br_mode not in breakout_to_hwp_count:
         nas_if.log_err('unsupported breakout mode %d' % br_mode)
         return False
 
     hwp_count = breakout_to_hwp_count[br_mode]
-    hwports.sort()
     hwports.reverse()
 
     while len(hwports) != 0:
@@ -164,7 +166,7 @@ def create_nas_ports(npu, hwports, br_mode,speed, phy_mode, created_phy_ports):
             hw_list.append(hwports.pop())
             i = i + 1
         # Send request to create phy port with hwlist and port speed
-        obj = cps_create_nas_port(npu,hw_list,speed, phy_mode)
+        obj = cps_create_nas_port(npu,hw_list,speed, phy_mode, fr_port)
         if obj == None:
             return False
         created_phy_ports[hw_list[0]] = obj

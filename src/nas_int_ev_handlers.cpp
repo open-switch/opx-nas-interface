@@ -40,6 +40,7 @@
 #include "dell-interface.h"
 #include "ietf-interfaces.h"
 #include "dell-base-common.h"
+#include "nas_if_utils.h"
 
 #include "cps_api_object_key.h"
 #include "cps_api_operation.h"
@@ -60,7 +61,10 @@ static t_std_error get_port_list_by_ifindex(nas_port_list_t &port_list, cps_api_
     for (;cps_api_object_it_valid(&it) ; cps_api_object_it_next(&it) ) {
         cps_api_attr_id_t id = cps_api_object_attr_id(it.attr);
         if (id == attr_id ) {
-            port_list.insert(cps_api_object_attr_data_u32(it.attr));
+            hal_ifindex_t ifindex = cps_api_object_attr_data_u32(it.attr);
+            if(!nas_is_virtual_port(ifindex)){
+                port_list.insert(ifindex);
+            }
         }
     }
     return STD_ERR_OK;
@@ -147,7 +151,43 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                     " Failed for get member %s if_index ", mem_name);
             return;
         }
+
+        if_master_info_t master_info = { nas_int_type_LAG, NAS_PORT_NONE, bond_idx};
+        BASE_IF_MODE_t intf_mode = nas_intf_get_mode(mem_idx);
+        if (op == cps_api_oper_CREATE) {
+            if(!nas_intf_add_master(mem_idx, master_info)){
+                EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG","Failed to add master for lag memeber port");
+            } else {
+                BASE_IF_MODE_t new_mode = nas_intf_get_mode(mem_idx);
+                if (new_mode != intf_mode) {
+                    if (nas_intf_handle_intf_mode_change(mem_idx, new_mode) == false) {
+                        EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG",
+                                "Update to NAS-L3 about interface mode change failed(%d)", mem_idx);
+                    }
+                }
+            }
+        } else if (op == cps_api_oper_DELETE) {
+            if(!nas_intf_del_master(mem_idx, master_info)){
+                 EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG",
+                         "Failed to delete master for lag memeber port");
+            } else {
+                BASE_IF_MODE_t new_mode = nas_intf_get_mode(mem_idx);
+                if (new_mode != intf_mode) {
+                    if (nas_intf_handle_intf_mode_change(mem_idx, new_mode) == false) {
+                        EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG",
+                                "Update to NAS-L3 about interface mode change failed(%d)", mem_idx);
+                    }
+                }
+            }
+        }
+
+        if(nas_is_virtual_port(mem_idx)){
+             EV_LOGGING(INTERFACE,INFO, "NAS-LAG",
+                     " Member port %s is virtual no need to do anything", mem_name);
+             return;
+        }
     }
+
     std_mutex_simple_lock_guard lock_t(nas_lag_mutex_lock());
     /* If op is CREATE then create the lag if not present and then add member lists*/
     if (op == cps_api_oper_CREATE) {
@@ -165,6 +205,10 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                             "LAG creation Failed for bond interface %s index %d",bond_name, bond_idx);
                     return;
             }
+            if (nas_intf_handle_intf_mode_change(bond_idx, BASE_IF_MODE_MODE_NONE) == false) {
+                EV_LOGGING(INTERFACE, DEBUG, "NAS-LAG",
+                        "Update to NAS-L3 about interface mode change failed(%d)", bond_idx);
+            }
             /* Now get the lag node entry */
             nas_lag_entry = nas_get_lag_node(bond_idx);
             if(nas_lag_entry != NULL){
@@ -179,6 +223,7 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                     "Failed to Add member %s to the Lag %s", mem_name, bond_name);
                 return ;
             }
+            nas_lag_entry->port_list.insert(mem_idx);
             member_op = cps_api_oper_SET;
             ndi_port_t ndi_port;
             if (nas_int_get_npu_port(mem_idx, &ndi_port) != STD_ERR_OK) {
@@ -219,13 +264,24 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
     } else if (op == cps_api_oper_DELETE) { /* If op is DELETE */
         if (_mem_attr != nullptr) {
             /*  delete the member from the lag */
+            nas_lag_entry = nas_get_lag_node(bond_idx);
+            if(nas_lag_entry == nullptr){
+                EV_LOGGING(INTERFACE,INFO,"NAS-LAG","Failed to find lag entry with %d"
+                        "ifindex for delete operation",bond_idx);
+                return;
+            }
             if(nas_lag_member_delete(bond_idx, mem_idx,lag_id) != STD_ERR_OK) {
-                EV_LOGGING(INTERFACE,INFO, "NAS-LAG",
-                    "Failed to Delete member %s to the Lag %d", mem_name, bond_idx);
+                EV_LOGGING(INTERFACE,INFO,"NAS-LAG",
+                        "Failed to Delete member %s to the Lag %d", mem_name, bond_idx);
                 return ;
             }
+            nas_lag_entry->port_list.erase(mem_idx);
             member_op = cps_api_oper_SET;
         } else {
+            if (nas_intf_handle_intf_mode_change(bond_idx, BASE_IF_MODE_MODE_L2) == false) {
+                EV_LOGGING(INTERFACE, DEBUG, "NAS-LAG",
+                        "Update to NAS-L3 about interface mode change failed(%d)", bond_idx);
+            }
             /*  Otherwise the event is to delete the lag */
             if((nas_lag_master_delete(bond_idx) != STD_ERR_OK))
                 return ;
@@ -265,6 +321,10 @@ static void nas_bridge_ev_handler(cps_api_object_t obj)
                             if_index, name, op);
 
     if (op == cps_api_oper_DELETE) {
+        if (nas_intf_handle_intf_mode_change(name, BASE_IF_MODE_MODE_L2) == false) {
+            EV_LOGGING(INTERFACE, DEBUG, "NAS-BR",
+                    "Update to NAS-L3 about interface mode change failed(%d)", if_index);
+        }
         if(nas_delete_bridge(if_index) != STD_ERR_OK)
             return;
     } else {
@@ -276,6 +336,12 @@ static void nas_bridge_ev_handler(cps_api_object_t obj)
         if (b_node == NULL) {
             nas_bridge_unlock();
             return;
+        }
+        if (create == true) {
+            if (nas_intf_handle_intf_mode_change(name, BASE_IF_MODE_MODE_NONE) == false) {
+                EV_LOGGING(INTERFACE, DEBUG, "NAS-BR",
+                        "Update to NAS-L3 about interface mode change failed(%d)", if_index);
+            }
         }
         nas_bridge_unlock();
     }
@@ -438,12 +504,15 @@ void nas_int_ev_handler(cps_api_object_t obj) {
     }
 }
 
-static const std::unordered_map<BASE_CMN_INTERFACE_TYPE_t, void(*)(cps_api_object_t), std::hash<int>> _int_ev_handlers = {
-                       { BASE_CMN_INTERFACE_TYPE_L3_PORT, nas_int_ev_handler},
-                       { BASE_CMN_INTERFACE_TYPE_L2_PORT, nas_bridge_ev_handler},
-                       { BASE_CMN_INTERFACE_TYPE_VLAN, nas_vlan_ev_handler},
-                       { BASE_CMN_INTERFACE_TYPE_LAG, nas_lag_ev_handler},
+static auto _int_ev_handlers = new std::unordered_map<BASE_CMN_INTERFACE_TYPE_t, void(*)
+                                                (cps_api_object_t), std::hash<int>>
+{
+    { BASE_CMN_INTERFACE_TYPE_L3_PORT, nas_int_ev_handler},
+    { BASE_CMN_INTERFACE_TYPE_L2_PORT, nas_bridge_ev_handler},
+    { BASE_CMN_INTERFACE_TYPE_VLAN, nas_vlan_ev_handler},
+    { BASE_CMN_INTERFACE_TYPE_LAG, nas_lag_ev_handler},
 };
+
 bool nas_int_ev_handler_cb(cps_api_object_t obj, void *param) {
 
     cps_api_object_attr_t _type = cps_api_object_attr_get(obj,BASE_IF_LINUX_IF_INTERFACES_INTERFACE_DELL_TYPE);
@@ -453,8 +522,8 @@ bool nas_int_ev_handler_cb(cps_api_object_t obj, void *param) {
     }
     EV_LOGGING(INTERFACE,INFO,"INTF-EV","OS event received for interface state change.");
     BASE_CMN_INTERFACE_TYPE_t if_type = (BASE_CMN_INTERFACE_TYPE_t) cps_api_object_attr_data_u32(_type);
-    auto func = _int_ev_handlers.find(if_type);
-    if (func != _int_ev_handlers.end()) {
+    auto func = _int_ev_handlers->find(if_type);
+    if (func != _int_ev_handlers->end()) {
         func->second(obj);
         return true;
     } else {

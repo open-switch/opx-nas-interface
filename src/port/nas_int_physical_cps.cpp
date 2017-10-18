@@ -145,18 +145,6 @@ static void make_phy_port_details(npu_id_t npu, port_t port, cps_api_object_t ob
         cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_HARDWARE_PORT_ID,hwport);
     }
 
-    //should be size_t
-    int mode_count = BASE_IF_PHY_BREAKOUT_MODE_BREAKOUT_1X1+1;
-    BASE_IF_PHY_BREAKOUT_MODE_t mode_list[BASE_IF_PHY_BREAKOUT_MODE_BREAKOUT_1X1+1];
-    if (ndi_port_supported_breakout_mode_get(npu,port,
-            &mode_count,mode_list)==STD_ERR_OK) {
-        size_t ix = 0;
-        size_t mx = mode_count;
-        for ( ; ix < mx ; ++ix ) {
-            cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_BREAKOUT_CAPABILITIES,mode_list[ix]);
-        }
-    }
-
     uint32_t hwport_list[MAX_HWPORT_PER_PORT] = {0};
     size_t count = MAX_HWPORT_PER_PORT;
     if (ndi_hwport_list_get_list(npu, port, hwport_list, &count) == STD_ERR_OK) {
@@ -164,11 +152,6 @@ static void make_phy_port_details(npu_id_t npu, port_t port, cps_api_object_t ob
             cps_api_object_attr_add_u32(obj, BASE_IF_PHY_PHYSICAL_HARDWARE_PORT_LIST,
                                         hwport_list[idx]);
         }
-    }
-
-    BASE_IF_PHY_BREAKOUT_MODE_t cur_mode;
-    if (ndi_port_breakout_mode_get(npu, port, &cur_mode) == STD_ERR_OK) {
-        cps_api_object_attr_add_u32(obj,BASE_IF_PHY_PHYSICAL_FANOUT_MODE, cur_mode);
     }
 
     _if_fill_in_supported_speeds_attrs(npu,port,obj);
@@ -340,6 +323,11 @@ static cps_api_return_code_t _phy_create(cps_api_object_t cur, cps_api_object_t 
     if (phy_it == _phy_port.end()) {
         _phy_port[hwport].front_panel_port = 0;
         _phy_port[hwport].loopback = 0;
+    }
+    cps_api_object_attr_t fp_attr = cps_api_object_attr_get(cur,
+                                            BASE_IF_PHY_PHYSICAL_FRONT_PANEL_NUMBER);
+    if (fp_attr != nullptr) {
+        _phy_port[hwport].front_panel_port = cps_api_object_attr_data_u32(fp_attr);
     }
     _phy_port[hwport].speed = speed;
     _phy_port[hwport].phy_mode = phy_mode;

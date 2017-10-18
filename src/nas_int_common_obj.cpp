@@ -29,6 +29,7 @@
 
 #include "event_log.h"
 #include "cps_class_map.h"
+#include "cps_api_db_interface.h"
 #include <unordered_map>
 
 #include "interface_obj.h"
@@ -45,7 +46,7 @@ typedef struct _intf_obj_handler_s {
 static cps_api_operation_handle_t nas_if_stat_handle;
 
 // get/set handlers based on category ( INTF/INTF_STATE/INTF_STATISTICS) and intf type (PHY/VLAN/LAG)
-static std::unordered_map <nas_int_type_t, intf_obj_handler_t *, std::hash<int>> _intf_handlers[obj_INTF_MAX];
+static  auto _intf_handlers = new std::unordered_map <nas_int_type_t, intf_obj_handler_t *, std::hash<int>> [obj_INTF_MAX];
 
 static t_std_error _if_type_from_if_index_or_name(obj_intf_cat_t obj_cat, cps_api_object_t obj,
                                                   nas_int_type_t *type) {
@@ -74,6 +75,39 @@ static t_std_error _if_type_from_if_index_or_name(obj_intf_cat_t obj_cat, cps_ap
 
     *type = if_info.int_type;
     return STD_ERR_OK;
+}
+
+t_std_error nas_intf_db_obj_get(const char * intf_name,cps_api_attr_id_t id, cps_api_qualifier_t cat,
+                            cps_api_object_t obj){
+
+    if(intf_name == nullptr){
+        EV_LOGGING(INTERFACE,ERR,"INT-DB-GET","Null intf name passed to retreive object from db");
+        return STD_ERR(INTERFACE,PARAM,0);
+    }
+
+    if(obj == nullptr){
+        EV_LOGGING(INTERFACE,ERR,"INT-DB-GET","Null object passed to retreive from db");
+        return STD_ERR(INTERFACE,PARAM,0);
+    }
+
+    cps_api_object_guard _og(cps_api_object_create());
+    if(_og.valid()){
+        cps_api_key_from_attr_with_qual(cps_api_object_key(_og.get()),id,cat);
+        cps_api_set_key_data(_og.get(),IF_INTERFACES_INTERFACE_NAME,cps_api_object_ATTR_T_BIN,intf_name,strlen(intf_name)+1);
+        cps_api_object_list_guard lst(cps_api_object_list_create());
+        if (cps_api_db_get(_og.get(),lst.get())==cps_api_ret_code_OK) {
+            size_t len = cps_api_object_list_size(lst.get());
+
+            if(len){
+                // Get should return only one object matching to the interface name
+                cps_api_object_clone(obj,cps_api_object_list_get(lst.get(),0));
+                return STD_ERR_OK;
+            }
+        }
+    }
+
+    EV_LOGGING(INTERFACE,ERR,"NAS-INT-SET","Failed to get stored configs for interface %s",intf_name);
+    return cps_api_ret_code_ERR;
 }
 
 static void cps_api_object_list_swap(cps_api_object_list_t &a, cps_api_object_list_t &b) {

@@ -61,6 +61,9 @@ typedef struct nas_vlan_lag_t{
 t_std_error nas_handle_lag_index_in_cps_set(nas_bridge_t *p_bridge, nas_port_list_t &port_index_list,
                                             nas_port_mode_t port_mode, vlan_roll_bk_t *roll_bk);
 
+bool nas_vlan_apply_lag_port_mapping_update(hal_ifindex_t lag_idx, hal_ifindex_t member_idx,
+                                            npu_id_t npu, port_t port, bool add_port);
+
 
 #ifdef __cplusplus
 }

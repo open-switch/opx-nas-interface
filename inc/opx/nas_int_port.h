@@ -36,16 +36,21 @@ static inline IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t ndi_to_cps_oper_type(n
 extern "C" {
 #endif
 t_std_error nas_int_port_create(npu_id_t npu, port_t port, const char *name, nas_int_type_t type);
-t_std_error nas_int_port_delete(npu_id_t npu, port_t port);
+t_std_error nas_int_port_delete(const char *name);
 
 void nas_int_port_link_change(npu_id_t npu, port_t port,
                             IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t state);
 
-bool nas_int_port_used(npu_id_t npu, port_t port);
+bool nas_int_port_id_used(npu_id_t npu, port_t port);
+
+bool nas_int_port_name_used(const char *name);
 
 t_std_error nas_int_port_init(void);
 
 bool nas_int_port_ifindex (npu_id_t npu, port_t port, hal_ifindex_t *ifindex);
+
+t_std_error nas_int_update_npu_port(const char *name, npu_id_t npu, port_t port,
+                                    bool connect);
 
 #ifdef __cplusplus
 }

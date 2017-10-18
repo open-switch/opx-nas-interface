@@ -1,8 +1,8 @@
 [Unit]
 Description=This service is to create all interface during system initiation
 ConditionPathExists=!/etc/opx/nas_if_nocreate
-After=opx-cps.service opx-nas.service opx-pas.service opx-front-panel-ports.service
-Wants=opx-cps.service opx-nas.service opx-pas.service opx-front-panel-ports.service
+After=opx-cps.service
+Wants=opx-cps.service
 
 [Service]
 Type=oneshot

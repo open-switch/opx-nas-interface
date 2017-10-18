@@ -158,7 +158,30 @@ bool pf_table::pf_t_in_pkt_hndlr(uint8_t *pkt, uint32_t pkt_len, pf_pkt_attr *p_
 }
 
 bool pf_table::pf_t_out_pkt_hndlr(uint8_t *pkt, uint32_t pkt_len, pf_pkt_attr *p_attr) {
-    //@TODO - Stub for out packet filtering
+
+    EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Out_Pkt handler - len %d, port %d",
+                                pkt_len, p_attr->tx_port);
+
+    std::lock_guard<std::mutex> pf_tlock {pf_mtx};
+
+    for (auto pfr : pf_egress_table) {
+        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Scanning rule id %d", pfr.pf_r_get_id());
+        bool match = true, action = true;
+
+        //Consider using std::invoke
+        pfr.pf_r_get_match_params([&](pf_match_t& m_tv) {
+            const pf_match ref = pfr.pf_r_get_match_list();
+            match &= ref.pf_m_inv_fptr(m_tv.m_type, pkt, pkt_len, p_attr, m_tv);
+        });
+        if(match) {
+            pfr.pf_r_get_action_params([&](pf_action_t& a_tv) {
+                const pf_action ref = pfr.pf_r_get_action_list();
+                action &= ref.trigger_action(pkt, pkt_len, p_attr, a_tv);
+            });
+            if(pfr.pf_r_get_stop()) return true;
+        }
+    }
+
     return false;
 }
 
@@ -170,13 +193,20 @@ void pf_match::pf_m_init_fptr() {
     for(auto ix = 0; ix < BASE_PACKET_PACKET_MATCH_TYPE_MAX; ++ix) {
         fptr[ix] = &pf_match::pf_m_pseudo_fn;
     }
-    //@TODO - Current support for User trap Id. Extend in future
+    //@TODO - Current support for User trap Id, Dest Mac. Extend in future
     fptr[BASE_PACKET_PACKET_MATCH_TYPE_HOSTIF_USER_TRAP_ID] = &pf_match::pf_m_usr_trap_id;
+    fptr[BASE_PACKET_PACKET_MATCH_TYPE_DST_MAC] = &pf_match::pf_m_dest_mac;
 }
 
 bool pf_match::pf_m_usr_trap_id(uint8_t *pkt, uint32_t len, pf_pkt_attr *p_attr,
                                 pf_match_t& m_tv) const {
     if(m_tv.m_val.u64 == p_attr->trap_id) return true;
+    return false;
+}
+
+bool pf_match::pf_m_dest_mac(uint8_t *pkt, uint32_t len, pf_pkt_attr *p_attr,
+                                pf_match_t& m_tv) const {
+    if(!memcmp(pkt, &m_tv.m_val.mac, HAL_MAC_ADDR_LEN)) return true;
     return false;
 }
 
@@ -274,6 +304,7 @@ bool pf_action::pf_a_redirect_if(uint8_t *pkt, uint32_t pkt_len, pf_pkt_attr *p_
 
     p_attr->npu_id = ndi_port.npu_id;
     p_attr->rx_port = ndi_port.npu_port;
+    p_attr->tx_port = ndi_port.npu_port;
 
     return true;
 }
@@ -336,6 +367,10 @@ bool nas_pf_in_pkt_hndlr(uint8_t *pkt, uint32_t pkt_len, ndi_packet_attr_t *p_at
     return pf_table_inst->pf_t_in_pkt_hndlr(pkt, pkt_len, p_attr);
 }
 
+bool nas_pf_out_pkt_hndlr(uint8_t *pkt, uint32_t pkt_len, ndi_packet_attr_t *p_attr) {
+    return pf_table_inst->pf_t_out_pkt_hndlr(pkt, pkt_len, p_attr);
+}
+
 /*
  * CPS OBJ Handlers - API Definitions
  */
@@ -347,6 +382,7 @@ static void nas_pf_match_list (const cps_api_object_t obj, const cps_api_object_
     uint64_t                         _value;
     cps_api_object_it_t              _list = it;
     t_std_error                      std_err = STD_ERR (INTERFACE, FAIL, 0);
+    size_t                           attr_len;
 
     for (cps_api_object_it_inside (&_list); cps_api_object_it_valid (&_list);
          cps_api_object_it_next (&_list)) {
@@ -375,6 +411,21 @@ static void nas_pf_match_list (const cps_api_object_t obj, const cps_api_object_
         EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "list indx %d type %d", l_idx, _type);
 
         switch (_type) {
+        case BASE_PACKET_PACKET_MATCH_TYPE_DST_MAC:
+            attr_match_val = cps_api_object_it_find (&_attr, BASE_PACKET_RULE_MATCH_MAC_ADDR);
+            if (attr_match_val == NULL) {
+                throw nas::base_exception {std_err, __FUNCTION__, "Missing MATCH_VALUE attribute"};
+            }
+            attr_len = cps_api_object_attr_len(attr_match_val);
+            if (attr_len < sizeof(hal_mac_addr_t)) {
+                throw nas::base_exception {std_err, __FUNCTION__, "Invalid attribute len"};
+            }
+            memcpy(m_tv.m_val.mac, cps_api_object_attr_data_bin(attr_match_val),
+                   sizeof(hal_mac_addr_t));
+
+            EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "Match_type %d", _type);
+            break;
+
         case BASE_PACKET_PACKET_MATCH_TYPE_ETHER_TYPE:
         case BASE_PACKET_PACKET_MATCH_TYPE_HOSTIF_TRAP_ID:
         case BASE_PACKET_PACKET_MATCH_TYPE_HOSTIF_USER_TRAP_ID:
@@ -384,6 +435,7 @@ static void nas_pf_match_list (const cps_api_object_t obj, const cps_api_object_
             }
             _value = cps_api_object_attr_data_u32 (attr_match_val);
             m_tv.m_val.u64 = _value;
+            EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "Match_type %d value %d", _type, _value);
             break;
 
         default:
@@ -392,8 +444,6 @@ static void nas_pf_match_list (const cps_api_object_t obj, const cps_api_object_
 
         //Invoke the callback function
         fn(m_tv);
-
-        EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "Match_type %d value %d", _type, _value);
     }
 }
 

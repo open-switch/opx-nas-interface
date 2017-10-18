@@ -39,6 +39,8 @@
 #include "nas_linux_l2.h"
 #include "nas_vlan_lag_cmn.h"
 #include "iana-if-type.h"
+#include "nas_if_utils.h"
+#include "nas_int_com_utils.h"
 
 #include <stdio.h>
 
@@ -94,6 +96,10 @@ static inline bool nas_get_lag_id_from_str(const char * str, nas_lag_id_t * id){
 
 static bool nas_lag_set_npu_mac_learn_mode(hal_ifindex_t ifindex,BASE_IF_PHY_MAC_LEARN_MODE_t mode){
 
+    if(nas_is_virtual_port(ifindex)){
+        return true;
+    }
+
     interface_ctrl_t i;
     memset(&i,0,sizeof(i));
     i.if_index = ifindex;
@@ -130,7 +136,7 @@ static cps_api_return_code_t nas_cps_create_lag(cps_api_object_t obj)
 
     if(nas_lag_get_ifindex_from_obj(obj,&lag_index)){
         EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG","Lag %s already exists",
-                   name);
+                name);
         return nas_cps_set_lag(obj);
     }
 
@@ -156,6 +162,11 @@ static cps_api_return_code_t nas_cps_create_lag(cps_api_object_t obj)
                    "Failure in NAS-CPS-LAG (NPU) creating lag with index %d",
                    lag_index);
         return cps_api_ret_code_ERR;
+    }
+
+    if (nas_intf_handle_intf_mode_change(lag_index, BASE_IF_MODE_MODE_NONE) == false) {
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-CPS-LAG",
+                "Update to NAS-L3 about interface mode change failed(%d)", lag_index);
     }
 
     cps_api_set_key_data(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,cps_api_object_ATTR_T_U32,
@@ -200,6 +211,11 @@ static cps_api_return_code_t nas_cps_delete_lag(cps_api_object_t obj)
 
     //Acquring lock to avoid pocessing netlink msg from kernel.
     std_mutex_simple_lock_guard lock_t(nas_lag_mutex_lock());
+
+    if (nas_intf_handle_intf_mode_change(lag_index, BASE_IF_MODE_MODE_L2) == false) {
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-CPS-LAG",
+                "Update to NAS-L3 about interface mode change failed(%d)", lag_index);
+    }
 
     if(nas_os_delete_lag(obj) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
@@ -291,50 +307,59 @@ static cps_api_return_code_t nas_cps_add_port_to_lag(nas_lag_master_info_t *nas_
 {
     cps_api_return_code_t rc = cps_api_ret_code_OK;
     char buff[MAX_CPS_MSG_BUFF];
+    if_master_info_t master_info = { nas_int_type_LAG, NAS_PORT_NONE, nas_lag_entry->ifindex};
+    BASE_IF_MODE_t intf_mode = nas_intf_get_mode(port_idx);
 
-    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "Add Port %d to Lag", port_idx);
+    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "Add Ports to Lag");
 
-    bool block_port = true;
-    if(nas_lag_entry->block_port_list.find(port_idx) == nas_lag_entry->block_port_list.end()) {
-        block_port = false;
-    }
     cps_api_object_t name_obj = cps_api_object_init(buff, sizeof(buff));
-    cps_api_object_attr_add_u32(name_obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
-                                nas_lag_entry->ifindex);
+    cps_api_object_attr_add_u32(name_obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, nas_lag_entry->ifindex);
     cps_api_object_attr_add_u32(name_obj,DELL_IF_IF_INTERFACES_INTERFACE_MEMBER_PORTS, port_idx);
 
     if(nas_os_add_port_to_lag(name_obj) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "Error adding port %d to lag  %d in the Kernel",
+        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
+                   "Error adding port %d to lag  %d in the Kernel",
                    port_idx,nas_lag_entry->ifindex);
         return cps_api_ret_code_ERR;
     }
 
-
-    if(nas_lag_member_add(nas_lag_entry->ifindex,port_idx,0) != STD_ERR_OK)
-    {
-        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
-                   "Error inserting index %d in list", port_idx);
-        return cps_api_ret_code_ERR;
+    if(!nas_intf_add_master(port_idx, master_info)){
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG-MASTER","Failed to add master for lag memeber port");
+    } else {
+        BASE_IF_MODE_t new_mode = nas_intf_get_mode(port_idx);
+        if (new_mode != intf_mode) {
+            if (nas_intf_handle_intf_mode_change(port_idx, new_mode) == false) {
+                EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG-MASTER", "Update to NAS-L3 about interface mode change failed(%d)", port_idx);
+            }
+        }
     }
 
-    if (block_port && nas_lag_block_port(nas_lag_entry, port_idx, block_port) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "Error Block/unblock Port %d",port_idx);
-        return cps_api_ret_code_ERR;
-    }
+    /*
+     * Check for virtual port and if it is a virtual port don't add it
+     */
+    if(!nas_is_virtual_port(port_idx)){
+        if(nas_lag_member_add(nas_lag_entry->ifindex,port_idx,0) != STD_ERR_OK)
+        {
+            EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
+                    "Error inserting index %d in list", port_idx);
+            return cps_api_ret_code_ERR;
+        }
 
-    if(nas_lag_entry->mac_learn_mode_set){
-        nas_lag_set_npu_mac_learn_mode(port_idx,nas_lag_entry->mac_learn_mode);
+        if(nas_lag_entry->mac_learn_mode_set){
+            nas_lag_set_npu_mac_learn_mode(port_idx,nas_lag_entry->mac_learn_mode);
+        }
     }
-
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
                "Add Ports to Lag Exit");
     return rc;
 }
 
-static cps_api_return_code_t nas_cps_delete_port_from_lag(hal_ifindex_t ifindex)
+static cps_api_return_code_t nas_cps_delete_port_from_lag(nas_lag_master_info_t *nas_lag_entry, hal_ifindex_t ifindex)
 {
     char buff[MAX_CPS_MSG_BUFF];
     cps_api_return_code_t rc=cps_api_ret_code_OK;
+    if_master_info_t master_info = { nas_int_type_LAG, NAS_PORT_NONE, nas_lag_entry->ifindex};
+    BASE_IF_MODE_t intf_mode = nas_intf_get_mode(ifindex);
 
     cps_api_object_t obj = cps_api_object_init(buff, sizeof(buff));
     cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_MEMBER_PORTS, ifindex);
@@ -343,21 +368,35 @@ static cps_api_return_code_t nas_cps_delete_port_from_lag(hal_ifindex_t ifindex)
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
                "nas_cps_del_port_from_lag %d", ifindex);
 
-    //delete the port from NPU
-    if((nas_lag_member_delete(0,ifindex,0) != STD_ERR_OK)){
-        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
-                   "Error deleting interface %d from NPU", ifindex);
-        return cps_api_ret_code_ERR;
+    if(!nas_is_virtual_port(ifindex)){
+        //delete the port from NPU
+        if((nas_lag_member_delete(0,ifindex,0) != STD_ERR_OK)){
+            EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
+                        "Error deleting interface %d from NPU", ifindex);
+            return cps_api_ret_code_ERR;
+        }
+
+        nas_lag_set_npu_mac_learn_mode(ifindex,BASE_IF_PHY_MAC_LEARN_MODE_HW);
+    }
+
+    if(!nas_intf_del_master(ifindex, master_info)){
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG-MASTER","Failed to delete master for lag memeber port");
+    } else {
+        BASE_IF_MODE_t new_mode = nas_intf_get_mode(ifindex);
+        if (new_mode != intf_mode) {
+            if (nas_intf_handle_intf_mode_change(ifindex, new_mode) == false) {
+                EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG-MASTER", "Update to NAS-L3 about interface mode change failed(%d)",
+                        ifindex);
+            }
+        }
     }
 
     //NPU delete done, now delete from Kernel
     if(nas_os_delete_port_from_lag(obj) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
-                   "Error deleting interface %d from OS", ifindex);
+                    "Error deleting interface %d from OS", ifindex);
         return cps_api_ret_code_ERR;
     }
-
-    nas_lag_set_npu_mac_learn_mode(ifindex,BASE_IF_PHY_MAC_LEARN_MODE_HW);
 
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
                "nas_cps_del_port_from_lag Exit %d",ifindex);
@@ -408,11 +447,13 @@ static cps_api_return_code_t cps_lag_update_ports(nas_lag_master_info_t  *nas_la
 
             EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
                     "Received new port add %d", *it);
+
             if(nas_cps_add_port_to_lag(nas_lag_entry, *it) != cps_api_ret_code_OK) {
                 EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
                            "Error adding port %d to OS/NPU", *it);
                 return cps_api_ret_code_ERR;
             }
+            nas_lag_entry->port_list.insert(*it);
         }
 
         if((nas_lag_entry->port_list.find(*it) != nas_lag_entry->port_list.end())
@@ -420,11 +461,14 @@ static cps_api_return_code_t cps_lag_update_ports(nas_lag_master_info_t  *nas_la
 
             EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
                        "Received new port delete %d", *it);
-            if(nas_cps_delete_port_from_lag(*it) != cps_api_ret_code_OK) {
+
+            if(nas_cps_delete_port_from_lag(nas_lag_entry, *it) != cps_api_ret_code_OK) {
                 EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
                            "Error deleting port  %d from  OS/NPU", *it);
                 return cps_api_ret_code_ERR;
             }
+            nas_lag_entry->port_list.erase(*it);
+            nas_lag_entry->port_oper_list.erase(*it);
 
             /* When LAG member port deleted, remove port from block list also */
             if(nas_lag_entry->block_port_list.find(*it) != nas_lag_entry->block_port_list.end()) {
@@ -1015,6 +1059,84 @@ void nas_lag_port_oper_state_cb(npu_id_t npu, npu_port_t port, IF_INTERFACES_STA
 
 }
 
+static bool nas_lag_process_port_association(hal_ifindex_t ifindex, npu_id_t npu, port_t port,bool add){
+
+    std_mutex_simple_lock_guard lock_t(nas_lag_mutex_lock());
+    auto  m_list = nas_intf_get_master(ifindex);
+    for(auto it : m_list){
+        if(it.type == nas_int_type_LAG){
+
+            if(add){
+                nas_lag_master_info_t *nas_lag_entry = nas_get_lag_node(it.m_if_idx);
+
+                if(nas_lag_entry == NULL){
+                    EV_LOGGING(INTERFACE,ERR,"NAS-LAG-MAP","No LAG entry for ifindex %d exist"
+                            "it.m_if_idx");
+                    continue;
+                }
+
+                if(nas_lag_member_add(nas_lag_entry->ifindex,ifindex,0) != STD_ERR_OK){
+                    EV_LOGGING(INTERFACE, ERR, "NAS-LAG-MAP","Error inserting index %d in list",
+                                ifindex);
+                    continue;
+                }
+
+                if (ndi_port_mac_learn_mode_set(npu,port,nas_lag_entry->mac_learn_mode)!=STD_ERR_OK) {
+
+                    EV_LOGGING(INTERFACE,ERR,"NAS-LAG-MAP","Failed to update MAC Learn mode to %d for "
+                                "npu %d port %d",nas_lag_entry->mac_learn_mode,npu,port);
+                }
+            }else{
+                if((nas_lag_member_delete(0,ifindex,0) != STD_ERR_OK)){
+                    EV_LOGGING(INTERFACE, ERR, "NAS-LAG-MAP","Error deleting lag"
+                                " interface %d from NPU", ifindex);
+                    continue;
+                }
+
+                if (ndi_port_mac_learn_mode_set(npu,port,BASE_IF_PHY_MAC_LEARN_MODE_HW)!=STD_ERR_OK) {
+
+                    EV_LOGGING(INTERFACE,ERR,"NAS-LAG-MAP","Failed to update MAC Learn mode to %d for "
+                                "npu %d port %d",BASE_IF_PHY_MAC_LEARN_MODE_HW,npu,port);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+
+static bool nas_lag_if_set_handler(cps_api_object_t obj, void *context)
+{
+    nas_int_port_mapping_t port_mapping;
+    if(!nas_get_phy_port_mapping_change( obj, &port_mapping)){
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG-MAP","Interface event is not an "
+                "association/dis-association event");
+        return true;
+    }
+
+    cps_api_object_attr_t npu_attr = cps_api_object_attr_get(obj,
+                                    BASE_IF_PHY_IF_INTERFACES_INTERFACE_NPU_ID);
+    cps_api_object_attr_t port_attr = cps_api_object_attr_get(obj,
+                                    BASE_IF_PHY_IF_INTERFACES_INTERFACE_PORT_ID);
+    cps_api_object_attr_t if_index_attr = cps_api_get_key_data(obj,
+                                    DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+
+    if (npu_attr == nullptr || port_attr == nullptr || if_index_attr == nullptr) {
+        EV_LOGGING(INTERFACE,DEBUG, "NAS-LAG-MAP", "Interface object does not have if-index/npu/port");
+        return true;
+    }
+
+    hal_ifindex_t ifidx = cps_api_object_attr_data_u32(if_index_attr);
+    npu_id_t npu = cps_api_object_attr_data_u32(npu_attr);
+    npu_port_t port = cps_api_object_attr_data_u32(port_attr);
+
+    bool add = (port_mapping == nas_int_phy_port_MAPPED) ? true : false;
+
+    return nas_lag_process_port_association(ifidx,npu,port,add);
+
+}
+
 t_std_error nas_cps_lag_init(cps_api_operation_handle_t lag_intf_handle) {
 
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "CPS LAG Initialize");
@@ -1026,7 +1148,32 @@ t_std_error nas_cps_lag_init(cps_api_operation_handle_t lag_intf_handle) {
     }
     /*  register a handler for physical port oper state change */
     nas_int_oper_state_register_cb(nas_lag_port_oper_state_cb);
+
+    if (cps_api_event_service_init() != cps_api_ret_code_OK) {
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
+
+    if (cps_api_event_thread_init() != cps_api_ret_code_OK) {
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
+
+    cps_api_event_reg_t reg;
+    cps_api_key_t key;
+
+    memset(&reg, 0, sizeof(cps_api_event_reg_t));
+
+    if (!cps_api_key_from_attr_with_qual(&key,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_OBJ,
+                                        cps_api_qualifier_OBSERVED)) {
+           EV_LOGGING(INTERFACE, ERR, "NAS-VLAN-INIT", "Cannot create a key for interface event");
+           return STD_ERR(INTERFACE,FAIL,0);
+    }
+
+    reg.objects = &key;
+    reg.number_of_objects = 1;
+
+    if (cps_api_event_thread_reg(&reg, nas_lag_if_set_handler, NULL)!= cps_api_ret_code_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-VLAN-INIT", "Cannot register interface operation event");
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
     return STD_ERR_OK;;
-
 }
-

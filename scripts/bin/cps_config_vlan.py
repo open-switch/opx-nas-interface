@@ -58,10 +58,10 @@ def usage():
     print '--addmac  : add a mac address to the VLAN '
     print '-s, --show: show the VLAN parameter, when no VLAN ID given show all'
     print '-t, --tagged: If user want to add the port as tagged port, default untagged\n'
-    print '--vlantype : Type of vlan (data/management)'
+    print '--vlantype : Type of vlan (data<1>/management<2>)'
 
     print 'Example:'
-    print 'cps_config_vlan.py  --add --id 100 --port e101-001-0,e101-004-0'
+    print 'cps_config_vlan.py  --add --id 100 --vlantype 1 --port e101-001-0,e101-004-0'
     print 'cps_config_vlan.py  --del --name br100'
     print 'cps_config_vlan.py  --addport --name br100 --port e101-001-0,e101-004-0'
     print 'cps_config_vlan.py  --addmac  --name br100 --mac 90:b1:1c:f4:a8:b1'

@@ -23,6 +23,8 @@ import event_log as ev
 import time
 import bytearray_utils as ba
 
+_fp_port_key = cps.key_from_name('target','base-if-phy/front-panel-port')
+
 media_type_to_str = {
     0: "Not Applicable",
     1: "Not Present",
@@ -196,7 +198,19 @@ media_type_to_str = {
     175: "QSFP28-DD 200GBASE SR4 5M",
     176: "QSFP28-DD 200GBASE SR4",
     177: "QSFP28-DD 200GBASE SR4 1.5M",
-    178: "QSFP28-DD 200GBASE SR4 2.5M"
+    178: "QSFP28-DD 200GBASE SR4 2.5M",
+    179: "1GBASE COPPER",
+    180: "10GBASE COPPER",
+    181: "25GBASE BACKPLANE",
+    182: "SFPPLUS 10GBASE SR AOC 1M",
+    183: "SFPPLUS 10GBASE SR AOC 3M",
+    184: "SFPPLUS 10GBASE SR AOC 5M",
+    185: "SFPPLUS 10GBASE SR AOC 10M",
+    186: "QSFPPLUS 4X10 10GBASE SR AOC 10M",
+    187: "QSFPPLUS 40GBASE SR AOC 3M",
+    188: "QSFPPLUS 40GBASE SR AOC 5M",
+    189: "QSFPPLUS 40GBASE SR AOC 7M",
+    190: "QSFPPLUS 40GBASE SR AOC 10M"
 }
 
 qsfp28_media_list = {
@@ -345,6 +359,7 @@ def nas_set_media_type_by_phy_port(npu, phy_port, media_type, fp_port):
 
 def nas_set_media_type_by_media_id(slot, media_id, media_type):
     l = []
+    port_list = []
     o = cps_object.CPSObject(
         module='base-if-phy/front-panel-port',
         data={
@@ -355,8 +370,12 @@ def nas_set_media_type_by_media_id(slot, media_id, media_type):
         nas_if.log_err("No such port found... for medial "+str(media_id))
         return
 
-    port_list = nas_if.physical_ports_for_front_panel_port(
-        cps_object.CPSObject(obj=l[0]))
+    #fetching 2 front panel port object from 1 phy media id for QSFP28-DD ports
+    for fp_obj in l:
+        obj = cps_object.CPSObject(obj = fp_obj)
+        if _fp_port_key == obj.get_key():
+            port_list = port_list + nas_if.physical_ports_for_front_panel_port(obj)
+
     if len(port_list) == 0:
         nas_if.log_err("There are no physical ports for front panel port ")
         nas_if.log_err(l[0])
@@ -396,9 +415,13 @@ def if_media_type_set(pas_media_obj):
         nas_if.log_err("No such port found... for media  "+str(media_id))
         return
 
-    # fetch PHY port list for the FP port
-    port_list = nas_if.physical_ports_for_front_panel_port(
-        cps_object.CPSObject(obj=l[0]))
+    #fetching 2 front panel port object from 1 phy media id for QSFP28-DD ports
+    port_list = []
+    for fp_obj in l:
+        obj = cps_object.CPSObject(obj=fp_obj)
+        if _fp_port_key == obj.get_key():
+            port_list = port_list + nas_if.physical_ports_for_front_panel_port(obj)
+
     if len(port_list) == 0:
         nas_if.log_err("There are no physical ports for front panel port ")
         nas_if.log_err(l[0])
@@ -408,8 +431,7 @@ def if_media_type_set(pas_media_obj):
     for p in port_list:
         npu = p.get_attr_data('npu-id')
         port = p.get_attr_data('port-id')
-        fanout = p.get_attr_data('fanout-mode')
-        hwport = p.get_attr_data('hardware-port-id')
+        hwport_list = p.get_attr_data('hardware-port-list')
 
         nas_if.log_info("send if rpc for media id set for phy port "+str(port))
         ifobj = cps_object.CPSObject(module='dell-base-if-cmn/set-interface', data={
@@ -423,12 +445,10 @@ def if_media_type_set(pas_media_obj):
         if_name = str(ch['change']['data']['if/interfaces/interface/name'])[:-1]
         if_details = nas_if.nas_os_if_list(d={'if/interfaces/interface/name':if_name})
         enable = ba.from_ba(if_details[0]['data']['if/interfaces/interface/enabled'],"uint64_t")
-        fp_details = fp.find_port_by_hwport(npu, hwport)
-        if fanout == 2:  # then it is in 4x10G fanout mode BASE_PORT_BREAKOUT_MODE_BREAKOUT_4X1
+        for hwport in hwport_list:
+            fp_details = fp.find_port_by_hwport(npu, hwport)
             _lane = fp_details.lane
-        else:    # non-fanout mode 1x40g mode
-            _lane = None # enable/disable all channels. Do not pass Lane #
-        media_transceiver_set(1, fp_details.media_id, _lane, enable)
+            media_transceiver_set(1, fp_details.media_id, _lane, enable)
     nas_if.log_info("setting media id: " + str(media_id) + " media type: " + str(media_type))
 
 def set_media_info(pas_media_obj):

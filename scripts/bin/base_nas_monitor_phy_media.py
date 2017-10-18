@@ -49,23 +49,17 @@ def set_media_transceiver(interface_obj):
     port_list = nas_if.nas_os_phy_list(
         d={'npu-id': npu, 'port-id': port})
     phy_obj = cps_object.CPSObject(obj=port_list[0])
-    fanout = phy_obj.get_attr_data('fanout-mode')
     try:
-        hwport = phy_obj.get_attr_data('hardware-port-id')
-        fp_details = fp.find_port_by_hwport(npu, hwport)
+        hwport_list = phy_obj.get_attr_data('hardware-port-list')
     except:
-        nas_if.log_err(" Error in setting media Transceiver for ", if_obj.get_attr_data('name'))
+        nas_if.log_err(" Error in setting media Transceiver for %s" % if_obj.get_attr_data('name'))
         return
     # set media transceiver using media Id and channel ID
-    # in case of 40G mode all channels should be enabled/disabled
-    #  else only one channel.
     #
-    nas_if.log_info("fanout " + str(fanout))
-    if fanout == 2:  # then it is in 4x10G fanout mode BASE_PORT_BREAKOUT_MODE_BREAKOUT_4X1
+    for hwport in hwport_list:
+        fp_details = fp.find_port_by_hwport(npu, hwport)
         _lane = fp_details.lane
-    else:    # non-fanout mode 1x40g mode
-        _lane = None # enable/disable all channels. Do not pass Lane #
-    media.media_transceiver_set(1, fp_details.media_id, _lane, enable)
+        media.media_transceiver_set(1, fp_details.media_id, _lane, enable)
 
 def set_interface_led(interface_obj):
     if_obj = cps_object.CPSObject(obj=interface_obj)
@@ -138,7 +132,7 @@ def monitor_interface_event():
                     if_obj_list = nas_if.nas_os_if_list(d={'if-index':if_index})
                     set_media_transceiver(if_obj_list[0])
                 except:
-                    nas_if.log_err("Unable to set media transceiver for ", str(if_index))
+                    nas_if.log_err("Unable to set media transceiver for if_index {}".format(str(if_index)))
             if _led_control == True:
                 oper_state = _get_obj_attr_value(obj, 'if/interfaces-state/interface/oper-status')
                 if oper_state != None:

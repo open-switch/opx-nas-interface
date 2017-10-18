@@ -156,5 +156,5 @@ void nas_handle_del_vlan_lag(hal_vlan_id_t vlan_id);
 std_mutex_type_t *vlan_lag_mutex_lock();
 t_std_error nas_default_vlan_cache_init(void);
 bool nas_set_vlan_member_port_mtu(hal_ifindex_t ifindex, uint32_t mtu, hal_vlan_id_t vlan_id);
-void nas_vlan_set_taaged_lag_mtu(hal_vlan_id_t vlan_id,uint32_t mtu) ;
+void nas_vlan_set_tagged_lag_mtu(hal_vlan_id_t vlan_id,uint32_t mtu) ;
 #endif /* NAS_INTF_VLAN_H_ */

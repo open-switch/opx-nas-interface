@@ -42,24 +42,25 @@ def verify_npu_supported_speed(speed):
         return False
 
 def get_fc_speed_frm_npu_speed(_yang_speed):
+    if not is_key_valid(eth_to_fc_speed, _yang_speed):
+        return 0
     return get_value(eth_to_fc_speed, _yang_speed)
 
-def get_phy_npu_port_speed(breakout, hwp_speed, hwp_num):
-    pport_num = breakout_to_pport_count[breakout]
-    if pport_num == 0 or hwp_num == None:
-        print 'invalid physical or hw port count'
+def get_phy_npu_port_speed(breakout, fp_speed):
+    if not is_key_valid(breakout_to_phy_fp_port_count, breakout):
+        print 'invalid breakout mode %d' % breakout
         return 0 # error case
-    speed = (hwp_num/pport_num)*hwp_speed
+    pp_count,fp_count = get_value(breakout_to_phy_fp_port_count, breakout)
+    speed = (fp_speed * fp_count) / pp_count
     return (get_value(mbps_to_yang_speed, speed))
 
-
-def get_phy_port_speed(breakout, hwp_speed, phy_mode, hwp_num):
-
-    npu_port_speed = get_phy_npu_port_speed(breakout,hwp_speed, hwp_num)
+def get_phy_port_speed(breakout, phy_mode, fp_speed):
+    npu_port_speed = get_phy_npu_port_speed(breakout, fp_speed)
     if npu_port_speed == 0:
         return 0
     if phy_mode == get_value(yang_phy_mode, 'fc'):
-        return get_fc_speed_frm_npu_speed(npu_port_speed)
+        if get_fc_speed_frm_npu_speed(npu_port_speed) == 0:
+            return 0;
     else:
         return npu_port_speed
 
@@ -156,9 +157,6 @@ class PortProfile(object):
 
     def get_port_speed(self):
         return self.phy_port_speed
-    def set_phy_port_speed(self, hwp_count):
-            self.phy_port_speed =  get_phy_port_speed(self.breakout, self.hwp_speed, self.phy_mode, hwp_count)
-
 
 
     def show(self):
@@ -175,7 +173,7 @@ class PortProfile(object):
 
 def default_port_profile_init():
     speed_caps = [10000]
-    breakout_caps = []
+    breakout_caps = [_yang_breakout_1x1]
     phy_mode_caps = [yang_phy_mode_ether]
     def_speed = 10000
     def_br = _yang_breakout_1x1
@@ -207,8 +205,6 @@ def process_portProfile_cfg(root):
             for speed in profile.findall('Supported_speed'):
                 _yang_speed = get_value(mbps_to_yang_speed, int(speed.get('value')))
                 supported_npu_speeds.append(_yang_speed)
-            print supported_npu_speeds
-            print profile
             continue
         name  = profile.get('name')
         phy_mode_caps = [yang_phy_mode_ether]
@@ -254,9 +250,10 @@ class Port(PortProfile):
         self.id = port
         self.media_id = media_id
         self.mac_offset = mac_offset
+        self.port_group_id = None
         self.hwports = []
     def get_hwports(self):
-        if self.hwports == None:
+        if self.hwports is None:
             return None
         return self.hwports[:]
 
@@ -264,16 +261,35 @@ class Port(PortProfile):
         self.hwports.append(int(hwport))
 
     def set_hwports(self, hwports):
-        if hwports == None:
-            self.hwports = None
+        if hwports is None:
+            self.hwports = []
         else:
             self.hwports = hwports[:]
 
+    def get_port_group_id(self):
+        return self.port_group_id
+
+    def set_port_group_id(self, pg_id):
+        self.port_group_id = pg_id
+
+    def is_pg_member(self):
+        if self.port_group_id == None:
+            return False
+        else:
+            return True
+
     def control_port(self):
-        return min(self.hwports)
+        if self.hwports is None or len(self.hwports) == 0:
+            return None
+        else:
+            return self.hwports[0]
 
     def lane(self, hwport):
         return self.hwports.index(hwport)
+
+    def set_phy_port_speed(self):
+        self.phy_port_speed = get_phy_port_speed(self.breakout, self.phy_mode,
+                                    self.hwp_speed * len(self.hwports))
 
     def show(self):
         print "Name: " + self.name
@@ -416,6 +432,10 @@ def is_qsfp28_cap_supported(fp_port_id):
         return True
     return False
 
+def set_fp_port_group_id(port, pg_id):
+    port_detail = find_front_panel_port(port)
+    if port_detail != None:
+        port_detail.set_port_group_id(pg_id)
 
 # Port Group details is read from the platform specific config file.
 # Properties in the port group is common to all front panel ports in a
@@ -426,7 +446,11 @@ class PortGroup(PortProfile):
         self.name = name
         self.fp_ports = fp_ports[:]
         self.hw_ports = hw_ports[:]
-        super(PortGroup, self).set_phy_port_speed(len(self.hw_ports))
+        self.set_phy_port_speed()
+
+    def set_phy_port_speed(self):
+        self.phy_port_speed = get_phy_port_speed(self.breakout, self.phy_mode,
+                                    (self.hwp_speed * len(self.hw_ports)) / len(self.fp_ports))
 
     def get_fp_ports(self):
         return self.fp_ports[:]
@@ -465,7 +489,7 @@ def process_frontPanelPort_cfg(root):
             _hwport = int(e.get('hwport'))
             port.add_hwport(_hwport)
         # Set physical port speed based on the breakout mode, phy mode and per pport hwp ports and hwp speed
-        port.set_phy_port_speed(len(port.get_hwports()))
+        port.set_phy_port_speed()
 
 port_group_list = {}
 
@@ -489,11 +513,13 @@ def process_portGroup_cfg(root):
         hw_ports = []
         for e in pg:
             if e.get('fpport') != None:
-                fp_ports.append(int(e.get('fpport')))
+                fp_port = int(e.get('fpport'))
+                set_fp_port_group_id(fp_port, name)
+                fp_ports.append(fp_port)
             if e.get('hwport') != None:
                 hw_ports.append(int(e.get('hwport')))
         port_group_list[name] = PortGroup(name, port_profile, fp_ports, hw_ports)
-        port_group_list[name].set_phy_port_speed(len(hw_ports))
+        port_group_list[name].set_phy_port_speed()
 
 
 def process_file(root):

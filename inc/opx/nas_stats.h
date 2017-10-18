@@ -37,6 +37,10 @@ t_std_error nas_stats_vlan_init(cps_api_operation_handle_t handle);
 
 bool nas_stat_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index,bool clear);
 
+bool nas_stat_get_name_from_obj(cps_api_object_t obj, char *if_name, size_t name_sz);
+
+bool get_intf_stats_from_os( const char *name, cps_api_object_list_t list);
+
 #ifdef __cplusplus
 }
 #endif

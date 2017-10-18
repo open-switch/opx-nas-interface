@@ -30,7 +30,8 @@ nas_os_if_keys = {'interface': 'dell-base-if-cmn/if/interfaces/interface',
 
 default_chassis_id = 1
 default_slot_id = 1
-_g_if_type = "ianaift:ethernetCsmacd"
+_g_if_eth_type = "ianaift:ethernetCsmacd"
+_g_if_fc_type = "ianaift:fibreChannel"
 _g_cpu_if_type = "base-if:cpu"
 
 # TODO default values should go to a common file and ideally it should be generated from yang file  just like C headers
@@ -107,16 +108,24 @@ def nas_os_cpu_if(d={}):
 def nas_os_if_list(d={}):
     l = []
     filt = make_if_obj(d)
-    set_obj_val(filt, 'if/interfaces/interface/type', _g_if_type)
+    # get FC and ether type interfaces both
+    eth_list = []
+    set_obj_val(filt, 'if/interfaces/interface/type', _g_if_eth_type)
+    if not(cps.get([filt.get()], eth_list)):
+        return None
 
-    if cps.get([filt.get()], l):
-        return l
-    return None
+    fc_list = []
+    set_obj_val(filt, 'if/interfaces/interface/type', _g_if_fc_type)
+    if not(cps.get([filt.get()], fc_list)):
+        return None
+
+    l = eth_list + fc_list
+    return l
 
 def nas_os_if_state_list(d={}):
     l = []
     filt = make_if_state_obj(d)
-    set_obj_val(filt, 'if/interfaces-state/interface/type', _g_if_type)
+    set_obj_val(filt, 'if/interfaces-state/interface/type', _g_if_eth_type)
 
     if cps.get([filt.get()], l):
         return l
@@ -150,15 +159,10 @@ def nas_os_fp_list(d={}):
 
 
 def name_to_ifindex(ifname):
-    ifs = nas_os_if_list()
-    if ifs == None:
-        return None
-    for intf in ifs:
-        obj = cps_object.CPSObject(obj=intf)
-        name = obj.get_attr_data('if/interfaces/interface/name')
-        if name == ifname:
-            return obj.get_attr_data('dell-base-if-cmn/if/interfaces/interface/if-index')
-
+    intf = nas_os_if_list(d={'if/interfaces/interface/name':ifname})
+    if intf:
+        obj = cps_object.CPSObject(obj=intf[0])
+        return obj.get_attr_data('dell-base-if-cmn/if/interfaces/interface/if-index')
     return None
 
 
@@ -353,7 +357,7 @@ def make_interface_from_phy_port(obj, mode = None, speed = None):
         'dell-if/if/interfaces/interface/negotiation':_yang_auto_neg,
         'dell-if/if/interfaces/interface/speed':speed,
         'dell-if/if/interfaces/interface/duplex':nas_comm.get_value(yang_duplex,'auto'),
-        'if/interfaces/interface/type':_g_if_type})
+        'if/interfaces/interface/type':_g_if_eth_type})
 
     return ifobj
 
@@ -591,7 +595,7 @@ def nas_set_interface_attribute(if_name, speed, duplex, autoneg):
     if autoneg != None:
         _data['dell-if/if/interfaces/interface/negotiation']= autoneg
     intf = create_interface_set_obj(if_name, _data)
-    intf.add_attr('if/interfaces/interface/type', _g_if_type)
+    intf.add_attr('if/interfaces/interface/type', _g_if_eth_type)
     ch = {'operation':'rpc', 'change':intf.get()}
     if cps.transaction([ch]):
         return(True)
@@ -653,15 +657,33 @@ def get_front_port_from_name(if_name, check_if = True):
 
 def get_breakoutCap_currentMode_mode(if_index):
     phy_port = get_phy_port_from_if_index(if_index)
-    return (get_port_breakoutCap_currentMode_mode(phy_port.npu, phy_port.port))
-
-def get_port_breakoutCap_currentMode_mode(npu, port):
-    port = nas_os_phy_list(d={'npu-id':npu,'port-id':port})
-    if port == None:
+    if phy_port == None:
+        log_err('no physical port found for ifindex %d' % if_index)
         return None
-    port_obj = cps_object.CPSObject(obj=port[0])
-    breakout_cap = port_obj.get_attr_data('breakout-capabilities')
-    current_mode = port_obj.get_attr_data('fanout-mode')
+    hwp = get_hwport_from_phy_port(phy_port.npu, phy_port.port)
+    if hwp == None:
+        log_err('no hw port found for npu %d port %d' % (phy_port.npu, phy_port.port))
+        return None
+    fp_port = get_fp_from_hw_port(phy_port.npu, hwp.hw_port)
+    if fp_port == None:
+        log_err('no front panel port found for hw port %d' % hwp.hw_port)
+        return None
+    return (get_port_breakoutCap_currentMode_mode(fp_port))
+
+def get_port_breakoutCap_currentMode_mode(fp_port):
+    fp_list = nas_os_fp_list(d={'front-panel-port':fp_port})
+    if fp_list == None or len(fp_list) == 0:
+        log_err('failed to get object of front panel port %d' % fp_port)
+        return None
+    fp_port_obj = cps_object.CPSObject(obj=fp_list[0])
+
+    br_cap_list = fp_port_obj.get_attr_data('br-cap')
+    breakout_cap = []
+    for cap_key,cap_item in br_cap_list.items():
+        br_mode = cap_item['breakout-mode']
+        if br_mode not in breakout_cap:
+            breakout_cap.append(br_mode)
+    current_mode = fp_port_obj.get_attr_data('breakout-mode')
     return (breakout_cap,current_mode)
 
 def get_cps_attr(obj,attr_name):

@@ -157,6 +157,7 @@ private:
 
     //Matching evaluation functions
     bool pf_m_usr_trap_id(uint8_t *, uint32_t, pf_pkt_attr *, pf_match_t&) const;
+    bool pf_m_dest_mac(uint8_t *, uint32_t, pf_pkt_attr *, pf_match_t&) const;
     bool pf_m_pseudo_fn(uint8_t *, uint32_t, pf_pkt_attr *, pf_match_t&) const;
 };
 

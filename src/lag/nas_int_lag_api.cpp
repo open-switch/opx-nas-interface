@@ -53,13 +53,13 @@ using nas_lag_slave_table_t = std::unordered_map <slave_ifindex , nas_lag_slave_
 /*
  * Table to maintain slave info
  */
-static nas_lag_slave_table_t nas_lag_slave_table;
+static auto nas_lag_slave_table = new nas_lag_slave_table_t;
 
 
 /*
  * Table to maintain master info
  */
-nas_lag_master_table_t nas_lag_master_table;
+auto nas_lag_master_table = new nas_lag_master_table_t;
 
 
 static std_mutex_lock_create_static_init_rec(lag_lock);
@@ -75,16 +75,16 @@ t_std_error nas_add_slave_node(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex
     EV_LOGGING(INTERFACE, INFO, "NAS-LAG","LagID %d Ifindex %d, lag mem id %lld",
                lag_master_id, ifindex, ndi_lag_member_id);
 
-    nas_lag_slave_table[ifindex] = { ifindex, lag_master_id ,ndi_lag_member_id };
+    nas_lag_slave_table->insert({ifindex ,{ ifindex, lag_master_id ,ndi_lag_member_id}});
     return STD_ERR_OK;
 }
 
 
 t_std_error nas_remove_slave_node(hal_ifindex_t ifindex)
 {
-    auto slave_table_it = nas_lag_slave_table.find(ifindex);
-    if (slave_table_it != nas_lag_slave_table.end()) {
-        nas_lag_slave_table.erase(slave_table_it);
+    auto slave_table_it = nas_lag_slave_table->find(ifindex);
+    if (slave_table_it != nas_lag_slave_table->end()) {
+        nas_lag_slave_table->erase(slave_table_it);
     }
     return STD_ERR_OK;
 }
@@ -92,8 +92,8 @@ t_std_error nas_remove_slave_node(hal_ifindex_t ifindex)
 
 nas_lag_slave_info_t *nas_get_slave_node(hal_ifindex_t ifindex)
 {
-    auto slave_table_it = nas_lag_slave_table.find(ifindex);
-    if (slave_table_it != nas_lag_slave_table.end()) {
+    auto slave_table_it = nas_lag_slave_table->find(ifindex);
+    if (slave_table_it != nas_lag_slave_table->end()) {
         nas_lag_slave_info_t & slave_entry = slave_table_it->second;
         return &slave_entry;
     }
@@ -125,16 +125,16 @@ t_std_error nas_remove_all_slave_node(nas_lag_master_info_t *nas_lag_entry)
 
 void nas_lag_entry_insert(nas_lag_master_info_t &master_entry)
 {
-    nas_lag_master_table[master_entry.ifindex] = master_entry;
+    nas_lag_master_table->insert({master_entry.ifindex, master_entry});
 }
 
 
 t_std_error nas_lag_entry_erase(hal_ifindex_t ifindex)
 {
-    auto master_table_it = nas_lag_master_table.find(ifindex);
+    auto master_table_it = nas_lag_master_table->find(ifindex);
 
-    if (master_table_it != nas_lag_master_table.end()) {
-        nas_lag_master_table.erase(master_table_it);
+    if (master_table_it != nas_lag_master_table->end()) {
+        nas_lag_master_table->erase(master_table_it);
     }else {
         EV_LOGGING(INTERFACE, ERR, "NAS-LAG","Invalid Lag Index %d", ifindex);
         return STD_ERR(INTERFACE,FAIL, 0);
@@ -146,8 +146,8 @@ t_std_error nas_lag_entry_erase(hal_ifindex_t ifindex)
 
 nas_lag_master_info_t *nas_get_lag_node(hal_ifindex_t ifindex)
 {
-    auto master_table_it = nas_lag_master_table.find(ifindex);
-    if (master_table_it != nas_lag_master_table.end()) {
+    auto master_table_it = nas_lag_master_table->find(ifindex);
+    if (master_table_it != nas_lag_master_table->end()) {
         nas_lag_master_info_t & master_entry = master_table_it->second;
         EV_LOG_INFO(ev_log_t_INTERFACE,3, "NAS-LAG", "%d Lag found ",ifindex);
         return &master_entry;
@@ -159,7 +159,7 @@ nas_lag_master_info_t *nas_get_lag_node(hal_ifindex_t ifindex)
 
 nas_lag_master_table_t & nas_get_lag_table(void)
 {
-    return nas_lag_master_table;
+    return *nas_lag_master_table;
 }
 
 
@@ -190,7 +190,7 @@ static bool nas_lag_intf_to_port(hal_ifindex_t ifindex, interface_ctrl_t *intf_c
 
 
 t_std_error nas_lag_member_add(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex,
-        nas_lag_id_t lag_id)
+                                nas_lag_id_t lag_id)
 {
     nas_lag_master_info_t *nas_lag_entry = NULL;
     t_std_error ret = STD_ERR_OK;
@@ -202,30 +202,19 @@ t_std_error nas_lag_member_add(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex
         return STD_ERR(INTERFACE,FAIL, 0);
     }
 
-    auto it_index = nas_lag_entry->port_list.find(ifindex);
-    if( it_index != nas_lag_entry->port_list.end()){
-        EV_LOGGING(INTERFACE, INFO, "NAS-LAG", "%d Port already exists, return",
-                   ifindex);
-        return STD_ERR_OK;
-    }
-
-
     interface_ctrl_t intf_ctrl;
     if (!nas_lag_intf_to_port(ifindex, &intf_ctrl)) {
         return STD_ERR(INTERFACE,FAIL, 0);
     }
 
     nas_lag_ndi_port.npu_id = intf_ctrl.npu_id;
-    nas_lag_ndi_port.npu_port= intf_ctrl.port_id;
-
+    nas_lag_ndi_port.npu_port = intf_ctrl.port_id;
 
     // Add port to NPU LAG
     if(nas_add_port_to_lag(nas_lag_ndi_port.npu_id,nas_lag_entry->ndi_lag_id,
                 &nas_lag_ndi_port,&ndi_lag_member_id) != STD_ERR_OK){
         return  STD_ERR(INTERFACE,FAIL, 0);
     }
-
-    nas_lag_entry->port_list.insert(ifindex);
 
     // Adding master NDI id to slave list.
     if(nas_add_slave_node(lag_master_id,ifindex,ndi_lag_member_id) != STD_ERR_OK){
@@ -234,7 +223,7 @@ t_std_error nas_lag_member_add(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex
 
 
     ndi_intf_link_state_t state;
-    if ((ndi_port_link_state_get(intf_ctrl.npu_id, intf_ctrl.port_id, &state))
+    if ((ndi_port_link_state_get(intf_ctrl.npu_id,intf_ctrl.port_id, &state))
                                    == STD_ERR_OK) {
         nas_lag_entry->port_oper_list[ifindex]= (state.oper_status ==ndi_port_OPER_UP) ? true : false;
     }
@@ -287,9 +276,6 @@ t_std_error nas_lag_member_delete(hal_ifindex_t lag_master_id,hal_ifindex_t ifin
     if(nas_remove_slave_node(ifindex) != STD_ERR_OK){
         return STD_ERR(INTERFACE,FAIL, 0);
     }
-
-    nas_lag_entry->port_list.erase(ifindex);
-    nas_lag_entry->port_oper_list.erase(ifindex);
 
     return ret;
 }

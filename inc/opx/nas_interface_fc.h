@@ -40,4 +40,5 @@ cps_api_return_code_t nas_cps_delete_fc_port(npu_id_t npu_id, port_t port);
 void nas_fc_fill_speed_autoneg_state(npu_id_t npu, port_t port, cps_api_object_t obj);
 void nas_fc_fill_supported_speed(npu_id_t npu, port_t port, cps_api_object_t obj);
 void nas_fc_fill_intf_attr(npu_id_t npu, port_t port, cps_api_object_t obj);
+void nas_fc_fill_misc_state(npu_id_t npu, port_t port, cps_api_object_t obj);
 #endif /* NAS_INTF_FC_H_ */

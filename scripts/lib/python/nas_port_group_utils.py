@@ -76,10 +76,11 @@ def create_and_add_pg_caps(pg, phy_mode, resp):
     br_modes = pg.get_breakout_caps()
     hwp_speeds = pg.get_hwport_speed_caps()
     hwp_count = len(pg.get_hw_ports())
+    fp_count = len(pg.get_fp_ports())
     for mode in br_modes:
         skip_ports = breakout_to_skip_port[mode]
-        for speed in hwp_speeds:
-            phy_npu_speed = fp.get_phy_npu_port_speed(mode, speed, hwp_count)
+        for hw_speed in hwp_speeds:
+            phy_npu_speed = fp.get_phy_npu_port_speed(mode, (hw_speed * hwp_count) / fp_count)
             if fp.verify_npu_supported_speed(phy_npu_speed) == False:
 #                nas_if.log_err("create_and_add_pg_caps: br_mode %d doesn't support speed %d " % (mode, phy_npu_speed))
 #               don't add this entry of spped or beakout
@@ -88,6 +89,9 @@ def create_and_add_pg_caps(pg, phy_mode, resp):
             phy_speed = phy_npu_speed
             if phy_mode == get_value(yang_phy_mode, 'fc'):
                 phy_speed = fp.get_fc_speed_frm_npu_speed(phy_npu_speed)
+                if phy_speed == 0:
+                    continue
+
             cps_obj = cps_object.CPSObject(module='base-pg/dell-pg/port-groups-state/port-group-state/br-cap',
                                            qual='observed',
                 data={pg_state_attr('br-cap/phy-mode'):phy_mode,
@@ -98,6 +102,32 @@ def create_and_add_pg_caps(pg, phy_mode, resp):
             resp.append(cps_obj.get())
             cps_obj = None
 
+def add_pg_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index = 0):
+    br_modes = pg.get_breakout_caps()
+    hwp_speeds = pg.get_hwport_speed_caps()
+    hwp_count = len(pg.get_hw_ports())
+    fp_count = len(pg.get_fp_ports())
+    for mode in br_modes:
+        skip_ports = breakout_to_skip_port[mode]
+        for hw_speed in hwp_speeds:
+            phy_npu_speed = fp.get_phy_npu_port_speed(mode, (hw_speed * hwp_count) / fp_count)
+            if fp.verify_npu_supported_speed(phy_npu_speed) == False:
+                # don't add this entry of spped or beakout
+                continue
+
+            phy_speed = phy_npu_speed
+            if phy_mode == get_value(yang_phy_mode, 'fc'):
+                phy_speed = fp.get_fc_speed_frm_npu_speed(phy_npu_speed)
+                if phy_speed == 0:
+                    continue
+            cap_list[str(cap_index)] = {'phy-mode':phy_mode,
+                                        'breakout-mode':mode,
+                                        'port-speed':phy_speed,
+                                        'skip-ports':skip_ports}
+            cap_index += 1
+
+    return cap_index
+
 # Add capability object for the port group in the cps get request
 def add_all_pg_caps(pg, resp):
     if pg == None:
@@ -105,6 +135,16 @@ def add_all_pg_caps(pg, resp):
     create_and_add_pg_caps(pg, yang_phy_mode_ether, resp)
     if pg.is_fc_supported():
         create_and_add_pg_caps(pg, yang_phy_mode_fc, resp)
+
+# Add capability to port group as child list in the cps get request
+def add_all_pg_caps_to_pg_obj(pg, pg_obj):
+    if pg == None:
+        return False
+    cap_list = {}
+    cap_index = add_pg_caps_to_pg_obj(pg, yang_phy_mode_ether, cap_list)
+    if pg.is_fc_supported():
+        add_pg_caps_to_pg_obj(pg, yang_phy_mode_fc, cap_list, cap_index)
+    pg_obj.add_attr(pg_state_attr('br-cap'), cap_list)
 
 # Get request for port group state object
 def create_and_add_pg_state_obj(pg, resp):
@@ -114,6 +154,7 @@ def create_and_add_pg_state_obj(pg, resp):
             data={base_pg_state_attr('front-panel-port'):pg.get_fp_ports(),
                   base_pg_state_attr('hwport-list'):pg.get_hw_ports(),
                   pg_state_attr('id'):pg.name })
+    add_all_pg_caps_to_pg_obj(pg, cps_obj)
     resp.append(cps_obj.get())
     add_all_pg_caps(pg,resp)
 
@@ -191,11 +232,19 @@ def set_sfp_port_group_config(pg, br_mode, port_speed, phy_mode):
     hwp_list = pg.get_hw_ports()
     fp_list.sort() # make sure that fp is in the sorted order in the list
     # set the HW port mapping to 0 fpr each fp
+    rollback_list = []
     for port in fp_list:
-        ret = fp_utils.set_fp_to_hwp_mapping(port, br_mode, port_speed, phy_mode, None)
+        hwports = []
+        ret = fp_utils.set_fp_to_hwp_mapping(port, br_mode, port_speed, phy_mode, hwports)
         if ret == False:
-            # TODO rollback
+            # rollback
+            nas_if.log_err('failed to clean hw_port list for port %d, start rollback' % port)
+            for port, hwports in rollback_list:
+                    nas_if.log_info('add back hw_port list %s to port %d' % (hwports, port))
+                    fp_utils.set_fp_to_hwp_mapping(port, pg.get_breakout_mode(), pg.get_port_speed(),
+                                                   pg.get_phy_mode(), hwports)
             return False
+        rollback_list.insert(0, (port, hwports))
     # set the HW port mapping based on the breakout mode
 
     # re-verify this case
@@ -218,8 +267,20 @@ def set_sfp_port_group_config(pg, br_mode, port_speed, phy_mode):
             i = i + 1
         ret = fp_utils.set_fp_to_hwp_mapping(port, br_mode, port_speed, phy_mode, hwports)
         if ret == False:
-            # TODO rollback
+            # rollback
+            nas_if.log_err('failed to add hw_port list %s to port %d, start rollback' %
+                           (hwports, port))
+            for port, hwports in rollback_list:
+                    if len(hwports) == 0:
+                        nas_if.log_info('clean hw_port list for port %d' % port)
+                        fp_utils.set_fp_to_hwp_mapping(port, br_mode, port_speed, phy_mode,
+                                                       hwports)
+                    else:
+                        nas_if.log_info('add back hw_port list %s to port %d' % (hwports, port))
+                        fp_utils.set_fp_to_hwp_mapping(port, pg.get_breakout_mode(), pg.get_port_speed(),
+                                                       pg.get_phy_mode(), hwports)
             return False
+        rollback_list.insert(0, (port, []))
     return True
 
 # Set breakout mode to DDQSFP28 port group
@@ -229,11 +290,18 @@ def set_ddqsfp_port_group_config(pg, fp_br_mode, port_speed, phy_mode):
         print 'FP list is empty'
         return False
 
+    rollback_list = []
     for fp_port in fp_list:
         ret = fp_utils.set_fp_port_config(fp_port, fp_br_mode, port_speed, phy_mode)
         if ret == False:
             # Rollback
+            nas_if.log_err('failed to config fp_port %d, start rollback' % fp_port)
+            for fp_port in rollback_list:
+                nas_if.log_info('rollback port %d config' % fp_port)
+                fp_utils.set_fp_port_config(fp_port, pg.get_breakout_mode(),
+                                            pg.get_port_speed(), pg.get_phy_mode())
             return False
+        rollback_list.append(fp_port)
     return True
 
 # Generic port group config handler
@@ -247,10 +315,17 @@ def set_port_group_config(pg, phy_mode, br_mode, port_speed):
         set_sfp_port_group_config(pg, fp_br_mode, port_speed, phy_mode)
     # If any of the value is None then skip it
     elif pg_type == 'unified_qsfp28' or pg_type == 'ethernet_qsfp' or pg_type == 'unified_qsfp':
+        rollback_list = []
         for port in fp_list:
             ret = fp_utils.set_fp_port_config(port, fp_br_mode, port_speed, phy_mode)
             if ret == False:
+                nas_if.log_err('failed to config fp_port %d, start rollback' % port)
+                for port in rollback_list:
+                    nas_if.log_info('rollback port %d config' % port)
+                    fp_utils.set_fp_port_config(port, pg.get_breakout_mode(),
+                                                pg.get_port_speed(), pg.get_phy_mode())
                 return False
+            rollback_list.append(port)
     elif pg_type == 'ethernet_ddqsfp28':
         fp_br_mode = ddqsfp_2_qsfp_brmode[br_mode]
         ret = set_ddqsfp_port_group_config(pg, fp_br_mode, port_speed, phy_mode)

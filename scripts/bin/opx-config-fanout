@@ -62,9 +62,6 @@ if __name__ == '__main__':
         nas_fp_cache.print_keys()
         exit(0)
 
-    npu = fp_obj.get_attr_data('npu-id')
-    phy_port_list = nas_if.physical_ports_for_front_panel_port(fp_obj)
-
     allowed_speed = get_value(breakout_allowed_speed, br_mode)
     if port_speed != None:
         if port_speed not in allowed_speed:
@@ -76,18 +73,27 @@ if __name__ == '__main__':
     _speed = get_value(yang_speed, port_speed)
     _mode = get_value(yang_breakout, br_mode)
 
-    breakout_cap = phy_port_list[0].get_attr_data('breakout-capabilities')
+    br_cap_list = fp_obj.get_attr_data('br-cap')
+    breakout_cap = []
+    for cap_key,cap_item in br_cap_list.items():
+        br_cap = cap_item['breakout-mode']
+        if br_cap not in breakout_cap:
+            breakout_cap.append(br_cap)
+
     if _mode not in breakout_cap:
         print 'breakout mode %d not supported on this port' % _mode
         sys.exit(1)
-    current_mode = phy_port_list[0].get_attr_data('fanout-mode')
-    current_speed = phy_port_list[0].get_attr_data('speed')
+    current_mode = fp_obj.get_attr_data('breakout-mode')
+    current_speed = fp_obj.get_attr_data('port-speed')
     if current_mode == _mode and current_speed == _speed:
         print 'Port already configured in the as breakoout mode %d and speed %d' % (
               _mode, _speed)
         sys.exit(1)
 
     l = []
+
+    npu = fp_obj.get_attr_data('npu-id')
+    phy_port_list = nas_if.physical_ports_for_front_panel_port(fp_obj)
 
     for phy_port in phy_port_list:
         if_port = if_cache.get_by_port(

@@ -24,6 +24,7 @@ import nas_phy_media as media
 import bytearray_utils as ba
 import dn_base_ip_tool
 import ifindex_utils
+import nas_fp_led_utils as fp_led
 import nas_if_lpbk as if_lpbk
 import nas_if_config_obj as if_config
 from nas_if_config_obj import intf_list
@@ -70,6 +71,7 @@ _yang_breakout_2x1 = 3
 _yang_breakout_4x1 = 2
 
 port_list = None
+fp_identification_led_control = None
 
 def _get_if_media_type(fp_port):
     if fp_port == None:
@@ -96,10 +98,11 @@ def _verify_intf_supported_speed(config, speed):
             return False
     return True
 
-
 def _add_default_speed(config, cps_obj):
     # fetch default speed
     media_type = config.get_media_type()
+    if media_type == None:
+        return
     nas_if.log_info("set default speed for media type " + str(media_type))
     speed = media.get_default_media_setting(media_type, 'speed')
     try:
@@ -108,10 +111,12 @@ def _add_default_speed(config, cps_obj):
     except ValueError:
         pass
     if speed == None:
+        nas_if.log_info('default speed setting not found')
         return
     if fp.is_qsfp28_cap_supported(config.get_fp_port()) == True:
-        nas_if.log_info('Do not push default speed in case of QSFP28 port')
-        return
+        if config.get_ietf_intf_type() !=  'ianaift:fibreChannel':
+            nas_if.log_info('Do not push default speed in case of QSFP28 port')
+            return
     if _verify_intf_supported_speed(config, speed) == False:
         nas_if.log_err('Media based default speed not supported %s' % str(speed))
         return
@@ -119,21 +124,32 @@ def _add_default_speed(config, cps_obj):
     nas_if.log_info("default speed is " + str(speed))
 
 def _add_default_autoneg(media_type, cps_obj):
+    if media_type == None:
+        return
     # fetch default autoneg
+    nas_if.log_info("set default autoneg for media type " + str(media_type))
     autoneg = media.get_default_media_setting(media_type, 'autoneg')
-    if autoneg == None:
+    if autoneg is None:
+        nas_if.log_info('default auto-negotiation setting not found')
         return
     nas_if.log_info("default autoneg is " + str(autoneg))
     cps_obj.add_attr(autoneg_attr_name, autoneg)
 
 def _add_default_duplex(media_type, cps_obj):
+    if media_type == None:
+        return
     # fetch default duplex
+    nas_if.log_info("set default duplex for media type " + str(media_type))
     duplex = media.get_default_media_setting(media_type, 'duplex')
-    if duplex == None:
+    if duplex is None:
+        nas_if.log_info('default duplex setting not found')
         duplex = _yang_dup_full
     cps_obj.add_attr(duplex_attr_name, duplex)
     nas_if.log_info("default Duplex is " + str(duplex))
 
+def _add_default_fec_mode(media_type, cps_obj):
+    # TODO: will add implementation code later
+    pass
 
 # Interface Speed is pushed down to hardware based on media connected and if it is configured AUTO(default).
 # Based on the port capability (QSFP+ or QSFP28) and mode configured(ethernet or FC), connected physical media
@@ -153,6 +169,7 @@ def _set_speed(speed, config, obj):
             # TODO default speed in breakout mode is not supported  yet
             # TODO it may cause issue in port group ports. Verify the usecases.
             _add_default_speed(config, obj)
+    return True
 
 def _set_autoneg(negotiation, config, obj):
     nas_if.log_info ('negotiation is ' + str(negotiation))
@@ -239,13 +256,13 @@ def check_if_media_support_phy_mode(media_type, config):
 
 # fetch media type from Media event object and then add corresponding default speed/autoneg
 def if_handle_set_media_type(op, obj):
-    nas_if.log_obj(obj.get())
+    nas_if.log_info('media obj: %s' % str(obj.get()))
     if_name = None
     try:
         npu = obj.get_attr_data(npu_attr_name)
         port = obj.get_attr_data(port_attr_name)
         media_type = obj.get_attr_data(media_type_attr_name)
-    except:
+    except ValueError:
         nas_if.log_info('missing npu,port or media type or non physical port cps obj request')
         nas_if.log_obj(obj.get())
         return True
@@ -286,9 +303,66 @@ def if_handle_set_media_type(op, obj):
         _add_default_autoneg(media_type, obj)
     if config.get_duplex() == _yang_auto_dup:
         _add_default_duplex(media_type, obj)
+    if config.get_fec_mode() == get_value(yang_fec_mode, 'AUTO'):
+        _add_default_fec_mode(media_type, obj)
+
+    # delete npu port attribute because NAS use them as flag for interface association
+    obj.del_attr(npu_attr_name)
+    obj.del_attr(port_attr_name)
 
     nas_if.log_info("media type setting is successful for " +str(if_name))
     config.show()
+
+    return True
+
+def _if_init_config(obj, config):
+    # Below rule is applied to process speed, duplex, auto-neg and FEC attritube in cps object
+    # 1. if attribute is in input cps object, use it and do not change anything
+    # 2. else, if attribute is in config, add it to cps object
+    # 3. else, add "auto" to cps object
+    speed = nas_if.get_cps_attr(obj, speed_attr_name)
+    if speed == None:
+        cfg_speed = config.get_speed()
+        if cfg_speed == None:
+            cfg_speed = _yang_auto_speed
+        obj.add_attr(speed_attr_name, cfg_speed)
+    duplex = nas_if.get_cps_attr(obj, duplex_attr_name)
+    if duplex == None:
+        cfg_duplex = config.get_duplex()
+        if cfg_duplex == None:
+            cfg_duplex = _yang_auto_dup
+        obj.add_attr(duplex_attr_name, cfg_duplex)
+    ng = nas_if.get_cps_attr(obj, negotiation_attr_name)
+    if ng == None:
+        cfg_ng = config.get_negotiation()
+        if cfg_ng == None:
+            cfg_ng = _yang_auto_neg
+        obj.add_attr(negotiation_attr_name, cfg_ng)
+
+    fec = nas_if.get_cps_attr(obj, fec_mode_attr_name)
+    if fec == None:
+        cfg_fec = config.get_fec_mode()
+        if cfg_fec == None:
+            auto_fec = get_value(yang_fec_mode, 'AUTO')
+            if_cfg_speed = config.get_cfg_speed()
+            if if_cfg_speed != None and is_fec_supported(auto_fec, if_cfg_speed):
+                cfg_fec = auto_fec
+        if cfg_fec != None:
+            obj.add_attr(fec_mode_attr_name, cfg_fec)
+
+
+def _fp_identification_led_handle(cps_obj):
+    ret = True
+    if fp_identification_led_control:
+        try:
+            led_val = nas_if.get_cps_attr(cps_obj, 'base-if-phy/if/interfaces/interface/identification-led')
+            if led_val != None:
+                cps_obj.del_attr('base-if-phy/if/interfaces/interface/identification-led')
+                name = cps_obj.get_attr_data('if/interfaces/interface/name')
+                ret = fp_led.identification_led_set(name, led_val)
+        except:
+            pass
+    return ret
 
 # Interface config is cached here in case of front panel port. It does add default attributes
 # like speed, FEC, autoneg , duplex etc.
@@ -302,72 +376,102 @@ def _if_update_config(op, obj):
     duplex = None
     media_type = None
     breakout_mode = None
-    breakout_cap = None
 
-    nas_if.log_info("update config for " +str(op))
     try:
         if_name = obj.get_attr_data(ifname_attr_name)
     except:
         # check for media_type change event obj
-        nas_if.log_err('process media event')
+        nas_if.log_info('process media event, op %s' % op)
         return(if_handle_set_media_type(op, obj))
+
+    nas_if.log_info('update config for %s: op %s' % (if_name, op))
+
+    npu_port_found = True
+    try:
+        npu_id = obj.get_attr_data(npu_attr_name)
+        port_id = obj.get_attr_data(port_attr_name)
+    except:
+        npu_port_found = False
+
     if op == 'create':
         # if config is cached only for physical interface
         if_type = if_config.get_intf_type(obj)
         if if_type != 'front-panel':
             return True
-        try:
-            npu_id = obj.get_attr_data(npu_attr_name)
-            port_id = obj.get_attr_data(port_attr_name)
-        except:
-            nas_if.log_info(' update config: Unable to get npu or port from the obj ' +str(if_name))
-            return False
-        try:
-            (breakout_cap, breakout_mode) = nas_if.get_port_breakoutCap_currentMode_mode(npu_id, port_id)
-        except:
-            nas_if.log_err(' unable to get breakout mode ' + str(if_name))
-            return False
 
-        fp_port = nas_if.get_cps_attr(obj, fp_port_attr_name)
-        subport_id = nas_if.get_cps_attr(obj, subport_attr_name)
-        #read media type from PAS
-        media_type = _get_if_media_type(fp_port)
         ietf_intf_type = nas_if.get_cps_attr(obj,get_value(attr_name,'intf_type'))
+        config = if_config.IF_CONFIG(if_name, ietf_intf_type)
+
+        if if_config.if_config_add(if_name, config) == False:
+            nas_if.log_err(' interface config already present for ' + str(if_name))
+        nas_if.log_info(' interface config added successfully for ' + str(if_name))
 
         if (nas_if.get_cps_attr(obj, negotiation_attr_name) is None):
             obj.add_attr(negotiation_attr_name, _yang_auto_neg)
 
-        config = if_config.IF_CONFIG(if_name, npu_id, port_id, media_type, breakout_mode,
-                                     ietf_intf_type, fp_port, subport_id)
-
-        fp_obj = fp.find_front_panel_port(fp_port)
-        if fp_port != None:
-            config.set_cfg_speed(fp_obj.get_port_speed())
-        else:
-            nas_if.log_err('Unable to find front panel object for port %d' % fp_port)
-
-        if if_config.if_config_add(if_name, config) == False:
-            nas_if.log_err(' interface config already present for ' + str(if_name))
-        nas_if.log_info(' interface config updated successfully for ' + str(if_name))
-
-        if check_if_media_supported(media_type, config) != True:
-            config.set_is_media_supported(False)
-            nas_if.log_err(' Plugged-in media is not supported for ' + str(if_name))
-            return True
-
-        if check_if_media_support_phy_mode(media_type, config) != True:
-            config.set_is_media_supported(False)
-            nas_if.log_err(' Plugged-in media does not support configured phy mode for ' + str(if_name))
-            return True
-
-        config.set_is_media_supported(True)
-        obj.add_attr(media_type_attr_name, media_type)
+    config = if_config.if_config_get(if_name)
+    if config is None:
+        nas_if.log_info(' interface not present in if config list' + str(if_name))
+        return True
+    if npu_port_found:
+        #NPU port attribute only found in create or associate/disassociate request
+        nas_if.log_info(' set npu %s and port %s to if config' % (str(npu_id), str(port_id)))
+        config.set_npu_port(npu_id, port_id)
 
     if op == 'set' or op == 'create':
-        config = if_config.if_config_get(if_name)
-        if config == None:
-            nas_if.log_info(' interface not present in if config list' + str(if_name))
-            return True
+        force_update = False
+        if npu_port_found:
+            if npu_id != None or port_id != None:
+                #for create or assiociate request
+                fp_port = nas_if.get_cps_attr(obj, fp_port_attr_name)
+                subport_id = nas_if.get_cps_attr(obj, subport_attr_name)
+                config.set_fp_port(fp_port)
+                config.set_subport_id(subport_id)
+
+                fp_obj = fp.find_front_panel_port(fp_port)
+                if fp_obj != None:
+                    config.set_cfg_speed(fp_obj.get_port_speed())
+                    config.set_breakout_mode(fp_obj.get_breakout_mode())
+                else:
+                    nas_if.log_err('Unable to find front panel object for port %d' % fp_port)
+
+                #read media type from PAS
+                media_type = _get_if_media_type(fp_port)
+                nas_if.log_info(' set media_type %s to if config for fp %d' % (
+                                str(media_type), fp_port));
+                config.set_media_type(media_type)
+
+                if check_if_media_supported(media_type, config) != True:
+                    config.set_is_media_supported(False)
+                    nas_if.log_err(' Plugged-in media is not supported for ' + str(if_name))
+                    return True
+
+                if check_if_media_support_phy_mode(media_type, config) != True:
+                    config.set_is_media_supported(False)
+                    nas_if.log_err(' Plugged-in media does not support configured phy mode for %s' %
+                                   if_name)
+                    return True
+
+                config.set_is_media_supported(True)
+                obj.add_attr(media_type_attr_name, media_type)
+                _if_init_config(obj, config)
+                if op != 'create':
+                    # for the case of interface associate, force attribute update
+                    force_update = True
+            else:
+                #for disassociate request
+                nas_if.log_info(' reset breakout_mode and media type in if config')
+                config.set_breakout_mode(None)
+                config.set_media_type(None)
+
+        if not(_fp_identification_led_handle(obj)):
+            nas_if.log_err('Setting identification led failed')
+            return False
+        # if media supports Ethernet and intf type is ethernet then only proceeds
+        # otherwise ignore for now.
+        intf_phy_mode = get_value(ietf_type_2_phy_mode, config.get_ietf_intf_type())
+        media_type = config.get_media_type()
+
         # if media supports Ethernet and intf type is ethernet then only proceeds
         # otherwise ignore for now.
         if config.get_is_media_supported() == False:
@@ -383,20 +487,22 @@ def _if_update_config(op, obj):
         # do not set auto speed in case of breakout mode.
         # In case of ethernet mode, set default speed only in case of breakout mode 1x1
         # in case of FC mode, set the default speed of the media.
-        if speed != None and speed != config.get_speed():
+        if speed != None and (force_update or speed != config.get_speed()):
             if _set_speed(speed, config, obj) == False:
                 nas_if.log_err('failed to set speed')
                 return False
 
-        # in case of negotiation, add autoneg attribute to on or off or default autoneg if negotiation== auto
-        if negotiation != None and negotiation != config.get_negotiation():
+        # in case of negotiation, add autoneg attribute to on or off or default autoneg
+        # if negotiation== auto
+        if negotiation != None and (force_update or negotiation != config.get_negotiation()):
             _set_autoneg(negotiation, config, obj)
 
-        if duplex != None and duplex != config.get_duplex():
+        if duplex != None and (force_update or duplex != config.get_duplex()):
             _set_duplex(duplex, config, obj)
 
         fec_mode = nas_if.get_cps_attr(obj, fec_mode_attr_name)
-        if op == 'create' or (fec_mode != None and fec_mode != config.get_fec_mode()):
+        if op == 'create' or (fec_mode != None and
+                              (force_update or fec_mode != config.get_fec_mode())):
             if _set_fec_mode(fec_mode, config, obj, op) != True:
                 nas_if.log_err('Failed to set FEC mode %d to interface %s' % (fec_mode, if_name))
                 return False
@@ -564,16 +670,16 @@ def set_intf_rpc_cb(methods, params):
             front_panel_port = cps_obj.get_attr_data(fp_port_attr_name)
         except ValueError:
             have_fp_attr = False
-            pass
         if have_fp_attr == True:
             subport_id = 0
             try:
                 subport_id = cps_obj.get_attr_data(subport_attr_name)
-            except:
+            except ValueError:
+                # use default value if no attribute found in object
                 pass
-            if front_panel_port == None:
-                npu_id = 0
-                port_id = 0
+            if front_panel_port is None:
+                npu_id = None
+                port_id = None
             else:
                 try:
                     (npu_id, port_id, hw_port) = fp_utils.get_npu_port_from_fp(
@@ -715,6 +821,8 @@ if __name__ == '__main__':
     d = {}
     d['transaction'] = get_mac_cb
     cps.obj_register(get_mac_hdl, get_value(keys_id, 'get_mac_key'), d)
+
+    fp_identification_led_control = fp_led.identification_led_control_get()
 
     # Initialization complete
     # Notify systemd: Daemon is ready

@@ -55,6 +55,7 @@ t_std_error _set_generic_mac (npu_id_t npu, port_t port, cps_api_attr_id_t attr,
 
 }
 
+/* Stores cps varied len data in u32, before sending to NDI */
 static
 t_std_error _set_generic_u32(npu_id_t npu, port_t port, cps_api_attr_id_t attr,
          cps_api_object_t obj) {
@@ -62,7 +63,7 @@ t_std_error _set_generic_u32(npu_id_t npu, port_t port, cps_api_attr_id_t attr,
     nas_fc_param_t param;
     cps_api_object_attr_t _attr = cps_api_object_attr_get(obj,attr);
     if (_attr==NULL)  return STD_ERR(INTERFACE,FAIL,0);
-    param.u32 = cps_api_object_attr_data_u32(_attr);
+    param.u32 = cps_api_object_attr_data_uint(_attr);
     return ndi_set_fc_attr(npu, port, &param, attr);
 }
 
@@ -75,6 +76,21 @@ t_std_error _set_generic_bool(npu_id_t npu, port_t port, cps_api_attr_id_t attr,
     return ndi_set_fc_attr(npu, port, &param, attr);
 
 }
+
+static
+t_std_error _set_fc_speed(npu_id_t npu, port_t port, cps_api_attr_id_t attr,
+         cps_api_object_t obj) {
+
+    cps_api_object_attr_t _attr = cps_api_object_attr_get(obj,attr);
+    if (_attr == NULL)  return STD_ERR(INTERFACE,FAIL,0);
+    uint32_t speed =  cps_api_object_attr_data_uint(_attr);
+    if (speed == BASE_IF_SPEED_AUTO) {
+        EV_LOGGING(INTERFACE,DEBUG ,"NAS-FCOE-MAP","Speed auto is not supported for FC interfaces");
+        return STD_ERR_OK;
+    }
+    return _set_generic_u32(npu, port, attr, obj);
+}
+
 
 /* Will come as interface object */
 
@@ -95,7 +111,7 @@ static const std::unordered_map<cps_api_attr_id_t,
         { BASE_IF_FC_IF_INTERFACES_INTERFACE_FCOE_PKT_VLANID, _set_generic_u32},
         { BASE_IF_FC_IF_INTERFACES_INTERFACE_PRIORITY,       _set_generic_u32},
         { BASE_IF_FC_IF_INTERFACES_INTERFACE_MTU,            _set_generic_u32},
-        { DELL_IF_IF_INTERFACES_INTERFACE_SPEED,             _set_generic_u32},
+        { DELL_IF_IF_INTERFACES_INTERFACE_SPEED,             _set_fc_speed},
         { BASE_IF_PHY_IF_INTERFACES_INTERFACE_PHY_MEDIA,    _set_generic_u32},
         { BASE_IF_FC_IF_INTERFACES_STATE_INTERFACE_BB_CREDIT_RECEIVE, _set_generic_u32},
         { BASE_IF_FC_IF_INTERFACES_INTERFACE_FLOW_CONTROL_ENABLE, _set_generic_bool},
@@ -289,6 +305,14 @@ void nas_fc_fill_intf_attr(npu_id_t npu, port_t port, cps_api_object_t obj)
         it->second(npu, port, it->first, obj);
 
     }
-    return;
+
+}
+
+
+void nas_fc_fill_misc_state(npu_id_t npu, port_t port, cps_api_object_t obj)
+{
+
+    _get_generic_u32(npu, port, DELL_IF_IF_INTERFACES_STATE_INTERFACE_FC_MTU, obj);
+    _get_generic_u32(npu, port, DELL_IF_IF_INTERFACES_STATE_INTERFACE_BB_CREDIT, obj);
 
 }

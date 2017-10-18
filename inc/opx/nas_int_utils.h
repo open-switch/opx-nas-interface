@@ -24,11 +24,15 @@
 
 #include "nas_ndi_common.h"
 #include "std_utils.h"
+#include "hal_if_mapping.h"
+#include "std_error_codes.h"
+#include "ds_common_types.h"
+
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
 
 int nas_int_name_to_if_index(hal_ifindex_t *if_index, const char *name);
 t_std_error nas_int_get_npu_port(hal_ifindex_t port_index, ndi_port_t *ndi_port);

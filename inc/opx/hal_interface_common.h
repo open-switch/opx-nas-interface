@@ -74,7 +74,7 @@ t_std_error hal_create_interfaces(void);
  * @param len length of the packet
  * @return standard return code
  */
-t_std_error hal_virtual_interace_send(npu_id_t npu, npu_port_t port, int queue,
+t_std_error hal_virtual_interface_send(npu_id_t npu, npu_port_t port, int queue,
         const void * data, unsigned int len);
 
 //! the callback that will be used to process a packet

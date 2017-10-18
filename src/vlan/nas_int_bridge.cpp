@@ -34,7 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static bridge_list_t bridge_list;
+static auto bridge_list = new bridge_list_t;
 typedef std::unordered_map <hal_vlan_id_t, hal_ifindex_t>  vlanid_to_bridge_t;
 vlanid_to_bridge_t vid_to_bridge;
 
@@ -85,7 +85,7 @@ t_std_error nas_vlan_get_all_info(cps_api_object_list_t list)
     EV_LOGGING(INTERFACE, DEBUG, "NAS-Vlan",
            "Getting all vlan interfaces");
 
-    for ( auto local_it = bridge_list.begin(); local_it!= bridge_list.end(); ++local_it ) {
+    for ( auto local_it = bridge_list->begin(); local_it!= bridge_list->end(); ++local_it ) {
         cps_api_object_t obj = cps_api_object_list_create_obj_and_append(list);
         nas_pack_vlan_if(obj, &local_it->second);
     }
@@ -106,9 +106,9 @@ void nas_bridge_unlock(void)
 nas_bridge_t *nas_get_bridge_node(hal_ifindex_t index)
 {
 
-    auto it = bridge_list.find(index);
+    auto it = bridge_list->find(index);
 
-    if (it == bridge_list.end()) {
+    if (it == bridge_list->end()) {
        EV_LOGGING(INTERFACE, INFO, "NAS-Br","Error finding bridge intf %d", index);
        return NULL;
     }
@@ -140,8 +140,8 @@ nas_bridge_t* nas_create_insert_bridge_node(hal_ifindex_t index, const char *nam
         node.ifindex = index;
         safestrncpy(node.name, name, sizeof(node.name));
 
-        bridge_list[index] = node;
-        nas_bridge_t *p_node = &bridge_list.at(index);
+        bridge_list->insert({index,node});
+        nas_bridge_t *p_node = &bridge_list->at(index);
         std_dll_init (&p_node->tagged_list.port_list);
         std_dll_init (&p_node->untagged_list.port_list);
         std_dll_init (&p_node->untagged_lag.port_list);
@@ -185,7 +185,7 @@ t_std_error nas_cleanup_bridge(nas_bridge_t *p_bridge_node)
         nas_del_vlan_to_bridge_map(p_bridge_node->vlan_id, p_bridge_node->ifindex);
     }
     /* Delete the bridge */
-    bridge_list.erase(p_bridge_node->ifindex);
+    bridge_list->erase(p_bridge_node->ifindex);
     return rc;
 }
 t_std_error nas_delete_bridge(hal_ifindex_t index)

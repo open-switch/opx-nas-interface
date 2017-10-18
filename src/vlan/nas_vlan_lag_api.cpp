@@ -32,6 +32,7 @@
 #include "dell-base-if.h"
 #include "dell-interface.h"
 #include "std_mutex_lock.h"
+#include "nas_if_utils.h"
 
 #include <unordered_map>
 #include <unordered_set>
@@ -44,7 +45,7 @@ typedef std::vector <ndi_port_t> nas_lag_mem_ndi_list_t;
 typedef std::unordered_map <hal_ifindex_t, nas_vlan_lag_t> nas_lag_list_t;
 typedef std::unordered_map <hal_ifindex_t, nas_vlan_lag_t >::iterator nas_lag_list_it;
 
-static nas_lag_list_t lag_list;
+static auto lag_list = new nas_lag_list_t;
 
 
 
@@ -54,20 +55,21 @@ std_mutex_type_t *vlan_lag_mutex_lock()
     return &vlan_lag_lock;
 }
 
+
 static t_std_error nas_vlan_create_lag(hal_ifindex_t ifindex)
 {
-    nas_lag_list_it lag_it = lag_list.find(ifindex);
+    nas_lag_list_it lag_it = lag_list->find(ifindex);
 
     EV_LOGGING(INTERFACE, INFO , "NAS-VLAN-LAG",
             "Add LAG %d using CPS", ifindex);
 
         /* Now that LAG exists, proceed further */
-    if(lag_it == lag_list.end()) {
+    if(lag_it == lag_list->end()) {
         nas_vlan_lag_t vlan_lag_entry;
 
         vlan_lag_entry.lag_index = ifindex;
         vlan_lag_entry.vlan_enable = false;
-        lag_list[ifindex] = vlan_lag_entry;
+        lag_list->insert({ifindex, vlan_lag_entry});
     }
     else {
         EV_LOGGING(INTERFACE, INFO , "NAS-VLAN-LAG",
@@ -78,18 +80,18 @@ static t_std_error nas_vlan_create_lag(hal_ifindex_t ifindex)
 }
 
 static t_std_error nas_vlan_delete_lag(hal_ifindex_t ifindex) {
-    nas_lag_list_it lag_it = lag_list.find(ifindex);
+    nas_lag_list_it lag_it = lag_list->find(ifindex);
 
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
             "Delete LAG %d using CPS", ifindex);
 
-    if(lag_it == lag_list.end()) {
+    if(lag_it == lag_list->end()) {
         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
                 "Missing Lag IfIndex %d ", ifindex);
         return (STD_ERR(INTERFACE,FAIL, 0));
     }
 
-    lag_list.erase(ifindex);
+    lag_list->erase(ifindex);
 
     return STD_ERR_OK;
 }
@@ -105,7 +107,7 @@ void nas_set_vlan_enable(nas_vlan_lag_t *lag_entry) {
 
 void nas_handle_del_vlan_lag(hal_vlan_id_t vlan_id) {
 
-    for (auto lag_it = lag_list.begin(); lag_it != lag_list.end(); ++lag_it) {
+    for (auto lag_it = lag_list->begin(); lag_it != lag_list->end(); ++lag_it) {
         nas_vlan_lag_t *lag_entry = &(lag_it->second);
         if (lag_entry->vlan_enable != true) {
             continue;
@@ -132,9 +134,9 @@ void nas_handle_del_vlan_lag(hal_vlan_id_t vlan_id) {
     }
 }
 
-void nas_vlan_set_taaged_lag_mtu(hal_vlan_id_t vlan_id,uint32_t mtu) {
+void nas_vlan_set_tagged_lag_mtu(hal_vlan_id_t vlan_id,uint32_t mtu) {
 
-    for (auto lag_it = lag_list.begin(); lag_it != lag_list.end(); ++lag_it) {
+    for (auto lag_it = lag_list->begin(); lag_it != lag_list->end(); ++lag_it) {
         nas_vlan_lag_t *lag_entry = &(lag_it->second);
         if (lag_entry->vlan_enable != true) {
             continue;
@@ -154,8 +156,8 @@ void nas_vlan_set_taaged_lag_mtu(hal_vlan_id_t vlan_id,uint32_t mtu) {
 void nas_dump_val_lag_list()
 {
     int i =1;
-    for (auto lag_it = lag_list.begin();
-        lag_it != lag_list.end(); ++lag_it) {
+    for (auto lag_it = lag_list->begin();
+        lag_it != lag_list->end(); ++lag_it) {
 
         auto lag_entry = &(lag_it->second);
 
@@ -236,9 +238,9 @@ static t_std_error nas_process_lag_mem_updates_for_vlan(hal_ifindex_t ifindex, n
     EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
            "LAG %d recvd member update !!!!", ifindex);
 
-    nas_lag_list_it lag_it = lag_list.find(ifindex);
+    nas_lag_list_it lag_it = lag_list->find(ifindex);
 
-    if(lag_it == lag_list.end()) {
+    if(lag_it == lag_list->end()) {
         EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                "Invalid LAG % in VLAN !", ifindex);
         return (STD_ERR(INTERFACE,FAIL, 0));
@@ -256,7 +258,7 @@ static t_std_error nas_process_lag_mem_updates_for_vlan(hal_ifindex_t ifindex, n
             EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
                    "Port %d deleted from LAG % ", port_node.ifindex, ifindex);
 
-            if(lag_entry->vlan_enable) {
+            if(lag_entry->vlan_enable && (!nas_is_virtual_port(port_node.ifindex))) {
                 nas_add_or_del_vlan_on_lag_mem_update(lag_entry, &(port_node.ndi_port), false);
             }
             //Now erase the member from lag_entry
@@ -294,7 +296,7 @@ static t_std_error nas_process_lag_mem_updates_for_vlan(hal_ifindex_t ifindex, n
 
             lag_entry->lag_mem[*port_it] = lag_mem;
             //New port in LAG group, add it to NPU
-            if(lag_entry->vlan_enable) {
+            if(lag_entry->vlan_enable && (!nas_is_virtual_port(*port_it))) {
                 nas_add_or_del_vlan_on_lag_mem_update(lag_entry, &(lag_mem.ndi_port), true);
             }
             else {
@@ -391,20 +393,21 @@ static t_std_error nas_add_or_del_lag_in_vlan(nas_vlan_lag_t *lag_entry, hal_vla
 
         nas_port_node_t &port_node = it->second;
 
-        if(nas_add_or_del_port_to_vlan(0, vlan_id, &port_node.ndi_port,
-                                       port_mode, add_flag) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE, ERR, "NAS-VLAN",
-                    "Failure updating port %d LAG entry %d in Vlan %d",
-                    port_node.ifindex, lag_entry->lag_index, vlan_id);
-            fail =true;
-            break;
-        } else {
-            if (roll_bk) {
-                mem.npu_id = port_node.ndi_port.npu_id;
-                mem.npu_port = port_node.ndi_port.npu_port;
-                lag_mem_ndi.push_back(mem);
+        if(!nas_is_virtual_port(port_node.ifindex)){
+            if(nas_add_or_del_port_to_vlan(0, vlan_id, &port_node.ndi_port,
+                    port_mode, add_flag) != STD_ERR_OK) {
+                EV_LOGGING(INTERFACE, ERR, "NAS-VLAN",
+                        "Failure updating port %d LAG entry %d in Vlan %d",
+                        port_node.ifindex, lag_entry->lag_index, vlan_id);
+                fail =true;
+                break;
+            }else {
+                if (roll_bk) {
+                    mem.npu_id = port_node.ndi_port.npu_id;
+                    mem.npu_port = port_node.ndi_port.npu_port;
+                    lag_mem_ndi.push_back(mem);
+                }
             }
-
         }
     }
     if (fail && roll_bk) {
@@ -437,8 +440,8 @@ t_std_error nas_handle_lag_add_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_t lag
     nas_lag_mem_list_it it;
     bool roll_bk_sup = (roll_bk==nullptr)? false:true;
 
-    nas_lag_list_it lag_it = lag_list.find(lag_index);
-    if(lag_it == lag_list.end()) {
+    nas_lag_list_it lag_it = lag_list->find(lag_index);
+    if(lag_it == lag_list->end()) {
         EV_LOGGING(INTERFACE, ERR , "NAS-Vlan",
                "Invalid LAG %d being added to Vlan %d", lag_index, p_bridge->vlan_id);
         return (STD_ERR(INTERFACE,FAIL, 0));
@@ -476,6 +479,19 @@ t_std_error nas_handle_lag_add_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_t lag
             return STD_ERR(INTERFACE,FAIL, 0);
         }
     }
+    if_master_info_t master_info = { nas_int_type_VLAN, port_mode, p_bridge->ifindex};
+    BASE_IF_MODE_t intf_mode = nas_intf_get_mode(lag_index);
+    if(!nas_intf_add_master(lag_index, master_info)){
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN","Failed to add master for vlan memeber lag");
+    } else {
+        BASE_IF_MODE_t new_mode = nas_intf_get_mode(lag_index);
+        if (new_mode != intf_mode) {
+            if (nas_intf_handle_intf_mode_change(lag_index, new_mode) == false) {
+                EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "Update to NAS-L3 about interface mode change failed(%d)", lag_index);
+            }
+        }
+    }
+
 
     if (nas_add_or_del_lag_in_vlan(lag_entry, p_bridge->vlan_id,
                                port_mode, true, roll_bk_sup) != STD_ERR_OK) {
@@ -515,8 +531,8 @@ t_std_error  nas_handle_lag_del_from_vlan(nas_bridge_t *p_bridge, hal_ifindex_t 
     nas_lag_mem_list_it it;
     bool roll_bk_sup = (roll_bk==nullptr)? false:true;
 
-    nas_lag_list_it lag_it = lag_list.find(lag_index);
-    if (lag_it == lag_list.end()) {
+    nas_lag_list_it lag_it = lag_list->find(lag_index);
+    if (lag_it == lag_list->end()) {
         EV_LOGGING(INTERFACE, ERR , "NAS-Vlan",
            "Invalid LAG %d being added to Vlan %d", lag_index, p_bridge->vlan_id);
         return (STD_ERR(INTERFACE,FAIL, 0));
@@ -530,6 +546,18 @@ t_std_error  nas_handle_lag_del_from_vlan(nas_bridge_t *p_bridge, hal_ifindex_t 
         return STD_ERR(INTERFACE,FAIL, 0);
     }
 
+    if_master_info_t master_info = { nas_int_type_VLAN, port_mode, p_bridge->ifindex};
+    BASE_IF_MODE_t intf_mode = nas_intf_get_mode(lag_index);
+    if(!nas_intf_del_master(lag_index, master_info)){
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN","Failed to delete master for vlan memeber lag");
+    } else {
+        BASE_IF_MODE_t new_mode = nas_intf_get_mode(lag_index);
+        if (new_mode != intf_mode) {
+            if (nas_intf_handle_intf_mode_change(lag_index, new_mode) == false) {
+                EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "Update to NAS-L3 about interface mode change failed(%d)", lag_index);
+            }
+        }
+    }
     /* Delete from Kernel now */
     if(cps_del == true) {
         if(nas_cps_del_port_from_os(p_bridge->vlan_id, lag_index, port_mode) !=
@@ -577,7 +605,7 @@ t_std_error nas_handle_lag_index_in_cps_set(nas_bridge_t *p_bridge, nas_port_lis
 {
     t_std_error rc = STD_ERR_OK;
 
-    for(auto lag_it = lag_list.begin(); lag_it != lag_list.end(); ++lag_it) {
+    for(auto lag_it = lag_list->begin(); lag_it != lag_list->end(); ++lag_it) {
         nas_vlan_lag_t *lag_entry = &(lag_it->second);
         //check in the list only if VLAN is enabled for this LAG
         nas_vlan_list_it vlan_it;
@@ -614,8 +642,8 @@ t_std_error nas_base_handle_lag_del(hal_ifindex_t br_index, hal_ifindex_t lag_in
 {
     nas_vlan_lag_t *lag_entry;
     nas_lag_mem_list_it it;
-    nas_lag_list_it lag_it = lag_list.find(lag_index);
-    if(lag_it == lag_list.end()) {
+    nas_lag_list_it lag_it = lag_list->find(lag_index);
+    if(lag_it == lag_list->end()) {
         EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                "Invalid LAG %d being deleted from Vlan %d", lag_index, vlan_id);
         return (STD_ERR(INTERFACE,FAIL, 0));
@@ -655,4 +683,17 @@ t_std_error nas_base_handle_lag_del(hal_ifindex_t br_index, hal_ifindex_t lag_in
         lag_entry->vlan_enable = false;
     }
     return STD_ERR_OK;
+}
+
+bool nas_vlan_apply_lag_port_mapping_update(hal_ifindex_t lag_idx, hal_ifindex_t member_idx,
+                                            npu_id_t npu, port_t port, bool add_port){
+    std_mutex_simple_lock_guard lock_t(vlan_lag_mutex_lock());
+    auto it = lag_list->find(lag_idx);
+    if(it == lag_list->end()){
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN-LAG","No lag entry for ifindex %d found",lag_idx);
+    }
+
+    ndi_port_t ndi_port = {npu,port};
+    nas_add_or_del_vlan_on_lag_mem_update(&(it->second),&ndi_port,add_port);
+    return true;
 }

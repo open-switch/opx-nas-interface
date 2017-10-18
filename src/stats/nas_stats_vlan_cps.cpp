@@ -43,8 +43,8 @@
 #include <stdint.h>
 #include <time.h>
 
-static std::vector<ndi_stat_id_t> vlan_stat_ids;
-static std::unordered_set<npu_id_t> npu_ids;
+static auto vlan_stat_ids = new std::vector<ndi_stat_id_t>;
+static auto npu_ids = new std::unordered_set<npu_id_t>;
 
 
 
@@ -65,7 +65,7 @@ static t_std_error populate_vlan_stat_ids(){
     }
 
     for(unsigned int ix = 0 ; ix < max_vlan_stat_id ; ++ix ){
-        vlan_stat_ids.push_back(ids_list[ix]);
+        vlan_stat_ids->push_back(ids_list[ix]);
     }
 
     const nas_switches_t * switches = nas_switch_inventory();
@@ -79,7 +79,7 @@ static t_std_error populate_vlan_stat_ids(){
         }
 
         for (size_t sd_ix = 0; sd_ix < sd->number_of_npus; ++sd_ix) {
-            npu_ids.insert(sd->npus[sd_ix]);
+            npu_ids->insert(sd->npus[sd_ix]);
         }
     }
     return STD_ERR_OK;
@@ -107,17 +107,17 @@ static bool get_stats(hal_ifindex_t vlan_ifindex, cps_api_object_list_t list){
         return false;
     }
 
-    const size_t vlan_stat_id_len = vlan_stat_ids.size();
+    const size_t vlan_stat_id_len = vlan_stat_ids->size();
     uint64_t stat_values[vlan_stat_id_len];
     uint64_t total_stat_values[vlan_stat_id_len];
     memset(stat_values,0,sizeof(stat_values));
     memset(total_stat_values,0,sizeof(total_stat_values));
 
 
-    for(auto it = npu_ids.begin(); it != npu_ids.end() ; ++it ){
+    for(auto it = npu_ids->begin(); it != npu_ids->end() ; ++it ){
 
         if(ndi_vlan_stats_get(*it, intf_ctrl.vlan_id,
-                              (ndi_stat_id_t *)&vlan_stat_ids[0],
+                              (ndi_stat_id_t *)&(vlan_stat_ids->at(0)),
                               stat_values,vlan_stat_id_len) != STD_ERR_OK) {
             return false;
         }
@@ -130,7 +130,7 @@ static bool get_stats(hal_ifindex_t vlan_ifindex, cps_api_object_list_t list){
     }
 
     for(unsigned int ix = 0 ; ix < vlan_stat_id_len ; ++ix ){
-         cps_api_object_attr_add_u64(obj, vlan_stat_ids[ix], total_stat_values[ix]);
+         cps_api_object_attr_add_u64(obj, vlan_stat_ids->at(ix), total_stat_values[ix]);
     }
 
     cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,time(NULL));
@@ -144,12 +144,37 @@ static cps_api_return_code_t if_stats_get (void * context, cps_api_get_params_t 
 
     cps_api_object_t obj = cps_api_object_list_get(param->filters,ix);
     hal_ifindex_t ifindex=0;
-       if(!nas_stat_get_ifindex_from_obj(obj,&ifindex,false)){
-           return (cps_api_return_code_t)STD_ERR(INTERFACE,CFG,0);
-       }
 
+    if(!nas_stat_get_ifindex_from_obj(obj,&ifindex,false)){
+        return (cps_api_return_code_t)STD_ERR(INTERFACE,CFG,0);
+    }
 
-    if(get_stats(ifindex,param->list)) return cps_api_ret_code_OK;
+    interface_ctrl_t intf_ctrl;
+    memset(&intf_ctrl, 0, sizeof(interface_ctrl_t));
+
+    intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF;
+    intf_ctrl.if_index = ifindex;
+
+    if (dn_hal_get_interface_info(&intf_ctrl) != STD_ERR_OK) {
+        EV_LOG(ERR,INTERFACE,0,"NAS-STAT","Interface %d has NO slot %d, port %d",
+                intf_ctrl.if_index, intf_ctrl.npu_id, intf_ctrl.port_id);
+        return false;
+    }
+    if ((intf_ctrl.int_type == nas_int_type_VLAN)
+        && (intf_ctrl.int_sub_type == BASE_IF_VLAN_TYPE_MANAGEMENT)) {
+
+        char name[HAL_IF_NAME_SZ];
+
+        if (!nas_stat_get_name_from_obj(obj, name, sizeof(name))) {
+            return (cps_api_return_code_t)STD_ERR(INTERFACE,CFG,0);
+        }
+
+        if (get_intf_stats_from_os((const char *)name, param->list)) {
+            return cps_api_ret_code_OK;
+        }
+    } else {
+        if(get_stats(ifindex,param->list)) return cps_api_ret_code_OK;
+    }
 
     return (cps_api_return_code_t)STD_ERR(INTERFACE,FAIL,0);
 }

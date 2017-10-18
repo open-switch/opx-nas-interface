@@ -130,7 +130,7 @@ static void _sflow_sock_init ()
 static t_std_error _sflow_pkt_hdl (uint8_t *pkt, uint32_t pkt_len,
                                    const ndi_packet_attr_t *p_attr)
 {
-    hal_ifindex_t rx_ifindex,tx_ifindex;
+    hal_ifindex_t rx_ifindex,tx_ifindex = 0;
 
     if (!nas_int_port_ifindex (p_attr->npu_id, p_attr->rx_port, &rx_ifindex)) {
         EV_LOGGING (INTERFACE,DEBUG, "PKT-IO",
@@ -143,12 +143,11 @@ static t_std_error _sflow_pkt_hdl (uint8_t *pkt, uint32_t pkt_len,
         EV_LOGGING (INTERFACE,DEBUG, "PKT-IO",
                  "Interface invalid - no matching port %d:%d",
                 p_attr->npu_id, p_attr->tx_port);
-        return STD_ERR (INTERFACE, PARAM, 0);
     }
 
-    EV_LOGGING(INTERFACE,DEBUG,"PKT-IO","[RX] SFLOW Pkt received - length %d npu-port %d:%d rx_ifindex %d"
+    EV_LOGGING(INTERFACE,DEBUG,"PKT-IO","[RX] SFLOW Pkt received - length %d npu %d rx_ifindex %d"
               " tx_ifindex %d sample count %d\r\n",
-              pkt_len, p_attr->npu_id, p_attr->rx_port, rx_ifindex,tx_ifindex,sample_count);
+              pkt_len, p_attr->npu_id, rx_ifindex,tx_ifindex,sample_count);
 
 #define META_BUF_SIZE  1024
     uint8_t meta_buf [META_BUF_SIZE];
@@ -493,7 +492,7 @@ static t_std_error dn_hal_packet_rx(uint8_t *pkt, uint32_t len, ndi_packet_attr_
         if(stop) return (STD_ERR_OK);
     }
 
-    t_std_error err = hal_virtual_interace_send(p_attr->npu_id,p_attr->rx_port,0,pkt,len);
+    t_std_error err = hal_virtual_interface_send(p_attr->npu_id,p_attr->rx_port,0,pkt,len);
     PKT_DEBUG("[RX] Data written to fd %d", err);
     return (STD_ERR_OK);
 }
@@ -514,6 +513,10 @@ static void dn_hal_packet_tx(npu_id_t npu, npu_port_t port, void  *pkt, uint32_t
 
     /* regular packet tx flow is bypass tx pipeline */
     attr.tx_type = NDI_PACKET_TX_TYPE_PIPELINE_BYPASS;
+
+    if(nas_pf_egr_enabled()) {
+        nas_pf_out_pkt_hndlr(pkt, len, &attr);
+    }
 
     if (ndi_packet_tx(pkt, len, &attr) != STD_ERR_OK) {
         PKT_DEBUG("[TX] Pkt txmission FAILED \r\n");

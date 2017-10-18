@@ -1,3 +1,46 @@
+opx-nas-interface (5.6.1) unstable; urgency=medium
+
+  * Update: Updating master list for lag interface.
+  * Update: Added a check to update mode change for bridge interface creat
+  * Update: Handle mode changes status update to nas-l3 when linux commands are used to configure lag and valn's.
+  * Update: Handle the sequencing issue between nas-l3/nas-interface/nas-linux for adding/deleting port to vlan/lag.
+  * Update: Fetch object with interface name instead of fetching allobjects
+  * Update: Added npu-speed for interfaces of type fibreChannel
+  * Update: Initialize default breakout mode for 10g profile
+  * Update: Handle lag to vlan changes when port asso/dis-asso occurs
+  * Update: Apply vlan config when port asso/dis-asso occurs
+  * Update: Apply/remove lag config based on port association/dis-association
+  * Update: Add/del master for lag and vlan to if class
+  * Update: Handle port mapping/unmapping event for vlan/lag
+  * Update: Skip npu config for lag and vlan for virtual port
+  * Update: Disabled physical port when it was un-mapped
+  * Update: Fix for opx-ethtool for FC interfaces
+  * Update: Initialize npu and port with None
+  * Update: Use generic CPS API to get u8,u32 or u16 and store in u32 before sending to NDI.
+  * Update: Validate speed auto for FC interfaces
+  * Update: Return error if any FC attribute set fails.
+  * Update: For 100g to FC conversion is removed. Code modified to take care of cases like this.
+  * Update: Get supported breakout capabilities and current fanout mode from front panel port instead of physical port
+  * Update: Replace ASSERT with error check and return failure instead of crash.
+  * Update: Updated usage/help message for cps_config_vlan.py utility.
+  * Update: Move lag global static to heap, move stat global static to heap
+  * Update: Move vlan global static to heap
+  * Update: Used phy/fp port count pair instead of decimal ratio number
+  * Update: Changed function of phy port speed calculation
+  * Update: Added rollback handling port-group breakout mode change
+  * Update: Wait for front panel port and physical port object to get ready before creating interfaces
+  * Update: Add FC MTU and BB credit to state object
+  * Feature: Adding breakout mode only if port is not part of port-group
+  * Feature: Added support to read Front panel port identification led control config from PAS.
+  * Feature: Added support for management vlan stats, reading management vlan stats from OS.
+  * Feature: Handle lag mtu set for tagged vlan members
+  * Feature: NAS support for DDQSFP, fetching 2 FP from one media id
+  * Feature: Destination mac match support for packet filtering
+  * Bugfix: Miscellaneous bug fixes
+  * Cleanup: Miscellaneous cleanup
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Fri, 29 Sep 2017  16:47:07 -0700
+
 opx-nas-interface (4.4.1) unstable; urgency=medium
 
   * Update: Added support for configuration rollback on failure

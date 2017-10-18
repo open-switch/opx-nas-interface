@@ -118,29 +118,38 @@ def _media_attr(attr):
 
 def _gen_media_list(media_obj, resp):
 
-    _media_type = media_obj.get_attr_data('media-type')
+    try:
+        _media_type = media_obj.get_attr_data('media-type')
+    except ValueError:
+        _media_type = None
 
-    # Fetch media-type information
-    _m_info = get_media_info(_media_type)
-    _m_info.show()
-    if _m_info == None:
-        nas_if.log_err("Null Media info")
-        return
-    _data = {}
-    _data['media-type'] = _media_type
-    _data['supported-phy-mode'] = []
-    if _m_info.speed != None:
-        _data['speed'] = nas_if.to_yang_speed(_m_info.speed)
-    if _m_info.autoneg != None:
-        _data['autoneg'] = nas_if.to_yang_autoneg(_m_info.autoneg)
-    if _m_info.duplex != None:
-        _data['duplex'] = nas_if.to_yang_duplex(_m_info.duplex)
-    for mode in _m_info.supported_phy_mode:
-        _phy_mode = get_value(yang_phy_mode, mode)
-        _data['supported-phy-mode'].append(_phy_mode)
+    if _media_type != None:
+        # Fetch media-type information
+        _m_info = get_media_info(_media_type)
+        _m_info.show()
+        if _m_info is None:
+            nas_if.log_err("Null Media info")
+            return
+        _media_list = {_media_type: _m_info}
+    else:
+        _media_list = MEDIA_LIST
+    for _media_type, _m_info in _media_list.items():
+        _data = {}
+        _data['media-type'] = _media_type
+        _data['media-name'] = _m_info.name
+        _data['supported-phy-mode'] = []
+        if _m_info.speed != None:
+            _data['speed'] = nas_if.to_yang_speed(_m_info.speed)
+        if _m_info.autoneg != None:
+            _data['autoneg'] = nas_if.to_yang_autoneg(_m_info.autoneg)
+        if _m_info.duplex != None:
+            _data['duplex'] = nas_if.to_yang_duplex(_m_info.duplex)
+        for mode in _m_info.supported_phy_mode:
+            _phy_mode = get_value(yang_phy_mode, mode)
+            _data['supported-phy-mode'].append(_phy_mode)
 
-    elem = cps_object.CPSObject(module='base-media/media-info', data= _data)
-    resp.append(elem.get())
+        elem = cps_object.CPSObject(module='base-media/media-info', data= _data)
+        resp.append(elem.get())
 
 
 def get_cb(methods, params):

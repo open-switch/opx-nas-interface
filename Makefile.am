@@ -17,14 +17,14 @@ AM_LDFLAGS=-shared -version-info 1:1:0 -levent
 
 libopx_nas_interface_la_SOURCES=src/swp_util_tap.c src/nas_int_main.cpp \
          src/nas_int_common_obj.cpp src/nas_int_list.c \
-         src/nas_int_ev_handlers.cpp src/vlan/nas_int_bridge.cpp \
-         src/vlan/nas_int_vlan.cpp src/vlan/nas_vlan_cps.cpp \
-         src/lag/nas_int_lag.c src/lag/nas_int_lag_api.cpp \
-         src/lag/nas_int_lag_cps.cpp src/port/hal_int_utils.c \
-         src/port/nas_int_logical_cps.cpp src/port/nas_int_port.cpp src/port/nas_fc_intf.cpp\
-         src/port/nas_int_physical_cps.cpp \
-         src/stats/nas_stats_if_cps.cpp src/stats/nas_stats_vlan_cps.cpp src/stats/nas_stats_fc_if_cps.cpp src/stats/nas_stats_eee_cps.cpp \
-         src/vlan/nas_vlan_lag_api.cpp
+         src/nas_int_ev_handlers.cpp src/nas_int_base_if.cpp \
+         src/vlan/nas_int_bridge.cpp src/vlan/nas_int_vlan.cpp \
+         src/vlan/nas_vlan_cps.cpp src/vlan/nas_vlan_lag_api.cpp \
+         src/lag/nas_int_lag.c src/lag/nas_int_lag_api.cpp src/lag/nas_int_lag_cps.cpp \
+         src/port/hal_int_utils.c src/port/nas_int_logical_cps.cpp \
+         src/port/nas_int_port.cpp src/port/nas_fc_intf.cpp src/port/nas_int_physical_cps.cpp \
+         src/stats/nas_stats_if_cps.cpp src/stats/nas_stats_vlan_cps.cpp \
+         src/stats/nas_stats_fc_if_cps.cpp src/stats/nas_stats_eee_cps.cpp 
 
 libopx_nas_interface_la_LIBADD=-lopx_common -lopx_nas_common -lopx_nas_ndi -lopx_cps_api_common -lopx_logging -lopx_nas_linux -lpthread -levent
 

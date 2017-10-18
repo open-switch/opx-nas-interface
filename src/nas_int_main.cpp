@@ -72,11 +72,11 @@ void hal_interface_send_event(cps_api_object_t obj) {
     }
 }
 
-static std::set <oper_state_handler_t> oper_state_handlers;
+static auto oper_state_handlers = new std::set <oper_state_handler_t> ;
 
 void nas_int_oper_state_register_cb(oper_state_handler_t oper_state_cb) {
     if (oper_state_cb != NULL) {
-        oper_state_handlers.insert(oper_state_cb);
+        oper_state_handlers->insert(oper_state_cb);
     }
 }
 
@@ -84,7 +84,7 @@ static void hw_link_state_cb(npu_id_t npu, npu_port_t port,
         ndi_intf_link_state_t *data) {
 
     IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t status = ndi_to_cps_oper_type(data->oper_status);
-    for (auto it = oper_state_handlers.begin(); it != oper_state_handlers.end(); ++it) {
+    for (auto it = oper_state_handlers->begin(); it != oper_state_handlers->end(); ++it) {
         (*it)(npu, port, status);
     }
 }

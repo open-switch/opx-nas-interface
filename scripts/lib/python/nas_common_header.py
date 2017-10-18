@@ -71,7 +71,6 @@ eth_to_fc_speed = { yang_speed['10G']:yang_speed['8GFC'],
                     yang_speed['25G']: yang_speed['16GFC'],
                     yang_speed['50G']: yang_speed['32GFC'],
                     yang_speed['40G']: yang_speed['32GFC'],
-                    yang_speed['100G']: yang_speed['32GFC']
                     }
 
 fc_to_ether_speed = {
@@ -115,18 +114,25 @@ yang_breakout = {
 }
 
 # Mapping between breakout mode and number of allocated hw ports for each physical port.
-breakout_to_hwp_count = {yang_breakout['1x1']:4, yang_breakout['2x1']:2, yang_breakout['4x1']:1,yang_breakout['4x4']:1,yang_breakout['2x4']:2}
-
-# Mapping between breakout mode and Physical ports count per front panel port or port group.
-breakout_to_pport_count = {
-        yang_breakout['1x1']:1,
+breakout_to_hwp_count = {
+        yang_breakout['1x1']:4,
         yang_breakout['2x1']:2,
-        yang_breakout['4x1']:4,
-        yang_breakout['4x4']:4,
-        yang_breakout['2x4']:2,
-        yang_breakout['2x2']:2,
-        yang_breakout['4x2']:4,
-        yang_breakout['8x2']:8,
+        yang_breakout['4x1']:1,
+        yang_breakout['4x4']:1,
+        yang_breakout['2x4']:2
+        }
+
+# Mapping between breakout mode and physical ports count per front panel port, or
+# physical and front panel ports count per port group.
+breakout_to_phy_fp_port_count = {
+        yang_breakout['1x1']:(1,1),
+        yang_breakout['2x1']:(2,1),
+        yang_breakout['4x1']:(4,1),
+        yang_breakout['4x4']:(4,4),
+        yang_breakout['2x4']:(2,4),
+        yang_breakout['2x2']:(2,2),
+        yang_breakout['4x2']:(4,2),
+        yang_breakout['8x2']:(8,2),
         }
 
 # mapping between breakout mode to the number of ports skipped to get the next physical port
@@ -148,7 +154,7 @@ breakout_to_subport_lane_map = {
         yang_breakout['1x1']: {0: (0, False), 1: (0, True)},
         yang_breakout['4x4']: {0: 0},
         yang_breakout['2x4']: {0: 0},
-        yang_breakout['2x1']: {1: 0, 2: 2},
+        yang_breakout['2x1']: {1: 0, 3: 2, 2: 2},
         yang_breakout['4x1']: {1: 0, 2: 1, 3: 2, 4: 3},
         }
 

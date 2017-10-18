@@ -39,6 +39,8 @@
 #include "std_mac_utils.h"
 #include "hal_interface_common.h"
 #include "iana-if-type.h"
+#include "nas_if_utils.h"
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -366,8 +368,22 @@ void nas_process_del_vlan_mem_from_os (hal_ifindex_t bridge_id, nas_port_list_t 
                        "Error finding index %d in intf_ctrl", if_index);
             break;
         }
+        
+        if_master_info_t master_info = { nas_int_type_VLAN, port_mode, p_bridge_node->ifindex};
+        BASE_IF_MODE_t intf_mode = nas_intf_get_mode(if_index);
 
-        if (intf_type == nas_int_type_PORT) {
+        if(!nas_intf_del_master(if_index, master_info)){
+            EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN","Failed to del master for vlan memeber port");
+        } else {
+            BASE_IF_MODE_t new_mode = nas_intf_get_mode(if_index);
+            if (new_mode != intf_mode) {
+                if (nas_intf_handle_intf_mode_change(if_index, new_mode) == false) {
+                    EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN",
+                            "Update to NAS-L3 about interface mode change failed(%d)", if_index);
+                }
+            }
+        }
+        if (!nas_is_virtual_port(if_index) && (intf_type == nas_int_type_PORT)) {
             EV_LOGGING(INTERFACE, INFO ,"NAS-Vlan",
                         "Delete Port %d from bridge %d ", if_index, bridge_id);
 
@@ -620,12 +636,26 @@ void nas_process_add_vlan_mem_from_os(hal_ifindex_t bridge_id, nas_port_list_t &
                     break;
                 }
             }
-            if((nas_process_member_addition_to_vlan(p_bridge_node, if_index,
+            if_master_info_t master_info = { nas_int_type_VLAN, port_mode, p_bridge_node->ifindex};
+            BASE_IF_MODE_t intf_mode = nas_intf_get_mode(if_index);
+            if(!nas_intf_add_master(if_index, master_info)){
+                EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN","Failed to add master for vlan memeber port");
+            } else {
+                BASE_IF_MODE_t new_mode = nas_intf_get_mode(if_index);
+                if (new_mode != intf_mode) {
+                    if (nas_intf_handle_intf_mode_change(if_index, new_mode) == false) {
+                        EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "Update to NAS-L3 about interface mode change failed(%d)", if_index);
+                    }
+                }
+            }
+            if(!nas_is_virtual_port(if_index)){
+                if((nas_process_member_addition_to_vlan(p_bridge_node, if_index,
                                                     intf_type, port_mode, vlan_id))
                     != STD_ERR_OK) {
-                EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
-                           "Error in adding port %d in the bridge %d ", if_index, bridge_id);
-                break;
+                    EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
+                            "Error in adding port %d in the bridge %d ", if_index, bridge_id);
+                    break;
+                }
             }
             publish_list.insert(if_index);
         }while(0);

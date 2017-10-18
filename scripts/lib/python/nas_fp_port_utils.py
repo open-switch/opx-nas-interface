@@ -48,7 +48,7 @@ def create_and_add_fp_caps(fp_port, resp):
     for mode in br_modes:
         skip_ports = breakout_to_skip_port[mode]
         for speed in hw_speeds:
-            phy_speed = fp.get_phy_npu_port_speed(mode, speed, hwp_count)
+            phy_speed = fp.get_phy_npu_port_speed(mode, speed * hwp_count)
             if fp.verify_npu_supported_speed(phy_speed) == False:
                 nas_if.log_err("create_and_add_fp_caps: fp port %d doesn't support yang speed %d " % (fp_port.id, phy_speed))
 # breakout mode and this speed is excluded from cps show
@@ -63,6 +63,30 @@ def create_and_add_fp_caps(fp_port, resp):
             resp.append(cps_obj.get())
             cps_obj = None
 
+# Add Breakout capability to front panel port as child list
+def add_fp_caps_to_fp_obj(fp_port, fp_obj):
+    br_modes = fp_port.get_breakout_caps()
+    hw_speeds = fp_port.get_hwport_speed_caps()
+    hwp_count = len(fp_port.get_hwports())
+    phy_mode = get_value(yang_phy_mode, 'ether') # FP port does not support FC capability directly. it is on the port group
+    cap_index = 0
+    cap_list = {}
+    for mode in br_modes:
+        skip_ports = breakout_to_skip_port[mode]
+        for speed in hw_speeds:
+            phy_speed = fp.get_phy_npu_port_speed(mode, speed * hwp_count)
+            if fp.verify_npu_supported_speed(phy_speed) == False:
+                nas_if.log_err("create_and_add_fp_caps: fp port %d doesn't support yang speed %d " % (
+                               fp_port.id, phy_speed))
+                # breakout mode and this speed is excluded from cps show
+                continue
+            cap_list[str(cap_index)] = {'phy-mode':phy_mode,
+                                        'breakout-mode':mode,
+                                        'port-speed':phy_speed,
+                                        'skip-ports':skip_ports}
+            cap_index += 1
+    fp_obj.add_attr('br-cap', cap_list)
+
 # Generate FP ports object list
 def _gen_fp_port_list(obj, resp):
 
@@ -72,7 +96,7 @@ def _gen_fp_port_list(obj, resp):
 
             port = npu.ports[p]
 
-            if not obj.key_compare({_fp_attr('front-panel-port'): port}):
+            if not obj.key_compare({_fp_attr('front-panel-port'): port.id}):
                 continue
 
             media_id = port.media_id
@@ -89,11 +113,15 @@ def _gen_fp_port_list(obj, resp):
                                         'default-name': port.name,
                                         'media-id': media_id,
                                         'mac-offset':port.mac_offset,
-                                        'breakout-mode':port.get_breakout_mode(),
                                         'port-speed':port.get_port_speed()
                                         })
+            if port.is_pg_member() == False:
+                breakout_mode = port.get_breakout_mode()
+                elem.add_attr('breakout-mode',breakout_mode)
+                add_fp_caps_to_fp_obj(port, elem)
             resp.append(elem.get())
-            create_and_add_fp_caps(port, resp)
+            if port.is_pg_member() == False:
+                create_and_add_fp_caps(port, resp)
 
 # Generate HW port obj list
 def _gen_npu_lanes(obj, resp):
@@ -113,11 +141,6 @@ def _gen_npu_lanes(obj, resp):
                 if not obj.key_compare({_lane_attr('hw-port'): h}):
                     continue
 
-                pm = 4  # port mode 4 is disabled
-                phy_port_obj = port_utils.get_phy_port_by_hw_port(port_list, npu.id, h)
-                if phy_port_obj != None:
-                    pm = phy_port_obj.get_attr_data('fanout-mode')
-
                 elem = cps_object.CPSObject(module='base-if-phy/hardware-port',
                                             data= {
                                             'npu-id': npu.id,
@@ -126,7 +149,7 @@ def _gen_npu_lanes(obj, resp):
                                             'hw-control-port':
                                                 port.control_port(),
                                             'subport-id': port.lane(h),
-                                            'fanout-mode': pm
+                                            'fanout-mode': port.get_breakout_mode()
                                             })
                 nas_if.log_info(str(elem.get()))
                 resp.append(elem.get())
@@ -163,9 +186,11 @@ def set_fp_port_config(fr_port, br_mode, phy_port_speed, phy_mode):
 
 
     #Check if breakout mode is same as current breakout mode
-    if br_mode == fp_port_obj.get_breakout_mode() and fp_port_obj.get_phy_mode() == phy_mode and fp_port_obj.get_port_speed() == phy_port_speed:
-        nas_if.log_err('FP config is same as current config')
-        return False
+    if (br_mode == fp_port_obj.get_breakout_mode() and
+        fp_port_obj.get_phy_mode() == phy_mode and
+        fp_port_obj.get_port_speed() == phy_port_speed):
+        nas_if.log_info('FP config is same as current config')
+        return True
 
     #check if breakout mode is supported by the FP port   ( not now)
     # TODO
@@ -186,7 +211,8 @@ def set_fp_port_config(fr_port, br_mode, phy_port_speed, phy_mode):
             return False
     # Create new phy ports based on the new breakout mode
     created_phy_ports = {}
-    if port_utils.create_nas_ports(npu,hwports, br_mode, phy_port_speed,phy_mode, created_phy_ports) == True:
+    if port_utils.create_nas_ports(npu, hwports, br_mode, phy_port_speed,phy_mode,
+                                   fr_port, created_phy_ports) == True:
         for port in created_phy_ports:
             port_utils.add_phy_port(port_list, created_phy_ports[port])
     else:
@@ -214,35 +240,41 @@ def set_fp_to_hwp_mapping(fr_port, br_mode, port_speed, phy_mode, hwports):
         return False
     hwp_list = port_detail.get_hwports()
     port_list = port_utils.get_phy_port_list()
-    if hwports == None:
+    if len(hwports) == 0:
         npu = port_detail.npu
-        for hwp in hwp_list:
-            phy_obj = port_utils.get_phy_port_by_hw_port(port_list, npu, hwp)
-            if phy_obj != None:
-                # delete the physical port
-                ret = port_utils.cps_del_nas_port(phy_obj)
-                if ret == False:
-                    print ' failed to delete Phy port'
-                    return False
-            # Delete hwp to phy port mapping
-            port_utils.del_phy_port(port_list, phy_obj)
+        if hwp_list != None:
+            for hwp in hwp_list:
+                phy_obj = port_utils.get_phy_port_by_hw_port(port_list, npu, hwp)
+                if phy_obj != None:
+                    # delete the physical port
+                    ret = port_utils.cps_del_nas_port(phy_obj)
+                    if ret == False:
+                        nas_if.log_err(' failed to delete Phy port')
+                        return False
+                    # Delete hwp to phy port mapping
+                    port_utils.del_phy_port(port_list, phy_obj)
+            hwports += hwp_list
         # set the hw port list to None
         port_detail.set_hwports(None)
+        # set breakout mode to None
+        port_detail.set_breakout_mode(None)
         return True
     else:
         # hwports is not empty. It means add the hwport to the fp port
         # create phy port corresponding to the hwport
         # check if hwport list is empty
-        if hwp_list != None:
+        if hwp_list != None and len(hwp_list) > 0:
             # hw port list is not empty, return False
             print 'port list is not empty'
             return False
         port_detail.set_hwports(hwports)
         # Now create phy ports base on the new hw port list.
         ret = set_fp_port_config(fr_port, br_mode, port_speed, phy_mode)
+        if not ret:
+            # Rollback
+            port_detail.set_hwports(None)
         return ret
     return True
-
 
 # Handle breakout mode
 def set_fp_rpc_cb(params):

@@ -24,25 +24,28 @@ intf_list = {}
 
 
 class IF_CONFIG:
-    def __init__ (self, if_name, npu, port, media_type, breakout_mode, ietf_intf_type, fp_port, subport_id):
+    def __init__ (self, if_name, ietf_intf_type):
         self.name = if_name
-        self.npu = npu
-        self.port = port
+        self.ietf_intf_type = ietf_intf_type
+
+        self.media_type = None
+        self.breakout_mode = None
         self.negotiation = None
         self.speed = None
         self.cfg_speed = None
         self.duplex = None
         self.fec = None
+        self.npu = None
+        self.port = None
 
-        self.media_type = media_type
-        self.breakout_mode = breakout_mode
-        self.ietf_intf_type = ietf_intf_type
-        self.fp_port = fp_port
-        self.subport_id = subport_id
         self.media_supported = True
 
     def get_npu_port(self):
         return(self.npu, self.port)
+
+    def set_npu_port(self, npu, port):
+        self.npu = npu
+        self.port = port
 
     def get_media_type(self):
         return(self.media_type)
@@ -83,32 +86,50 @@ class IF_CONFIG:
     def get_breakout_mode(self):
         return(self.breakout_mode)
 
+    def set_breakout_mode(self, breakout_mode):
+        self.breakout_mode = breakout_mode
+
     def get_ietf_intf_type(self):
         return(self.ietf_intf_type)
 
     def get_fp_port(self):
         return(self.fp_port)
 
+    def set_fp_port(self, port):
+        self.fp_port = port
+
     def get_subport_id(self):
         return(self.subport_id)
+
+    def set_subport_id(self, sp_id):
+        self.subport_id = sp_id
+
+    def show(self):
+        attr_list = [('If Name', 'name'),
+                     ('If Type', 'ietf_intf_type'),
+                     ('Speed', 'speed'),
+                     ('Config speed', 'cfg_speed'),
+                     ('Negotiation', 'negotiation'),
+                     ('Duplex', 'duplex'),
+                     ('NPU ID', 'npu'),
+                     ('Port ID', 'port'),
+                     ('Media', 'media_type'),
+                     ('Breakout', 'breakout_mode'),
+                     ('Front Panel Port', 'fp_port'),
+                     ('Subport ID', 'subport_id'),
+                     ('FEC mode', 'fec')]
+        for attr_desc, attr_name in attr_list:
+            if attr_name not in self.__dict__ or self.__dict__[attr_name] == None:
+                attr_val = '-'
+            else:
+                attr_val = str(self.__dict__[attr_name])
+            nas_if.log_info('%-17s: %s' % (attr_desc, attr_val))
 
     def get_fec_mode(self):
         return(self.fec)
 
     def set_fec_mode(self, fec):
         self.fec = fec
-
-    def show(self):
-        nas_if.log_info( "If Name:  " + str(self.name))
-        nas_if.log_info( "Speed: " + str(self.speed))
-        nas_if.log_info( "Config speed: " + str(self.cfg_speed))
-        nas_if.log_info( "negotiation: " +  str(self.negotiation))
-        nas_if.log_info( "Duplex: " + str(self.duplex))
-        nas_if.log_info( "npu: " + str(self.npu))
-        nas_if.log_info( "port: " + str(self.port))
-        nas_if.log_info( "Front Panel port: " + str(self.fp_port))
-        nas_if.log_info( "Subport ID: " + str(self.subport_id))
-        nas_if.log_info( "FEC mode: " + str(self.fec))
 
 def if_config_get_by_npu_port(npu, port):
     for if_name in intf_list:
