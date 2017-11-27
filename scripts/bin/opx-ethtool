@@ -37,7 +37,7 @@ def usage():
     print 'opx-ethtool -e|--eeprom-dump devname'
     # following will be implemented in the next version.
     #print 'ethtool -s devname speed N [duplex half|full] [port tp|aui|bnc|mii] [autoneg on|off]'
-    print 'opx-ethtool -s| --speed devname [speed N|auto] [duplex half|full|auto] [autoneg on|off|auto]'
+    print 'opx-ethtool -s| --change devname (speed [speed N|auto] | duplex [half|full|auto] | autoneg [on|off|auto])'
     #print 'ethtool -m|--dump-module-eeprom devname'
     print 'opx-ethtool -S|--statistics devname'
     sys.exit(1)
@@ -172,7 +172,11 @@ def _nas_if_configure(arg_list):
     if_name = arg_list[0]
     if_index = nas_os_utils.if_nametoindex(if_name)
     _media_type = 0
-    media_id = nas_if.get_media_id_from_if_index(if_index)
+    try:
+        media_id = nas_if.get_media_id_from_if_index(if_index)
+    except IndexError:
+        print 'Invalid interface.'
+        sys.exit(1)
     if media_id == 0:
         # media_id 0 is used for non-pluggable ports, for such ports, media_type "Not Applicable" is used.
         ethtool_if_configure(arg_list,_media_type)
@@ -251,7 +255,7 @@ def main(argv):
 
     try:
         opts, args = getopt.getopt(argv, "hve:S:s:", \
-                ["help", "version", "eeprom-dump=", "statistics=", "speed="])
+                ["help", "version", "eeprom-dump=", "statistics=", "change="])
     except getopt.GetoptError:
         usage()
 
@@ -269,8 +273,11 @@ def main(argv):
             _nas_media_show(arg)
         elif opt in ('-S', '--statistics'):
             _nas_stat_show(arg)
-        elif opt in ('-s', '--speed'):
-            _nas_if_configure(argv[1:])
+        elif opt in ('-s', '--change'):
+            if len(argv[1:]) > 2:
+                _nas_if_configure(argv[1:])
+            else:
+                usage()
         else:
             usage()
 
