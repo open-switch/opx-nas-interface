@@ -113,7 +113,10 @@ def _gen_fp_port_list(obj, resp):
                                         'default-name': port.name,
                                         'media-id': media_id,
                                         'mac-offset':port.mac_offset,
-                                        'port-speed':port.get_port_speed()
+                                        'port-speed':port.get_port_speed(),
+                                        'default-phy-mode':port.get_def_phy_mode(),
+                                        'default-breakout-mode':port.get_def_breakout(),
+                                        'default-port-speed':port.get_default_phy_port_speed()
                                         })
             if port.is_pg_member() == False:
                 breakout_mode = port.get_breakout_mode()
@@ -344,7 +347,7 @@ def get_npu_port_from_fp(fp_port, sub_port):
     if port_obj == None:
         raise ValueError('Front-panel-port %d not found in cache' % fp_port)
     br_mode = port_obj.get_breakout_mode()
-    nas_if.log_info('Cached breakout mode of front panel port %d is %d' % (fp_port, br_mode))
+    nas_if.log_info('Cached breakout mode of front panel port %s is %s' % (str(fp_port), str(br_mode)))
     lane_id = subport_to_lane(br_mode, sub_port)
     if lane_id == None:
         raise ValueError('Failed to get lane id from br_mode %d subport %d' % (

@@ -42,7 +42,7 @@ extern "C" {
 typedef struct nas_bridge_s{
     hal_ifindex_t ifindex;      //Kernel ifindex of the bridge
     hal_vlan_id_t vlan_id;      //One bridge maps to one Vlan ID in the NPU
-    char mac_addr[MAC_STRING_SZ];  //MAC address of this bridge
+    char mac_addr[MAC_STRING_SZ];  //MAC address of this bridge // TODO to be Deprecated
     char name[HAL_IF_NAME_SZ]; //Just store it for now.
     IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_t admin_status;
     bool learning_disable;     //learning disable state.
@@ -50,6 +50,7 @@ typedef struct nas_bridge_s{
     nas_list_t untagged_list; //untagged vlan ports in this bridge
     nas_list_t tagged_list; //tagged vlan ports in this bridge
     nas_list_t untagged_lag; //Untagged LAG index to handle
+    nas_list_t tagged_lag; //tagged LAG index to handle
     uint32_t mtu;
 }nas_bridge_t;
 
@@ -105,6 +106,7 @@ nas_bridge_t *nas_get_bridge_node(hal_ifindex_t index);
 
 nas_bridge_t *nas_get_bridge_node_from_name(const char *vlan_if_name);
 
+nas_bridge_t *nas_get_bridge_node_from_vid (hal_vlan_id_t vlan_id);
 /**
  * @brief Utility to use simple mutex lock for bridge resources access.
  */

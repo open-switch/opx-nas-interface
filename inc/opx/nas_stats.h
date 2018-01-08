@@ -24,6 +24,8 @@
 
 #include "std_error_codes.h"
 #include "cps_api_operation.h"
+#include "nas_ndi_plat_stat.h" // nas_stat_type_t
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,6 +42,10 @@ bool nas_stat_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index,boo
 bool nas_stat_get_name_from_obj(cps_api_object_t obj, char *if_name, size_t name_sz);
 
 bool get_intf_stats_from_os( const char *name, cps_api_object_list_t list);
+
+t_std_error get_stat_ids_len(nas_stat_type_t type, unsigned int * len);
+t_std_error port_stat_list_get(uint64_t * list, unsigned int *len);
+t_std_error vlan_stat_list_get(uint64_t *list, unsigned int *len);
 
 #ifdef __cplusplus
 }

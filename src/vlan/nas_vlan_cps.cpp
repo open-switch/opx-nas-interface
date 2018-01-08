@@ -84,12 +84,12 @@ static inline cps_api_return_code_t nas_vlan_get_mtu(cps_api_object_t obj, nas_b
 
 }
 
-static bool nas_vlan_process_port_assoication(hal_ifindex_t ifindex, npu_id_t npu, port_t port,bool add){
+static bool nas_vlan_process_port_association(hal_ifindex_t ifindex, npu_id_t npu, port_t port,bool add){
 
     auto  m_list = nas_intf_get_master(ifindex);
     for(auto it : m_list){
         if(it.type == nas_int_type_LAG){
-            nas_vlan_apply_lag_port_mapping_update(it.m_if_idx, ifindex,npu, port, add);
+            continue;
         }else if(it.type == nas_int_type_VLAN){
 
             nas_bridge_lock();
@@ -99,7 +99,10 @@ static bool nas_vlan_process_port_assoication(hal_ifindex_t ifindex, npu_id_t np
             nas_bridge_t * br_m = nas_get_bridge_node(it.m_if_idx);
 
             if(br_m == NULL){
-                EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-MAP","No bridge for ifindex %d",br_m->ifindex);
+                /*  TODO It means bridge is deleted but exists in the master list. It should not be the case
+                 *  if lock is used properly.
+                 * */
+                EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-MAP","No bridge for interface ifindex %d",ifindex);
                 nas_bridge_unlock();
                 return false;
             }
@@ -145,7 +148,7 @@ static bool nas_vlan_if_set_handler(cps_api_object_t obj, void *context)
 
     bool add = (port_mapping == nas_int_phy_port_MAPPED) ? true : false;
 
-    return nas_vlan_process_port_assoication(ifidx,npu,port,add);
+    return nas_vlan_process_port_association(ifidx,npu,port,add);
 
 }
 
@@ -202,12 +205,16 @@ cps_api_return_code_t nas_cps_set_vlan_mac(cps_api_object_t obj, nas_bridge_t *p
                p_bridge->ifindex);
         return cps_api_ret_code_ERR;
     }
-
     char * mac_addr_str = (char *) cps_api_object_attr_data_bin(_mac_attr);
     safestrncpy(p_bridge->mac_addr, (const char *)mac_addr_str, sizeof(p_bridge->mac_addr));
     EV_LOGGING(INTERFACE, INFO ,"NAS-Vlan", "Rcvd MAC  %s set for bridge %d\n",
            p_bridge->mac_addr, p_bridge->ifindex);
 
+    if (dn_hal_update_intf_mac(p_bridge->ifindex, (const char *)mac_addr_str) != STD_ERR_OK)  {
+        EV_LOGGING(INTERFACE, ERR ,"NAS-Vlan", "Failure saving bridge %d MAC in intf block",
+                p_bridge->ifindex);
+        return cps_api_ret_code_ERR;
+    }
     return cps_api_ret_code_OK;
 }
 
@@ -808,10 +815,21 @@ static cps_api_return_code_t nas_process_cps_vlan_get(void * context,
          cps_api_object_t filter = cps_api_object_list_get(param->filters, ix);
          cps_api_object_attr_t name_attr = cps_api_get_key_data(filter,
                                             IF_INTERFACES_INTERFACE_NAME);
+         cps_api_object_attr_t vlan_id_attr = cps_api_object_attr_get(filter,
+                                    BASE_IF_VLAN_IF_INTERFACES_INTERFACE_ID);
 
          if (name_attr != NULL) {
               const char *if_name = (char *)cps_api_object_attr_data_bin(name_attr);
-              nas_get_vlan_intf(if_name, param->list);
+              if (nas_get_vlan_intf(if_name, param->list) != STD_ERR_OK) {
+                  nas_bridge_unlock();
+                  return cps_api_ret_code_ERR;
+              }
+          } else if (vlan_id_attr != NULL) {
+              hal_vlan_id_t vid = cps_api_object_attr_data_u32(vlan_id_attr);
+              if (nas_get_vlan_intf_from_vid(vid, param->list) != STD_ERR_OK) {
+                  nas_bridge_unlock();
+                  return cps_api_ret_code_ERR;
+              }
           }
           else {
               nas_vlan_get_all_info(param->list);
@@ -923,7 +941,7 @@ static t_std_error nas_cps_add_port_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_
     p_link_node = nas_create_vlan_port_node(p_bridge, port_idx,
                                             port_mode, &create_flag);
 
-    if ((p_link_node != NULL) && (!nas_is_virtual_port(port_idx))) {
+    if ((p_link_node != NULL) && (!nas_is_non_npu_phy_port(port_idx))) {
         if((rc = nas_add_or_del_port_to_vlan(p_link_node->ndi_port.npu_id, vlan_id,
                                       &(p_link_node->ndi_port), port_mode, true)) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
@@ -1008,8 +1026,13 @@ static t_std_error nas_cps_del_port_from_vlan(nas_bridge_t *p_bridge, nas_list_n
         }
     }
 
-    if (!nas_is_virtual_port(p_link_node->ifindex)) {
-    //delete the port from NPU
+
+    if(!nas_intf_cleanup_l2mc_config(p_link_node->ifindex,  p_bridge->vlan_id)) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
+               "Error cleaning L2MC membership for interface %d", p_link_node->ifindex);
+    }
+    if (!nas_is_non_npu_phy_port(p_link_node->ifindex)) {
+    //delete the port from NPU if it is a NPU port
         if (nas_add_or_del_port_to_vlan(p_link_node->ndi_port.npu_id, p_bridge->vlan_id,
                                     &(p_link_node->ndi_port), port_mode, false) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",

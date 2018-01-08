@@ -48,6 +48,8 @@ bool nas_ck_port_exist(hal_vlan_id_t vlan_id, hal_ifindex_t port_index);
 t_std_error nas_vlan_delete(npu_id_t npu_id, hal_vlan_id_t vlan_id);
 void nas_pack_vlan_if(cps_api_object_t obj, nas_bridge_t *p_bridge);
 
+t_std_error nas_process_lag_for_vlan_del(nas_list_t *p_list,
+                                              hal_ifindex_t if_index);
 cps_api_return_code_t nas_cps_set_vlan_mac(cps_api_object_t obj, nas_bridge_t *p_bridge);
 
 /**
@@ -125,6 +127,7 @@ t_std_error nas_vlan_get_all_info(cps_api_object_list_t list);
  */
 t_std_error nas_get_vlan_intf(const char *if_name, cps_api_object_list_t list);
 
+t_std_error nas_get_vlan_intf_from_vid(hal_vlan_id_t vid, cps_api_object_list_t list);
 t_std_error nas_register_vlan_intf(nas_bridge_t *p_bridge, hal_intf_reg_op_type_t op);
 cps_api_return_code_t nas_publish_vlan_object(nas_bridge_t *p_bridge_node, cps_api_operation_types_t op);
 

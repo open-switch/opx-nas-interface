@@ -218,6 +218,12 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
         }
         /*   Check if Member port is present then add the members in the lag */
         if (_mem_attr != nullptr) {
+              /* Check: if port is a bond member*/
+            if (nas_lag_if_port_is_lag_member(bond_idx, mem_idx)) {
+                EV_LOGGING(INTERFACE, DEBUG, "NAS-LAG", "Slave port %d already a member of lag %d",
+                               mem_idx, bond_idx);
+                return ;
+            }
             if(nas_lag_member_add(bond_idx,mem_idx,lag_id) != STD_ERR_OK) {
                 EV_LOGGING(INTERFACE,INFO, "NAS-LAG",
                     "Failed to Add member %s to the Lag %s", mem_name, bond_name);
@@ -400,7 +406,7 @@ static void nas_int_loopback_handler(cps_api_object_t obj, const char *name) {
             DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
     if (if_attr==nullptr) return ; // if index not present
 
-    strncpy(details.if_name,name,sizeof(details.if_name)-1);
+    safestrncpy(details.if_name,name,sizeof(details.if_name));
     details.if_index = cps_api_object_attr_data_u32(if_attr);
     details.int_type = nas_int_type_LPBK;
 
@@ -430,6 +436,56 @@ static void nas_int_loopback_handler(cps_api_object_t obj, const char *name) {
     return;
 
 }
+
+static void nas_macvlan_ev_handler(cps_api_object_t obj) {
+
+
+    interface_ctrl_t details;
+    hal_intf_reg_op_type_t reg_op;
+
+    memset(&details,0,sizeof(details));
+    cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
+    cps_api_object_attr_t if_attr = cps_api_object_attr_get(obj,
+            DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+    cps_api_object_attr_t _addr = cps_api_object_attr_get(obj,DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS);
+
+    cps_api_object_attr_t if_name_attr = cps_api_object_attr_get(obj,
+            IF_INTERFACES_INTERFACE_NAME);
+
+    if (if_attr == nullptr || if_name_attr ==nullptr) {
+        EV_LOGGING(INTERFACE,INFO,"NAS-INT",
+              "if index or if name missing for MAC VLAN interface type ");
+        return ;
+    }
+
+    const char *name =  (const char*)cps_api_object_attr_data_bin(if_name_attr);
+    safestrncpy(details.if_name,name,sizeof(details.if_name));
+    details.if_index = cps_api_object_attr_data_u32(if_attr);
+    details.int_type = nas_int_type_MACVLAN;
+    if (_addr != nullptr) {
+        const char *mac_addr =  (const char*)cps_api_object_attr_data_bin(_addr);
+        safestrncpy(details.mac_addr,mac_addr,sizeof(details.mac_addr));
+    }
+
+
+    if (op == cps_api_oper_CREATE) {
+        EV_LOGGING(INTERFACE,INFO,"NAS-INT", "interface register event for %s",
+            details.if_name);
+        reg_op = HAL_INTF_OP_REG;
+    } else if (op == cps_api_oper_DELETE) {
+        EV_LOGGING(INTERFACE,INFO,"NAS-INT", "interface de-register event for %s",
+            details.if_name);
+        reg_op = HAL_INTF_OP_DEREG;
+    } else {
+        return;
+    }
+    if (dn_hal_if_register(reg_op,&details) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,INFO,"NAS-INT",
+            "interface register Error %s - mapping error or macvlan  interface already present",name);
+    }
+
+}
+
 void nas_int_ev_handler(cps_api_object_t obj) {
 
     hal_ifindex_t if_index;
@@ -447,14 +503,15 @@ void nas_int_ev_handler(cps_api_object_t obj) {
     cps_api_object_attr_t attr = cps_api_object_attr_get(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
     if (attr==nullptr) return ; // if index not present
     if_index = cps_api_object_attr_data_u32(attr);
+    if (nas_is_virtual_port(if_index)) {
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-INT", "Bypass virtual interface, ifindex=%d", if_index);
+        return;
+    }
     if (nas_int_get_npu_port(if_index, &ndi_port) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,DEBUG,"NAS-INT","if_index %d is wrong or Interface has NO slot port ", if_index);
         return;
     }
 
-    if ((ndi_port.npu_id == 0) && (ndi_port.npu_port == 0)) {
-        return;
-    }
     /*
      * Admin State
      */
@@ -511,6 +568,7 @@ static auto _int_ev_handlers = new std::unordered_map<BASE_CMN_INTERFACE_TYPE_t,
     { BASE_CMN_INTERFACE_TYPE_L2_PORT, nas_bridge_ev_handler},
     { BASE_CMN_INTERFACE_TYPE_VLAN, nas_vlan_ev_handler},
     { BASE_CMN_INTERFACE_TYPE_LAG, nas_lag_ev_handler},
+    { BASE_CMN_INTERFACE_TYPE_MACVLAN, nas_macvlan_ev_handler},
 };
 
 bool nas_int_ev_handler_cb(cps_api_object_t obj, void *param) {

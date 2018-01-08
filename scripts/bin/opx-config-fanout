@@ -25,9 +25,16 @@ from nas_common_header import *
 
 _g_if_name = 'if/interfaces/interface/name'
 
+def usage():
+    print ("Invalid arguments specified - os10-config-fanout [port] [true/false/mode] [speed]" \
+            + "\neg: os10-config-fanout e101-001-0 true" \
+            + "\n    os10-config-fanout e101-001-1 false" \
+            + "\n    os10-config-fanout e101-001-0 4x1 25g" \
+            + "\n    os10-config-fanout e101-001-1 1x1 100g")
+
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print "Invalid arguments specified.... %s [port] [true/false/mode] [speed]" % sys.argv[0]
+        usage()
         sys.exit(0)
     br_mode = sys.argv[2].lower()
     if br_mode == 'true':
@@ -75,10 +82,17 @@ if __name__ == '__main__':
 
     br_cap_list = fp_obj.get_attr_data('br-cap')
     breakout_cap = []
+    port_speed_cap = []
     for cap_key,cap_item in br_cap_list.items():
         br_cap = cap_item['breakout-mode']
         if br_cap not in breakout_cap:
             breakout_cap.append(br_cap)
+            port_speed_cap.append(cap_item['port-speed'])
+
+    if (sys.argv[2].lower()=='false' and len(port_speed_cap)>2):
+        print ("Rejecting transaction, Please use mode and speed" \
+                "\neg: os10-config-fanout e101-001-1 1x1 100g")
+        sys.exit(1)
 
     if _mode not in breakout_cap:
         print 'breakout mode %d not supported on this port' % _mode
@@ -86,7 +100,7 @@ if __name__ == '__main__':
     current_mode = fp_obj.get_attr_data('breakout-mode')
     current_speed = fp_obj.get_attr_data('port-speed')
     if current_mode == _mode and current_speed == _speed:
-        print 'Port already configured in the as breakoout mode %d and speed %d' % (
+        print 'Port already configured as breakout mode %d and speed %d' % (
               _mode, _speed)
         sys.exit(1)
 

@@ -29,7 +29,7 @@ import systemd.daemon
 _fp_port_key = cps.key_from_name('target','base-if-phy/front-panel-port')
 _media_key = cps.key_from_name('observed', 'base-pas/media')
 _physical_key = cps.key_from_name('target', 'base-if-phy/physical')
-_logical_if_key = cps.key_from_name('target', 'dell-base-if-cmn/if/interfaces/interface')
+_logical_if_key = cps.key_from_name('observed', 'dell-base-if-cmn/if/interfaces/interface')
 _logical_if_state_key = cps.key_from_name('observed', 'dell-base-if-cmn/if/interfaces-state/interface')
 
 def _get_obj_attr_value(obj, attr_name):
@@ -61,15 +61,22 @@ def set_media_transceiver(interface_obj):
         _lane = fp_details.lane
         media.media_transceiver_set(1, fp_details.media_id, _lane, enable)
 
-def set_interface_led(interface_obj):
-    if_obj = cps_object.CPSObject(obj=interface_obj)
-    npu = if_obj.get_attr_data('base-if-phy/if/interfaces/interface/npu-id')
-    port = if_obj.get_attr_data('base-if-phy/if/interfaces/interface/port-id')
-    speed = if_obj.get_attr_data('dell-if/if/interfaces/interface/speed')
-    hwport_details = nas_if.get_hwport_from_phy_port(npu, port)
-    fp_port = nas_if.get_fp_from_hw_port(npu, hwport_details.hw_port)
-    media_id = nas_if.get_media_id_from_fp_port(fp_port)
-    media.media_led_set(1, media_id, 0, speed)
+def set_interface_media_speed(interface_obj, speed=None):
+    try:
+        if_obj = cps_object.CPSObject(obj=interface_obj)
+        npu = if_obj.get_attr_data('base-if-phy/if/interfaces/interface/npu-id')
+        port = if_obj.get_attr_data('base-if-phy/if/interfaces/interface/port-id')
+        if speed is None:
+            speed = if_obj.get_attr_data('dell-if/if/interfaces/interface/speed')
+        hwport_details = nas_if.get_hwport_from_phy_port(npu, port)
+        if hwport_details is None:
+            nas_if.log_info("Hw  port not present")
+            return
+        fp_port,subport_id = nas_if.get_subport_id_from_hw_port(npu, hwport_details.hw_port)
+        media_id = nas_if.get_media_id_from_fp_port(fp_port)
+        media.media_led_set(1, media_id, subport_id, speed)
+    except:
+        nas_if.log_info("Failure in setting interface media speed")
 
 
 def monitor_phy_media():
@@ -105,10 +112,23 @@ def _update_fp(fp_obj):
     fp_db.set_speed(nas_if.get_cps_attr(fp_obj, 'port-speed'))
 
 
+def _process_logical_if_event(obj):
+    if_index = _get_obj_attr_value(obj, 'dell-base-if-cmn/if/interfaces/interface/if-index')
+    speed = _get_obj_attr_value(obj, 'dell-if/if/interfaces/interface/speed')
+    # check if if_index is present
+    if if_index == None:
+        nas_if.log_err('Interface index not present in the interface event')
+        return
+    # Get Interface attributes
+    if_obj_list = nas_if.nas_os_if_list(d={'if-index':if_index})
+    if len(if_obj_list) != 0:
+        set_interface_media_speed(if_obj_list[0], speed)
+
 def monitor_interface_event():
     handle = cps.event_connect()
     cps.event_register(handle, _physical_key)
     cps.event_register(handle, _logical_if_state_key)
+    cps.event_register(handle, _logical_if_key)
     _led_control = media.led_control_get()
     while True:
         o = cps.event_wait(handle)
@@ -118,6 +138,10 @@ def monitor_interface_event():
             _update_fp(obj)
         if _physical_key == obj.get_key():
             continue
+
+        if _logical_if_key == obj.get_key():
+            _process_logical_if_event(obj)
+
         elif _logical_if_state_key == obj.get_key():
             if_index = _get_obj_attr_value(obj, 'if/interfaces-state/interface/if-index')
             # check if if_index is present
@@ -125,11 +149,11 @@ def monitor_interface_event():
                 nas_if.log_err('Interface index not present in the interface state event')
                 continue
             # Get Interface attributes
+            if_obj_list = nas_if.nas_os_if_list(d={'if-index':if_index})
             admin_state = _get_obj_attr_value(obj, 'if/interfaces-state/interface/admin-status')
             if admin_state != None:
                 # This is admin state change event
                 try:
-                    if_obj_list = nas_if.nas_os_if_list(d={'if-index':if_index})
                     set_media_transceiver(if_obj_list[0])
                 except:
                     nas_if.log_err("Unable to set media transceiver for if_index {}".format(str(if_index)))
@@ -137,7 +161,7 @@ def monitor_interface_event():
                 oper_state = _get_obj_attr_value(obj, 'if/interfaces-state/interface/oper-status')
                 if oper_state != None:
                     try:
-                        set_interface_led(if_obj_list[0])
+                        set_interface_media_speed(if_obj_list[0])
                     except:
                         nas_if.log_err("Error in setting LED")
                 continue

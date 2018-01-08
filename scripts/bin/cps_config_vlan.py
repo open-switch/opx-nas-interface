@@ -15,6 +15,7 @@
 
 import sys
 import getopt
+import cps
 import cps_utils
 import nas_ut_framework as nas_ut
 import nas_os_utils
@@ -55,6 +56,7 @@ def usage():
     print '-m, --mac : mac address that need to configured for the given VLAN'
     print '--ifdex   : ifIndex of the VLAN that is configured previously'
     print '--addport : option to add port to the given VLAN'
+    print '--delport : option to delete port from the given VLAN'
     print '--addmac  : add a mac address to the VLAN '
     print '-s, --show: show the VLAN parameter, when no VLAN ID given show all'
     print '-t, --tagged: If user want to add the port as tagged port, default untagged\n'
@@ -75,6 +77,7 @@ vlan_attr_id = 'base-if-vlan/if/interfaces/interface/id'
 mac_attr_id =  'dell-if/if/interfaces/interface/phys-address'
 tagged_port_attr_id = 'dell-if/if/interfaces/interface/tagged-ports'
 untagged_port_attr_id = 'dell-if/if/interfaces/interface/untagged-ports'
+vlan_obj_id = 'dell-base-if-cmn/if/interfaces/interface'
 vlan_type_attr_id = 'dell-if/if/interfaces/interface/vlan-type'
 
 vlan_if_type = 'ianaift:l2vlan'
@@ -100,7 +103,11 @@ def main(argv):
 
     try:
         opts, args = getopt.getopt(argv, "hadtsp:i:m:v:",
-                                   ["help", "add", "del", "tagged", "port=", "show", "id=", "name=", "addport", "mac=", "addmac", "vlantype="])
+                                   ["help", "add", "del", "tagged", "port=",
+                                    "show", "id=", "name=", "addport",
+                                    "delport", "mac=", "addmac", "vlantype="
+                                    ]
+        )
 
     except getopt.GetoptError:
         usage()
@@ -124,6 +131,8 @@ def main(argv):
 
         elif opt == '--addport':
             choice = 'addport'
+        elif opt == '--delport':
+            choice = 'delport'
 
         elif opt in ('-s', '--show'):
             choice = 'get'
@@ -159,9 +168,37 @@ def main(argv):
             nas_vlan_op("get", {type_attr_id:vlan_if_type})
 
     elif choice == 'addport' and if_name != '' and ports != '':
-        ifname_list = []
         ifname_list = _port_name_list(ports)
+        vlan_attr_list = []
+
+        vlan_obj = cps_object.CPSObject(vlan_obj_id)
+        vlan_obj.add_attr(name_attr_id, if_name)
+        cps.get([vlan_obj.get()], vlan_attr_list) 
+        
+        if port_type in vlan_attr_list[0]['data']:
+            if_curr_list = vlan_attr_list[0]['data'][port_type]
+            ifname_list = ifname_list + if_curr_list
         nas_vlan_op("set", {name_attr_id: if_name, port_type: ifname_list})
+    elif choice == 'delport' and if_name != '' and ports != '':
+        vlan_attr_list = []
+        if_curr_list = []
+        if_target_list = []
+        ifname_list = _port_name_list(ports)
+        
+        vlan_obj = cps_object.CPSObject(vlan_obj_id)
+        vlan_obj.add_attr(name_attr_id, if_name)
+        cps.get([vlan_obj.get()], vlan_attr_list) 
+        
+        if port_type in vlan_attr_list[0]['data']:
+            if_curr_list = vlan_attr_list[0]['data'][port_type] 
+
+        for curr in if_curr_list:  
+            # Strip the port name from CPS to have the same name format 
+            port_name = str(curr).rstrip('\0')     
+            if port_name not in ifname_list:
+                if_target_list.append(port_name)
+        
+        nas_vlan_op("set", {name_attr_id: if_name, port_type: if_target_list})
 
     elif choice == 'mac' and if_name != '' and mac_id != '':
         nas_vlan_op("set", {name_attr_id: if_name, mac_attr_id: mac_id})

@@ -51,4 +51,5 @@ bool nas_intf_handle_intf_mode_change (const char *if_name, BASE_IF_MODE_t mode)
 
 t_std_error nas_intf_db_obj_get(const char * intf_name,cps_api_attr_id_t id, cps_api_qualifier_t cat,
                             cps_api_object_t  obj);
+bool nas_intf_cleanup_l2mc_config (hal_ifindex_t ifx,  hal_vlan_id_t vlan_id=0);
 #endif //NAS_INT_COM_UTILS_H_

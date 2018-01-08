@@ -64,6 +64,7 @@ private:
     bool _used = false;
     npu_id_t _npu = 0;
     port_t _port = 0;
+    bool _mapped = false;
     swp_util_tap_descr _dscr=nullptr;
     IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t _link =
             IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN;
@@ -72,7 +73,11 @@ public:
     virtual bool create(const char *name);
     virtual void init(npu_id_t npu, port_t port) {
         _npu = npu;
-        _port=port;
+        _port = port;
+        _mapped = true;
+    }
+    virtual void init() {
+        _mapped = false;
     }
     virtual bool del();
 
@@ -84,6 +89,7 @@ public:
 
     hal_ifindex_t ifindex () const;
     bool valid() const { return _used; }
+    bool mapped() const { return _mapped; }
 
     inline npu_id_t npu() const { return _npu; }
     inline port_t port() const { return _port; }
@@ -94,10 +100,11 @@ public:
 
 class CNasDummyPort : public CNasPortDetails {
 public:
-    virtual bool create(const char *name) {return true;}
-    virtual void init(npu_id_t npu, port_t port) {}
-    virtual bool del() {return true;}
-    virtual void set_link_state(IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t state) {}
+    virtual bool create(const char *name) override {return true;}
+    virtual void init(npu_id_t npu, port_t port) override {}
+    virtual void init() override {}
+    virtual bool del() override {return true;}
+    virtual void set_link_state(IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t state) override {}
 };
 
 class NasPortList {
@@ -141,7 +148,7 @@ const CNasPortDetails& NasPortList::operator[](std::string name) const
     return iter->second;
 }
 
-static NasPortList _ports;
+static NasPortList& _ports = *new NasPortList();
 
 /* tap fd to event info details */
 typedef std::unordered_map<int,struct event *> _fd_to_event_info_map_t;
@@ -433,11 +440,11 @@ int nas_process_payload_and_form_packet (uint8_t *pkt_buf,
 #define NSEC_PER_SEC 1000000000
     int               pkt_len = 0;
     uint16_t          vlan_id = 0;
-    uint16_t          vlan_protocol = htons (0x8100);
-    uint16_t          arp_protocol = htons (0x0806);
-    uint16_t          ip_protocol = htons (0x0800); //ipv4
+    static const uint16_t          vlan_protocol = htons (0x8100);
+    static const uint16_t          arp_protocol = htons (0x0806);
+    static const uint16_t          ip_protocol = htons (0x0800); //ipv4
+    static const unsigned char     dest_mac[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
     interface_ctrl_t  intf_ctrl;
-    unsigned char     dest_mac[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
     arp_header_t      *p_arp_header = NULL;
     struct timespec   ts_cur_pkt;
     struct timespec   ts_diff;
@@ -711,6 +718,16 @@ t_std_error hal_virtual_interface_send(npu_id_t npu, npu_port_t port, int queue,
     return STD_ERR_OK;
 }
 
+static bool nas_int_port_mapped(const char* name)
+{
+    const auto& ports = _ports;
+    if (!ports[name].valid()) {
+        return false;
+    }
+
+    return ports[name].mapped();
+}
+
 static bool nas_int_port_used_int(const char* name, npu_id_t npu, port_t port,
                                   bool check_port)
 {
@@ -762,7 +779,9 @@ void nas_int_port_link_change(npu_id_t npu, port_t port,
     EV_LOGGING(INTERFACE,INFO,"INT-STATE", "Interface state change %d:%d to %d",(int)npu,(int)port,(int)state);
 }
 
-t_std_error nas_int_port_create(npu_id_t npu, port_t port, const char *name, nas_int_type_t type) {
+static t_std_error nas_int_port_create_int(npu_id_t npu, port_t port, const char *name,
+                                           nas_int_type_t type,
+                                           bool mapped) {
 
     std_rw_lock_write_guard l(&ports_lock);
 
@@ -774,9 +793,13 @@ t_std_error nas_int_port_create(npu_id_t npu, port_t port, const char *name, nas
         return STD_ERR(INTERFACE,PARAM,0);
     }
 
-    _ports[name].init(npu, port);
+    if (mapped) {
+        _ports[name].init(npu, port);
+    } else {
+        _ports[name].init();
+    }
     _ports[name].create(name);
-    if (npu != 0 || port != 0) {
+    if (mapped) {
         _ports[npu][port] = &_ports[name];
     }
 
@@ -784,10 +807,13 @@ t_std_error nas_int_port_create(npu_id_t npu, port_t port, const char *name, nas
     memset(&details,0,sizeof(details));
     details.if_index = _ports[name].ifindex();
     strncpy(details.if_name,name,sizeof(details.if_name)-1);
-    details.npu_id = npu;
-    details.port_id = port;
-    details.tap_id = (npu << 16) + port;
+    if (mapped) {
+        details.npu_id = npu;
+        details.port_id = port;
+        details.tap_id = (npu << 16) + port;
+    }
     details.int_type = type;
+    details.port_mapped = mapped;
 
     if (dn_hal_if_register(HAL_INTF_OP_REG,&details)!=STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"INT-CREATE", "Not created %d:%d:%s - mapping error",
@@ -803,6 +829,15 @@ t_std_error nas_int_port_create(npu_id_t npu, port_t port, const char *name, nas
             (int)npu,(int)port,name, details.if_index);
 
     return STD_ERR_OK;
+}
+
+t_std_error nas_int_port_create_mapped(npu_id_t npu, port_t port, const char *name,
+                                       nas_int_type_t type) {
+    return nas_int_port_create_int(npu, port, name, type, true);
+}
+
+t_std_error nas_int_port_create_unmapped(const char *name, nas_int_type_t type) {
+    return nas_int_port_create_int(0, 0, name, type, false);
 }
 
 t_std_error nas_int_port_delete(const char *name) {
@@ -828,9 +863,9 @@ t_std_error nas_int_port_delete(const char *name) {
         }
     }
 
-    npu_id_t npu = port_info.npu();
-    port_t port = port_info.port();
-    if (npu != 0 || port != 0) {
+    if (port_info.mapped()) {
+        npu_id_t npu = port_info.npu();
+        port_t port = port_info.port();
         _ports[npu][port] = _ports.dummy_port();
     }
     _ports[name].del();
@@ -883,32 +918,6 @@ void nas_nflog_dbg_reset_counters ()
     nas_nflog_pkts_tx_to_ingress_pipeline_dropped = 0;
 }
 
-static t_std_error update_if_tracker(const char *name, npu_id_t npu, port_t port,
-                                     bool connect)
-{
-    hal_ifindex_t if_index = 0;
-    if (nas_int_name_to_if_index(&if_index, name) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, ERR, "INTF-UPDATE", "Failed to get ifindex for interface %s",
-                   name);
-        return STD_ERR(INTERFACE, FAIL, 0);
-    }
-    cps_api_object_t obj = cps_api_object_create();
-    if (obj == nullptr) {
-        EV_LOGGING(INTERFACE, ERR, "INTF-UPDATE", "Failed to create cps object");
-        return STD_ERR(INTERFACE, FAIL, 0);
-    }
-    cps_api_object_attr_add_u32(obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
-                                if_index);
-    char alias[100];
-    if (!connect) {
-        npu = port = 0;
-    }
-    snprintf(alias, sizeof(alias), "NAS## %d %d", npu, port);
-    cps_api_object_attr_add(obj, NAS_OS_IF_ALIAS,alias, strlen(alias) + 1);
-    nas_os_interface_set_attribute(obj, NAS_OS_IF_ALIAS);
-    return STD_ERR_OK;
-}
-
 static t_std_error update_if_reg_info(const char *name, npu_id_t npu, port_t port,
                                       bool connect)
 {
@@ -927,7 +936,7 @@ static t_std_error update_if_reg_info(const char *name, npu_id_t npu, port_t por
                    name);
         return STD_ERR(INTERFACE, PARAM, 0);
     }
-    if ((connect && (info.npu_id != 0 || info.port_id != 0)) ||
+    if ((connect && info.port_mapped) ||
         (!connect && (info.npu_id != npu || info.port_id != port))) {
         EV_LOGGING(INTERFACE, ERR, "INTF-UPDATE", "Reg info mismatch between input and port info db");
         return STD_ERR(INTERFACE, PARAM, 0);
@@ -942,10 +951,12 @@ static t_std_error update_if_reg_info(const char *name, npu_id_t npu, port_t por
         info.npu_id = npu;
         info.port_id = port;
         info.tap_id = (npu << 16) + port;
+        info.port_mapped = true;
     } else {
         info.npu_id = 0;
         info.port_id = 0;
         info.tap_id = 0;
+        info.port_mapped = false;
     }
 
     if (dn_hal_if_register(HAL_INTF_OP_REG, &info) != STD_ERR_OK) {
@@ -962,16 +973,16 @@ t_std_error nas_int_update_npu_port(const char *name, npu_id_t npu, port_t port,
 {
     std_rw_lock_write_guard l(&ports_lock);
 
-    if ((connect && (!nas_int_port_used_int(name, 0, 0, true) ||
+    if ((connect && (nas_int_port_mapped(name) ||
                      nas_int_port_used_int(nullptr, npu, port, true))) ||
-        (!connect && (nas_int_port_used_int(name, 0, 0, true) ||
+        (!connect && (!nas_int_port_mapped(name) ||
                      !nas_int_port_used_int(nullptr, npu, port, true)))) {
         EV_LOGGING(INTERFACE, ERR, "INT-UPDATE", "Interface %s could not be connected or disconnected",
                    name);
         EV_LOGGING(INTERFACE, ERR, "INT-UPDATE", "npu %d port %d connect %s \
-                   virtual_port %s logical_port %s",
+                   logical_port mapped %s physical_port used %s",
                    npu, port, connect ? "TRUE" : "FALSE",
-                   nas_int_port_used_int(name, 0, 0, true) ? "TRUE" : "FALSE",
+                   nas_int_port_mapped(name) ? "TRUE" : "FALSE",
                    nas_int_port_used_int(nullptr, npu, port, true) ? "TRUE" : "FALSE");
         return STD_ERR(INTERFACE, PARAM, 0);
     }
@@ -991,7 +1002,7 @@ t_std_error nas_int_update_npu_port(const char *name, npu_id_t npu, port_t port,
         _ports[npu][port]->set_link_state(state);
     } else {
         _ports[npu][port]->set_link_state(IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN);
-        _ports[name].init(0, 0);
+        _ports[name].init();
         _ports[npu][port] = _ports.dummy_port();
 
         // Disable un-mapped NPU port to force its link down

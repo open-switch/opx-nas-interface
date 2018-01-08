@@ -53,6 +53,7 @@
 #include "nas_fc_stats.h"
 #include "nas_int_utils.h"
 #include "std_utils.h"
+#include "nas_vrf.h"
 
 #include "nas_ndi_port.h"
 #include <string.h>
@@ -346,6 +347,15 @@ t_std_error hal_interface_init(void) {
         return rc;
     }
 
+    if ( (rc=nas_vrf_object_vrf_init(nas_if_handle))!=STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-VRF", "Failed to initialize VRF handler");
+        return rc;
+    }
+
+    if ( (rc=nas_vrf_object_vrf_intf_init(nas_if_handle))!=STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-VRF-INTF", "Failed to initialize VRF and Intf bind handler");
+        return rc;
+    }
     nas_default_vlan_cache_init();
     nas_shell_command_init();
     return (rc);

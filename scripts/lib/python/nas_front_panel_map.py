@@ -25,6 +25,13 @@ _yang_breakout_2x1 = 3
 _yang_breakout_4x1 = 2
 _yang_40g_speed = 6
 
+_yang_autoneg_support = {
+    'not-supported' : 1,
+    'on-supported'  : 2,
+    'off-supported' : 3,
+    'both-supported': 4
+}
+
 yang_phy_mode_ether = 1
 yang_phy_mode_fc = 2
 
@@ -71,7 +78,7 @@ def get_phy_port_speed(breakout, phy_mode, fp_speed):
 # it belongs to.
 
 class PortProfile(object):
-    def __init__(self, profile=None, name=None, breakout_caps=None, speed_caps=None, phy_mode_caps=None, def_speed=None, def_br=None, def_phy=None):
+    def __init__(self, profile=None, supported_autoneg=None, name=None, breakout_caps=None, speed_caps=None, phy_mode_caps=None, def_speed=None, def_br=None, def_phy=None):
         if profile != None and isinstance(profile, PortProfile):
             self.copy(profile)
         else:
@@ -83,18 +90,27 @@ class PortProfile(object):
             # default values
             self.def_hwport_speed = def_speed
             self.def_breakout = def_br
-            if def_phy == None:
+            if def_phy is None:
                 self.def_phy_mode = yang_phy_mode_ether
             else:
                 self.def_phy_mode = def_phy
+
+            #Setup supported autoneg
+            self.supported_autoneg = _yang_autoneg_support['both-supported']
+            if supported_autoneg is not None:
+                self.supported_autoneg = supported_autoneg
+
             # current configuration
             self.breakout =   self.def_breakout
             self.hwp_speed =  self.def_hwport_speed
             self.phy_mode =   self.def_phy_mode
             self.phy_port_speed =  None
+            self.def_phy_port_speed = None
+            self.fc_caps = []
 
     def copy(self,profile):
         self.profile_name = profile.profile_name
+        self.supported_autoneg = profile.supported_autoneg
         self.breakout_caps = profile.breakout_caps[:]
         self.hwport_speed_caps = profile.hwport_speed_caps[:]
         self.phy_mode_caps = profile.phy_mode_caps[:]
@@ -105,6 +121,8 @@ class PortProfile(object):
         self.hwp_speed = profile.def_hwport_speed
         self.phy_mode = yang_phy_mode_ether
         self.phy_port_speed =  None
+        self.def_phy_port_speed = None
+        self.fc_caps = profile.fc_caps[:]
 
 
     def get_profile_type(self):
@@ -119,11 +137,20 @@ class PortProfile(object):
     def get_hwport_speed_caps(self):
         return self.hwport_speed_caps[:]
 
+    def get_fc_caps(self):
+        return self.fc_caps[:]
+
+    def set_fc_caps(self, fc_caps):
+        self.fc_caps = fc_caps[:]
+
     def get_def_hwport_speed(self):
         return self.def_hwport_speed
 
     def get_def_breakout(self):
         return self.def_breakout
+
+    def get_def_phy_mode(self):
+        return self.def_phy_mode
 
     def get_supported_phy_mode_caps(self):
         return self.phy_mode_caps[:]
@@ -151,13 +178,18 @@ class PortProfile(object):
 
     def set_phy_mode(self, mode):
         self.phy_mode = mode
-
+            
     def set_port_speed(self, speed):
         self.phy_port_speed = speed
 
     def get_port_speed(self):
         return self.phy_port_speed
 
+    def get_supported_autoneg(self):
+        return self.supported_autoneg
+    
+    def get_default_phy_port_speed(self):
+        return self.def_phy_port_speed
 
     def show(self):
         print('Profile name %s' % self.profile_name)
@@ -168,16 +200,18 @@ class PortProfile(object):
         print('default breakout ' + str(self.def_breakout))
         print('default Phy mode ' + str(self.def_phy_mode))
         print('Phy port speed ' + str(self.phy_port_speed))
+        print('Default phy port speed' +str(self.def_phy_port_speed))
         print('----------------------------------------')
 
 
 def default_port_profile_init():
     speed_caps = [10000]
+    supported_autoneg = _yang_autoneg_support['both-supported']
     breakout_caps = [_yang_breakout_1x1]
     phy_mode_caps = [yang_phy_mode_ether]
     def_speed = 10000
     def_br = _yang_breakout_1x1
-    default_port_profile = PortProfile( None, 'base_default', breakout_caps, speed_caps, phy_mode_caps, def_speed, def_br)
+    default_port_profile = PortProfile(None, supported_autoneg, 'base_default', breakout_caps, speed_caps, phy_mode_caps, def_speed, def_br)
     return default_port_profile
 
 def show_profile(pr):
@@ -189,13 +223,24 @@ def show_profile(pr):
     print('default breakout ' + str(pr.def_breakout))
     print('default Phy mode ' + str(pr.def_phy_mode))
     print('----------------------------------------')
+def process_Profile_fc_cap_cfg(fc_cap_node):
+    _fc_cap = []
+    for cap in fc_cap_node.findall('cap'):
+        fc_br_cap = {}
+        _br_str = cap.get('breakout')
+        _hwp_speed = cap.get('hwport_speed')
+        fc_br_cap = {'breakout':get_value(yang_breakout, _br_str),
+                   'hwp_speed':int(_hwp_speed)}
+
+        _fc_cap.append(fc_br_cap)
+    return _fc_cap
 
 def process_portProfile_cfg(root):
     global _def_port_profile
     global portProfile_list
     global supported_npu_speeds
     g_default = root.find('global')
-    if g_default == None:
+    if g_default is None:
         _def_port_profile = default_port_profile_init()
         return
     _g_fc = g_default.get('fc_enabled')
@@ -209,22 +254,41 @@ def process_portProfile_cfg(root):
         name  = profile.get('name')
         phy_mode_caps = [yang_phy_mode_ether]
         _fc = profile.get('fc_enabled')
-        if _fc == None:
+        if _fc is None:
             _fc = _g_fc
         if _fc == 'true':
             phy_mode_caps.append(yang_phy_mode_fc)
 
         def_hwport_speed = int(profile.get('default_hwport_speed'))
+
+        supported_autoneg = profile.get('supported_autoneg')
+        if supported_autoneg is not None and \
+           supported_autoneg in _yang_autoneg_support:
+            supported_autoneg = _yang_autoneg_support[supported_autoneg]
+        else:
+            supported_autoneg = _yang_autoneg_support['both-supported']
+
         def_breakout = get_value(yang_breakout, profile.get('default_breakout'))
         br_cap = []
         hwp_speed_cap = []
 
+        # Read breakout capabilities
         for br in profile.findall('breakout_cap'):
             _br_str = br.get('value')
             br_cap.append(get_value(yang_breakout, _br_str))
+        # Read HWport Lane speed capabilities
         for speed in profile.findall('hwport_speed_cap'):
             hwp_speed_cap.append(int(speed.get('value')))
-        portProfile_list[name] = PortProfile(None, name, br_cap, hwp_speed_cap,phy_mode_caps, def_hwport_speed,def_breakout)
+        # Read FC br capability if present otherwise it is based on hwport speed and breakout cap
+        fc_caps = []
+        _fc_cap_node = profile.find('fc_cap')
+        if _fc_cap_node is not None:
+            fc_caps = process_Profile_fc_cap_cfg(_fc_cap_node)
+
+        portProfile_list[name] = PortProfile(None, supported_autoneg, name, br_cap, hwp_speed_cap,phy_mode_caps,
+                                             def_hwport_speed,def_breakout)
+        portProfile_list[name].set_fc_caps(fc_caps)
+        fc_caps = []
     if def_profile != None and portProfile_list[def_profile] != None:
         _def_port_profile = portProfile_list[def_profile]
     else:
@@ -273,7 +337,7 @@ class Port(PortProfile):
         self.port_group_id = pg_id
 
     def is_pg_member(self):
-        if self.port_group_id == None:
+        if self.port_group_id is None:
             return False
         else:
             return True
@@ -290,6 +354,10 @@ class Port(PortProfile):
     def set_phy_port_speed(self):
         self.phy_port_speed = get_phy_port_speed(self.breakout, self.phy_mode,
                                     self.hwp_speed * len(self.hwports))
+        
+    def set_default_phy_port_speed(self):
+        self.def_phy_port_speed = get_phy_port_speed(self.def_breakout, self.def_phy_mode,
+                                    self.def_hwport_speed * len(self.hwports))
 
     def show(self):
         print "Name: " + self.name
@@ -452,6 +520,10 @@ class PortGroup(PortProfile):
         self.phy_port_speed = get_phy_port_speed(self.breakout, self.phy_mode,
                                     (self.hwp_speed * len(self.hw_ports)) / len(self.fp_ports))
 
+    def set_default_phy_port_speed(self):
+        self.def_phy_port_speed = get_phy_port_speed(self.def_breakout, self.def_phy_mode,
+                                    self.def_hwport_speed * len(self.hw_ports))
+    
     def get_fp_ports(self):
         return self.fp_ports[:]
     def get_hw_ports(self):
@@ -490,6 +562,7 @@ def process_frontPanelPort_cfg(root):
             port.add_hwport(_hwport)
         # Set physical port speed based on the breakout mode, phy mode and per pport hwp ports and hwp speed
         port.set_phy_port_speed()
+        port.set_default_phy_port_speed()
 
 port_group_list = {}
 
@@ -498,17 +571,15 @@ def get_port_group_list():
 
 def process_portGroup_cfg(root):
     global port_group_list
-    g_default = root.find('global')
     # Read all port group configuration
     _port_group = root.find('port-group')
-    if _port_group == None:
+    if _port_group is None:
         # the platform does not have port groups
         return
     for pg in _port_group.findall('pg'):
         _profile_name = pg.get('profile_type')
         port_profile = get_port_profile(_profile_name)
         name = pg.get('name')
-        idx = int(pg.get('id'))
         fp_ports = []
         hw_ports = []
         for e in pg:
@@ -520,6 +591,7 @@ def process_portGroup_cfg(root):
                 hw_ports.append(int(e.get('hwport')))
         port_group_list[name] = PortGroup(name, port_profile, fp_ports, hw_ports)
         port_group_list[name].set_phy_port_speed()
+        port_group_list[name].set_default_phy_port_speed()
 
 
 def process_file(root):

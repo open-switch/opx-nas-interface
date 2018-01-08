@@ -210,7 +210,16 @@ media_type_to_str = {
     187: "QSFPPLUS 40GBASE SR AOC 3M",
     188: "QSFPPLUS 40GBASE SR AOC 5M",
     189: "QSFPPLUS 40GBASE SR AOC 7M",
-    190: "QSFPPLUS 40GBASE SR AOC 10M"
+    190: "QSFPPLUS 40GBASE SR AOC 10M",
+    191: "QSFP28-DD 2x100GBASE CR4",
+    192: "QSFP28-DD 2x100GBASE CR4 1.5M",
+    193: "QSFP28-DD 8x25GBASE CR1",
+    194: "QSFP28-DD 8x25GBASE CR4 1.5M",
+    195: "QSFP28-DD 8x25GBASE 2SR4 AOC",
+    196: "QSFP28-DD 200GBASE 2SR4 AOC",
+    197: "QSFP28-DD 2x100GBASE SR4 AOC",
+    198: "QSFP28-DD 200GBASE CWDM4",
+    199: "QSFP28-DD 200GBASE PSM4 IR"
 }
 
 qsfp28_media_list = {
@@ -238,20 +247,14 @@ qsfp28_media_list = {
     95: "2X50 50GBASE CR2 3M",
     96: "2X50 50GBASE CR2 4M",
     97: "2X50 50GBASE CR2",
-    98: "SFP28 25GBASE CR1",
-    100: "SFP28 25GBASE CR1 1M",
-    101: "SFP28 25GBASE CR1 2M",
-    102: "SFP28 25GBASE CR1 3M",
     109: "QSFP28 100GBASE LR4 LITE",
     110: "QSFP28 100GBASE ER4",
     111: "QSFP28 100GBASE ACC",
-    112: "SFP28 25GBASE SR",
     120: "QSFP28 100GBASE PSM4 PIGTAIL",
     121: "QSFP28 100GBASE SWDM4",
     125: "QSFP28 100GBASE CR4 HALFM",
     126: "4X25 25GBASE CR1 HALFM",
     127: "2X50 50GBASE CR2 HALFM",
-    128: "SFP28 25GBASE CR1 HALFM",
     149: "QSFP28-DD 200GBASE CR4 HALFM",
     150: "QSFP28-DD 200GBASE CR4 1M",
     151: "QSFP28-DD 200GBASE CR4 2M",
@@ -274,7 +277,16 @@ qsfp28_media_list = {
     175: "QSFP28-DD 200GBASE SR4 5M",
     176: "QSFP28-DD 200GBASE SR4",
     177: "QSFP28-DD 200GBASE SR4 1.5M",
-    178: "QSFP28-DD 200GBASE SR4 2.5M"
+    178: "QSFP28-DD 200GBASE SR4 2.5M",
+    191: "QSFP28-DD 2x100GBASE CR4",
+    192: "QSFP28-DD 2x100GBASE CR4 1.5M",
+    193: "QSFP28-DD 8x25GBASE CR1",
+    194: "QSFP28-DD 8x25GBASE CR4 1.5M",
+    195: "QSFP28-DD 8x25GBASE 2SR4 AOC",
+    196: "QSFP28-DD 200GBASE 2SR4 AOC",
+    197: "QSFP28-DD 2x100GBASE SR4 AOC",
+    198: "QSFP28-DD 200GBASE CWDM4",
+    199: "QSFP28-DD 200GBASE PSM4 IR"
     }
 
 
@@ -515,6 +527,8 @@ def get_default_media_setting(_media_type, def_param):
             _def_attr = nas_if.get_cps_attr(obj,'autoneg')
         elif def_param == 'supported-phy-mode':
             _def_attr = nas_if.get_cps_attr(obj,'supported-phy-mode')
+        elif def_param == 'hw-profile':
+            _def_attr = nas_if.get_cps_attr(obj,'hw-profile')
     return _def_attr
 
 

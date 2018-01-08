@@ -70,9 +70,40 @@ def get_hwp_speed(breakout, phy_speed, phy_mode):
     else:
         return _hwp_speed_mbps
 
+def add_fc_br_cap_objs(pg, fc_caps, resp):
+    phy_mode =  get_value(yang_phy_mode, 'fc')
+    hwp_count = len(pg.get_hw_ports())
+    fp_count = len(pg.get_fp_ports())
+    for cap in fc_caps:
+        mode = cap['breakout']
+        skip_ports = breakout_to_skip_port[mode]
+        hw_speed = cap['hwp_speed']
+        phy_npu_speed = fp.get_phy_npu_port_speed(mode, (hw_speed * hwp_count) / fp_count)
+        if fp.verify_npu_supported_speed(phy_npu_speed) == False:
+#           don't add this entry of speed or breakout
+            continue
+        phy_speed = fp.get_fc_speed_frm_npu_speed(phy_npu_speed)
+        if phy_speed == 0:
+            continue
+        cps_obj = cps_object.CPSObject(module='base-pg/dell-pg/port-groups-state/port-group-state/br-cap',
+                                       qual='observed',
+            data={pg_state_attr('br-cap/phy-mode'):phy_mode,
+                pg_state_attr('br-cap/breakout-mode'):mode,
+                pg_state_attr('br-cap/port-speed'):phy_speed,
+                pg_state_attr('br-cap/skip-ports'):skip_ports,
+                pg_state_attr('id'):pg.name })
+        resp.append(cps_obj.get())
+        cps_obj = None
+
+
 # Create port group capability object for  port group object get request.
 # Each Capability object includes breakout mode, phy mode and phy port speed
 def create_and_add_pg_caps(pg, phy_mode, resp):
+    if phy_mode == get_value(yang_phy_mode, 'fc'):
+        fc_caps = pg.get_fc_caps()
+        if fc_caps is not None and len(fc_caps) != 0:
+            add_fc_br_cap_objs(pg, fc_caps, resp)
+            return
     br_modes = pg.get_breakout_caps()
     hwp_speeds = pg.get_hwport_speed_caps()
     hwp_count = len(pg.get_hw_ports())
@@ -82,8 +113,7 @@ def create_and_add_pg_caps(pg, phy_mode, resp):
         for hw_speed in hwp_speeds:
             phy_npu_speed = fp.get_phy_npu_port_speed(mode, (hw_speed * hwp_count) / fp_count)
             if fp.verify_npu_supported_speed(phy_npu_speed) == False:
-#                nas_if.log_err("create_and_add_pg_caps: br_mode %d doesn't support speed %d " % (mode, phy_npu_speed))
-#               don't add this entry of spped or beakout
+#               don't add this entry of speed or breakout
                 continue
 
             phy_speed = phy_npu_speed
@@ -101,8 +131,35 @@ def create_and_add_pg_caps(pg, phy_mode, resp):
                     pg_state_attr('id'):pg.name })
             resp.append(cps_obj.get())
             cps_obj = None
+# Add FC Specific Breakout mode in the port group CPS object is present in the port group
+def _append_fc_br_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index):
+    hwp_count = len(pg.get_hw_ports())
+    fp_count = len(pg.get_fp_ports())
+    fc_caps = pg.get_fc_caps()
+    for cap in fc_caps:
+        mode = cap['breakout']
+        skip_ports = breakout_to_skip_port[mode]
+        hw_speed = cap['hwp_speed']
+        phy_npu_speed = fp.get_phy_npu_port_speed(mode, (hw_speed * hwp_count) / fp_count)
+        if fp.verify_npu_supported_speed(phy_npu_speed) == False:
+#           don't add this entry of speed or breakout
+            continue
+        phy_speed = fp.get_fc_speed_frm_npu_speed(phy_npu_speed)
+        if phy_speed == 0:
+            continue
+        cap_list[str(cap_index)] = {'phy-mode':phy_mode,
+                                    'breakout-mode':mode,
+                                    'port-speed':phy_speed,
+                                    'skip-ports':skip_ports}
+        cap_index += 1
+    return cap_index
+
 
 def add_pg_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index = 0):
+    if phy_mode == get_value(yang_phy_mode, 'fc'):
+        fc_caps = pg.get_fc_caps()
+        if fc_caps is not None and len(fc_caps) != 0:
+            return _append_fc_br_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index)
     br_modes = pg.get_breakout_caps()
     hwp_speeds = pg.get_hwport_speed_caps()
     hwp_count = len(pg.get_hw_ports())
@@ -153,6 +210,9 @@ def create_and_add_pg_state_obj(pg, resp):
     cps_obj = cps_object.CPSObject(module='base-pg/dell-pg/port-groups-state/port-group-state', qual='observed',
             data={base_pg_state_attr('front-panel-port'):pg.get_fp_ports(),
                   base_pg_state_attr('hwport-list'):pg.get_hw_ports(),
+                  pg_state_attr('default-phy-mode'):pg.get_def_phy_mode(),
+                  pg_state_attr('default-breakout-mode'):pg.get_def_breakout(),
+                  pg_state_attr('default-port-speed'):pg.get_default_phy_port_speed(),
                   pg_state_attr('id'):pg.name })
     add_all_pg_caps_to_pg_obj(pg, cps_obj)
     resp.append(cps_obj.get())

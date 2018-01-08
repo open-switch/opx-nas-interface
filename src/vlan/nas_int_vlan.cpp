@@ -48,6 +48,42 @@
 
 const static int MAX_CPS_MSG_BUFF=10000;
 
+static t_std_error nas_check_intf_vlan_membership(nas_bridge_t *p_bridge_node, hal_ifindex_t ifindex,
+                                      nas_port_mode_t port_mode, nas_int_type_t intf_type,
+                                      bool *is_member)
+{
+    nas_list_t *members = NULL;
+    if (p_bridge_node == NULL) {
+        return STD_ERR(INTERFACE, PARAM, 0);
+    }
+    if ((intf_type == nas_int_type_PORT) || (intf_type == nas_int_type_FC)) {
+        if(port_mode == NAS_PORT_TAGGED) {
+            members = &p_bridge_node->tagged_list;
+        } else {
+            members = &p_bridge_node->untagged_list;
+        }
+    } else if (intf_type == nas_int_type_LAG) {
+       if(port_mode == NAS_PORT_TAGGED) {
+            members = &p_bridge_node->tagged_lag;
+       } else {
+            members = &p_bridge_node->untagged_lag;
+       }
+    } else {
+        EV_LOGGING(INTERFACE, INFO, "NAS-Vlan", "wrong type of the interface %d bridge %d  type %d ", ifindex,
+                                    p_bridge_node->ifindex, intf_type);
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+
+    nas_list_node_t *p_link_node = nas_get_link_node(&members->port_list, ifindex);
+    if (p_link_node == NULL) {
+        *is_member = false;
+    } else {
+        *is_member = true;
+    }
+    return STD_ERR_OK;
+}
+
+
 cps_api_return_code_t nas_publish_vlan_port_list(nas_bridge_t *p_bridge_node, nas_port_list_t &port_list,
                                                  nas_port_mode_t port_mode, cps_api_operation_types_t op)
 {
@@ -286,13 +322,13 @@ t_std_error nas_process_lag_for_vlan_del(nas_list_t *p_list,
     nas_list_node_t *p_link_node = NULL;
 
     EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
-                "Get untagged lag interface %d ",
+                "Get lag interface %d ",
                  if_index);
 
     p_link_node = nas_get_link_node(&p_list->port_list, if_index);
     if (p_link_node) {
         EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
-                    "Found untagged lag interface %d for deletion",
+                    "Found lag interface %d for deletion",
                      if_index);
 
         nas_delete_link_node(&p_list->port_list, p_link_node);
@@ -368,7 +404,7 @@ void nas_process_del_vlan_mem_from_os (hal_ifindex_t bridge_id, nas_port_list_t 
                        "Error finding index %d in intf_ctrl", if_index);
             break;
         }
-        
+
         if_master_info_t master_info = { nas_int_type_VLAN, port_mode, p_bridge_node->ifindex};
         BASE_IF_MODE_t intf_mode = nas_intf_get_mode(if_index);
 
@@ -387,6 +423,10 @@ void nas_process_del_vlan_mem_from_os (hal_ifindex_t bridge_id, nas_port_list_t 
             EV_LOGGING(INTERFACE, INFO ,"NAS-Vlan",
                         "Delete Port %d from bridge %d ", if_index, bridge_id);
 
+            if(!nas_intf_cleanup_l2mc_config(if_index,  p_bridge_node->vlan_id)) {
+                EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
+                   "Error cleaning L2MC membership for interface %d", if_index);
+            }
             //check the untagged list first
             if (nas_process_list_for_vlan_del(p_bridge_node, p_list,
                                              if_index, p_bridge_node->vlan_id,
@@ -397,10 +437,17 @@ void nas_process_del_vlan_mem_from_os (hal_ifindex_t bridge_id, nas_port_list_t 
             publish_list.insert(if_index); // TODO combine with LAG members
         } else if (intf_type == nas_int_type_LAG) {
             EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
-                        "Delete LAG %d from Bridge %d ", if_index, bridge_id);
+                "Delete %s LAG %d from Bridge %d ", (port_mode == NAS_PORT_UNTAGGED) ? "untagged" : "tagged",
+                if_index, bridge_id);
+
             std_mutex_simple_lock_guard lock_t(vlan_lag_mutex_lock());
             nas_base_handle_lag_del(p_bridge_node->ifindex, if_index, p_bridge_node->vlan_id);
-            nas_process_lag_for_vlan_del(&p_bridge_node->untagged_lag, if_index);
+            if (port_mode == NAS_PORT_TAGGED) {
+                nas_process_lag_for_vlan_del(&p_bridge_node->tagged_lag, if_index);
+            } else {
+                nas_process_lag_for_vlan_del(&p_bridge_node->untagged_lag, if_index);
+            }
+
         } else {
             EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                     "Unknown interface type or not supported: if_index %d type %d ", if_index, intf_type);
@@ -422,6 +469,7 @@ nas_list_node_t *nas_create_vlan_port_node(nas_bridge_t *p_bridge_node,
     ndi_port_t ndi_port;
     t_std_error rc = STD_ERR_OK;
 
+    memset(&ndi_port, 0, sizeof(ndi_port_t));
     EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
                 "Insert member %d mode %d in bridge %d",
                 ifindex, port_mode, p_bridge_node->ifindex);
@@ -434,10 +482,10 @@ nas_list_node_t *nas_create_vlan_port_node(nas_bridge_t *p_bridge_node,
     if (p_link_node == NULL) {
         *create_flag = true;
         if((rc = (nas_int_get_npu_port(ifindex, &ndi_port))) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
+            EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
                        "Interface %d returned error %d ",
                         ifindex, rc);
-            return NULL;
+            /* Could be a management interface: proceed ahead */
         }
 
         p_link_node = (nas_list_node_t *)malloc(sizeof(nas_list_node_t));
@@ -628,6 +676,18 @@ void nas_process_add_vlan_mem_from_os(hal_ifindex_t bridge_id, nas_port_list_t &
                            "Error finding index %d in intf_ctrl ", if_index);
                 break;
             }
+            bool is_member;
+            if (nas_check_intf_vlan_membership(p_bridge_node, if_index, port_mode, intf_type, &is_member) != STD_ERR_OK) {
+                EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "Error finding Interface index %d membership in bridge index %d",
+                        if_index, p_bridge_node->ifindex);
+                break;
+            }
+            if (is_member) {
+                EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "Interface idx %d is already member of bridge idx %d",
+                        if_index, p_bridge_node->ifindex);
+                break;
+            }
+
             if (port_mode == NAS_PORT_TAGGED && vlan_id != 0) {
                 /*Check if the tagged port exist in the os else don't add, it may have been deleted n this netlik message is stale */
                 if (nas_ck_port_exist(vlan_id, if_index) !=true ) {
@@ -696,7 +756,11 @@ void nas_pack_vlan_if(cps_api_object_t obj, nas_bridge_t *p_bridge)
 
     nas_pack_vlan_port_list(obj, &p_bridge->tagged_list, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS);
 
+    nas_pack_vlan_port_list(obj, &p_bridge->tagged_lag, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS);
+
     nas_pack_vlan_port_list(obj, &p_bridge->untagged_list,DELL_IF_IF_INTERFACES_INTERFACE_UNTAGGED_PORTS);
+
+    nas_pack_vlan_port_list(obj, &p_bridge->untagged_lag,DELL_IF_IF_INTERFACES_INTERFACE_UNTAGGED_PORTS);
 
     cps_api_object_attr_add(obj,DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, p_bridge->mac_addr,
                             sizeof(p_bridge->mac_addr));
@@ -732,10 +796,34 @@ t_std_error nas_get_vlan_intf(const char *if_name, cps_api_object_list_t list)
         return(STD_ERR(INTERFACE, FAIL, 0));
     }
     cps_api_object_t object = cps_api_object_list_create_obj_and_append(list);
+    if (object == nullptr)  {
+        return(STD_ERR(INTERFACE, FAIL, 0));
+    }
     nas_pack_vlan_if(object, p_bridge);
     return STD_ERR_OK;
 }
 
+t_std_error nas_get_vlan_intf_from_vid(hal_vlan_id_t vid, cps_api_object_list_t list)
+{
+    nas_bridge_t *p_bridge = NULL;
+
+    EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
+           "Get vlan interface from vid %d", vid);
+
+    p_bridge = nas_get_bridge_node_from_vid(vid);
+
+    if(p_bridge == NULL) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
+                               "Error finding bridge vlan ID %d for get operation", vid);
+        return(STD_ERR(INTERFACE, FAIL, 0));
+    }
+    cps_api_object_t object = cps_api_object_list_create_obj_and_append(list);
+    if (object == nullptr)  {
+        return(STD_ERR(INTERFACE, FAIL, 0));
+    }
+    nas_pack_vlan_if(object, p_bridge);
+    return STD_ERR_OK;
+}
 
 t_std_error nas_register_vlan_intf(nas_bridge_t *p_bridge, hal_intf_reg_op_type_t op)
 {

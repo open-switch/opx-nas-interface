@@ -263,6 +263,14 @@ yang_fec_mode = {
     'CL108-RS' : 5
 }
 
+fec_mode_to_yang = {
+    1: 'AUTO',
+    2: 'OFF',
+    3: 'CL91-RS',
+    4: 'CL74-FC',
+    5: 'CL108-RS'
+}
+
 def is_fec_supported(fec_mode, if_speed):
     if ((if_speed == yang_speed['25G'] or
          if_speed == yang_speed['50G'] or

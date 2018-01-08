@@ -34,12 +34,13 @@ _media_key = cps.key_from_name('observed', 'base-media/media-info')
 MEDIA_LIST = {}
 
 class PHY_Media:
-    def  __init__(self, media_type, media_str, speed, autoneg, duplex):
+    def  __init__(self, media_type, media_str, speed, autoneg, duplex, hw_profile):
         self.name = media_str
         self.id = media_type
         self.speed = speed
         self.autoneg = autoneg
         self.duplex = duplex
+        self.hw_profile = hw_profile
         self.supported_speed = []
         self.supported_phy_mode = []
 
@@ -57,6 +58,8 @@ class PHY_Media:
             nas_if.log_info("autoneg "  + str(self.autoneg))
         if self.duplex != None:
             nas_if.log_info("duplex "  + str(self.duplex))
+        if self.hw_profile != None:
+            nas_if.log_info("hw_profile "  + str(self.hw_profile))
         nas_if.log_info("supported speed :" + str(self.supported_speed))
         nas_if.log_info("supported Phy mode :" + str(self.supported_phy_mode))
 
@@ -65,9 +68,9 @@ def get_media_info(media_type):
         if media_type not in MEDIA_LIST:
             return None
         return MEDIA_LIST[media_type]
-def add_media_info(media_type, media_str, speed, autoneg, duplex):
+def add_media_info(media_type, media_str, speed, autoneg, duplex, hw_profile):
     if media_type not in MEDIA_LIST:
-        MEDIA_LIST[media_type] = PHY_Media(media_type, media_str, speed, autoneg, duplex)
+        MEDIA_LIST[media_type] = PHY_Media(media_type, media_str, speed, autoneg, duplex, hw_profile)
     return MEDIA_LIST[media_type]
 
 def process_file(root):
@@ -77,18 +80,22 @@ def process_file(root):
         _media_type = media.get_media_type_from_str(_media_str)
         _speed = None
         _autoneg = None
+        _hw_profile = None
         _duplex = "full"  # Default value for duplex state is always full state
         _speed_str = i.get('speed')
         _autoneg_str = i.get('autoneg')
         _duplex_str = i.get('duplex')
+        _hw_profile_str = i.get('hw-profile')
         if _speed_str != 'None':
             _speed = int(_speed_str)
         if _autoneg_str != 'None':
             _autoneg = _autoneg_str
         if _duplex_str != 'None':
             _duplex = _duplex_str
+        if _hw_profile_str != 'None':
+            _hw_profile = _hw_profile_str
         if _media_type not in MEDIA_LIST:
-            media_info = add_media_info(_media_type, _media_str, _speed, _autoneg, _duplex)
+            media_info = add_media_info(_media_type, _media_str, _speed, _autoneg, _duplex, _hw_profile)
             phy_modes = []
             if media_info is not None:
                 for e in i:
@@ -144,6 +151,8 @@ def _gen_media_list(media_obj, resp):
             _data['autoneg'] = nas_if.to_yang_autoneg(_m_info.autoneg)
         if _m_info.duplex != None:
             _data['duplex'] = nas_if.to_yang_duplex(_m_info.duplex)
+        if _m_info.hw_profile != None:
+            _data['hw-profile'] = _m_info.hw_profile
         for mode in _m_info.supported_phy_mode:
             _phy_mode = get_value(yang_phy_mode, mode)
             _data['supported-phy-mode'].append(_phy_mode)

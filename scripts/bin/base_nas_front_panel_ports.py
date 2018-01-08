@@ -16,33 +16,27 @@
 import cps
 import cps_object
 import cps_utils
-import event_log as ev
 import nas_front_panel_map as fp
 import nas_os_if_utils as nas_if
 import nas_mac_addr_utils as ma
 import nas_phy_media as media
-import bytearray_utils as ba
-import dn_base_ip_tool
-import ifindex_utils
 import nas_fp_led_utils as fp_led
 import nas_if_lpbk as if_lpbk
+import nas_if_macvlan as if_macvlan
 import nas_if_config_obj as if_config
-from nas_if_config_obj import intf_list
 import nas_phy_port_utils as port_utils
 import nas_fp_port_utils as fp_utils
 import nas_port_group_utils as pg_utils
-from nas_common_header import *
+import nas_common_header as nas_comm
 
 import logging
-import sys
 import time
-import xml.etree.ElementTree as ET
-from nas_front_panel_map import NPU
 import copy
 import systemd.daemon
 
 npu_attr_name = 'base-if-phy/if/interfaces/interface/npu-id'
 port_attr_name = 'base-if-phy/if/interfaces/interface/port-id'
+supported_autoneg = 'base-if-phy/if/interfaces/interface/supported-autoneg'
 fp_port_attr_name = 'base-if-phy/hardware-port/front-panel-port'
 subport_attr_name = 'base-if-phy/hardware-port/subport-id'
 ifindex_attr_name = 'dell-base-if-cmn/if/interfaces/interface/if-index'
@@ -52,6 +46,7 @@ speed_attr_name = 'dell-if/if/interfaces/interface/speed'
 negotiation_attr_name = 'dell-if/if/interfaces/interface/negotiation'
 autoneg_attr_name = 'dell-if/if/interfaces/interface/auto-negotiation'
 duplex_attr_name = 'dell-if/if/interfaces/interface/duplex'
+hwprofile_attr_name = 'base-if-phy/if/interfaces/interface/hw-profile'
 media_type_attr_name = 'base-if-phy/if/interfaces/interface/phy-media'
 vlan_id_attr_name = 'base-if-vlan/if/interfaces/interface/id'
 fec_mode_attr_name = 'dell-if/if/interfaces/interface/fec'
@@ -69,6 +64,7 @@ _yang_dup_half = 2
 _yang_breakout_1x1 = 4
 _yang_breakout_2x1 = 3
 _yang_breakout_4x1 = 2
+_yang_breakout_4x4 = 7
 
 port_list = None
 fp_identification_led_control = None
@@ -91,8 +87,8 @@ def _get_if_media_type(fp_port):
 # Verify if the speed is supported by the interface
 def _verify_intf_supported_speed(config, speed):
     # if it is ethernet type then check if the speed is supported globally
-    intf_phy_mode = get_value(ietf_type_2_phy_mode, config.get_ietf_intf_type())
-    if intf_phy_mode == get_value(yang_phy_mode, 'ether'):
+    intf_phy_mode = nas_comm.get_value(nas_comm.ietf_type_2_phy_mode, config.get_ietf_intf_type())
+    if intf_phy_mode == nas_comm.get_value(nas_comm.yang_phy_mode, 'ether'):
         if  fp.verify_npu_supported_speed(speed) == False:
             nas_if.log_err('Configured speed not supported %s' % str(speed))
             return False
@@ -101,7 +97,7 @@ def _verify_intf_supported_speed(config, speed):
 def _add_default_speed(config, cps_obj):
     # fetch default speed
     media_type = config.get_media_type()
-    if media_type == None:
+    if media_type is None:
         return
     nas_if.log_info("set default speed for media type " + str(media_type))
     speed = media.get_default_media_setting(media_type, 'speed')
@@ -110,7 +106,7 @@ def _add_default_speed(config, cps_obj):
             cps_obj.del_attr(speed_attr_name)
     except ValueError:
         pass
-    if speed == None:
+    if speed is None:
         nas_if.log_info('default speed setting not found')
         return
     if fp.is_qsfp28_cap_supported(config.get_fp_port()) == True:
@@ -157,7 +153,7 @@ def _add_default_fec_mode(media_type, cps_obj):
 # If user set something other than AUTO( default) then it will be passed down without checking connected media.
 # in case of ethernet fanout mode, default speed is skipped.
 def _set_speed(speed, config, obj):
-    intf_phy_mode = get_value(ietf_type_2_phy_mode, config.get_ietf_intf_type())
+    intf_phy_mode = nas_comm.get_value(nas_comm.ietf_type_2_phy_mode, config.get_ietf_intf_type())
     breakout_mode = config.get_breakout_mode()
     nas_if.log_info("breakout mode %s and speed %s " % (str(breakout_mode), str(speed)))
     if speed != _yang_auto_speed:
@@ -165,7 +161,7 @@ def _set_speed(speed, config, obj):
             return False
     config.set_speed(speed)
     if speed == _yang_auto_speed:
-        if intf_phy_mode == get_value(yang_phy_mode, 'fc') or breakout_mode == _yang_breakout_1x1:
+        if intf_phy_mode == nas_comm.get_value(nas_comm.yang_phy_mode, 'fc') or breakout_mode == _yang_breakout_1x1 or breakout_mode == _yang_breakout_4x4:
             # TODO default speed in breakout mode is not supported  yet
             # TODO it may cause issue in port group ports. Verify the usecases.
             _add_default_speed(config, obj)
@@ -184,6 +180,18 @@ def _set_autoneg(negotiation, config, obj):
         obj.add_attr(autoneg_attr_name, autoneg)
     return
 
+def _set_hw_profile(config, obj):
+    media_type = config.get_media_type()
+    if media_type is None:
+        return
+    hw_profile = media.get_default_media_setting(media_type, 'hw-profile')
+    if hw_profile is None:
+        return
+    if config.get_hw_profile() is None or \
+       config.get_hw_profile() != hw_profile:
+        obj.add_attr(hwprofile_attr_name, hw_profile)
+        config.set_hw_profile(hw_profile)
+
 def _set_duplex(duplex, config, obj):
     nas_if.log_info("duplex is " + str(duplex))
     config.set_duplex(duplex)
@@ -200,31 +208,34 @@ def _get_default_fec_mode(if_speed):
     for all types of media. Default option for 25G/50G is OFF for all types
     of media.
     """
-    if if_speed == get_value(yang_speed, '100G'):
-        fec_mode = get_value(yang_fec_mode, 'CL91-RS')
+    if if_speed == nas_comm.get_value(nas_comm.yang_speed, '100G'):
+        fec_mode = nas_comm.get_value(nas_comm.yang_fec_mode, 'CL91-RS')
     else:
-        fec_mode = get_value(yang_fec_mode, 'OFF')
+        fec_mode = nas_comm.get_value(nas_comm.yang_fec_mode, 'OFF')
 
     return fec_mode
 
 def _set_fec_mode(fec_mode, config, obj, op):
     if_cfg_speed = config.get_cfg_speed()
     if fec_mode != None:
-        if not is_fec_supported(fec_mode, if_cfg_speed):
-            nas_if.log_err('FEC mode %d is not supported by port with speed %d' % (
-                           fec_mode, if_cfg_speed))
+        if not nas_comm.is_fec_supported(fec_mode, if_cfg_speed):
+            _str_err = ('FEC mode %s is not supported with speed %s'
+                        %(nas_comm.get_value(nas_comm.fec_mode_to_yang,fec_mode),
+                        nas_comm.get_value(nas_comm.yang_to_mbps_speed,if_cfg_speed)))
+            nas_if.log_err(_str_err)
+            obj.set_error_string(1,_str_err)
             return False
     else:
         if (op == 'create' and
-            is_fec_supported(get_value(yang_fec_mode, 'AUTO'), if_cfg_speed)):
+            nas_comm.is_fec_supported(nas_comm.get_value(nas_comm.yang_fec_mode, 'AUTO'), if_cfg_speed)):
             # set default FEC mode as auto to newly created interface
-            fec_mode = get_value(yang_fec_mode, 'AUTO')
+            fec_mode = nas_comm.get_value(nas_comm.yang_fec_mode, 'AUTO')
         else:
             return True
 
     nas_if.log_info('set FEC mode %d' % fec_mode)
     config.set_fec_mode(fec_mode)
-    if fec_mode == get_value(yang_fec_mode, 'AUTO'):
+    if fec_mode == nas_comm.get_value(nas_comm.yang_fec_mode, 'AUTO'):
         fec_mode = _get_default_fec_mode(if_cfg_speed)
     obj.add_attr(fec_mode_attr_name, fec_mode)
     return True
@@ -244,7 +255,7 @@ def check_if_media_supported(media_type, config):
 
 # Check if physical Mode is supported by the media plugged-in
 def check_if_media_support_phy_mode(media_type, config):
-    intf_phy_mode = get_value(ietf_type_2_phy_mode, config.get_ietf_intf_type())
+    intf_phy_mode = nas_comm.get_value(nas_comm.ietf_type_2_phy_mode, config.get_ietf_intf_type())
 
     # Make sure that connected media supports  the configured intf phy mode.
     supported_phy_modes = media.get_default_media_setting(media_type, 'supported-phy-mode')
@@ -284,27 +295,29 @@ def if_handle_set_media_type(op, obj):
         config.set_is_media_supported(False)
         return False
 
-    # Initialize default speed and negotiation to auto if not initialized
-    if config.get_speed() == None:
+    # Initialize default speed, hw_profile and negotiation to auto if not initialized
+    if config.get_speed() is None:
         config.set_speed(_yang_auto_speed)
-    if config.get_negotiation() == None:
+    if config.get_negotiation() is None:
         config.set_negotiation(_yang_auto_neg)
 
     config.set_is_media_supported(True)
 
-    intf_phy_mode = get_value(ietf_type_2_phy_mode, config.get_ietf_intf_type())
+    intf_phy_mode = nas_comm.get_value(nas_comm.ietf_type_2_phy_mode, config.get_ietf_intf_type())
 
     obj.add_attr(ifname_attr_name, if_name)
     # set the default speed if the speed is configured to auto it is in non-breakout mode
     if config.get_speed() == _yang_auto_speed:
-        if config.get_breakout_mode() == _yang_breakout_1x1 or intf_phy_mode == get_value(yang_phy_mode, 'fc'):
+        if config.get_breakout_mode() == _yang_breakout_1x1 or config.get_breakout_mode() == _yang_breakout_4x4 or intf_phy_mode == nas_comm.get_value(nas_comm.yang_phy_mode, 'fc'):
             _add_default_speed(config, obj)
     if config.get_negotiation() == _yang_auto_neg:
         _add_default_autoneg(media_type, obj)
     if config.get_duplex() == _yang_auto_dup:
         _add_default_duplex(media_type, obj)
-    if config.get_fec_mode() == get_value(yang_fec_mode, 'AUTO'):
+    if config.get_fec_mode() == nas_comm.get_value(nas_comm.yang_fec_mode, 'AUTO'):
         _add_default_fec_mode(media_type, obj)
+
+    _set_hw_profile(config, obj)
 
     # delete npu port attribute because NAS use them as flag for interface association
     obj.del_attr(npu_attr_name)
@@ -321,31 +334,31 @@ def _if_init_config(obj, config):
     # 2. else, if attribute is in config, add it to cps object
     # 3. else, add "auto" to cps object
     speed = nas_if.get_cps_attr(obj, speed_attr_name)
-    if speed == None:
+    if speed is None:
         cfg_speed = config.get_speed()
-        if cfg_speed == None:
+        if cfg_speed is None:
             cfg_speed = _yang_auto_speed
         obj.add_attr(speed_attr_name, cfg_speed)
     duplex = nas_if.get_cps_attr(obj, duplex_attr_name)
-    if duplex == None:
+    if duplex is None:
         cfg_duplex = config.get_duplex()
-        if cfg_duplex == None:
+        if cfg_duplex is None:
             cfg_duplex = _yang_auto_dup
         obj.add_attr(duplex_attr_name, cfg_duplex)
     ng = nas_if.get_cps_attr(obj, negotiation_attr_name)
-    if ng == None:
+    if ng is None:
         cfg_ng = config.get_negotiation()
-        if cfg_ng == None:
+        if cfg_ng is None:
             cfg_ng = _yang_auto_neg
         obj.add_attr(negotiation_attr_name, cfg_ng)
 
     fec = nas_if.get_cps_attr(obj, fec_mode_attr_name)
-    if fec == None:
+    if fec is None:
         cfg_fec = config.get_fec_mode()
-        if cfg_fec == None:
-            auto_fec = get_value(yang_fec_mode, 'AUTO')
+        if cfg_fec is None:
+            auto_fec = nas_comm.get_value(nas_comm.yang_fec_mode, 'AUTO')
             if_cfg_speed = config.get_cfg_speed()
-            if if_cfg_speed != None and is_fec_supported(auto_fec, if_cfg_speed):
+            if if_cfg_speed != None and nas_comm.is_fec_supported(auto_fec, if_cfg_speed):
                 cfg_fec = auto_fec
         if cfg_fec != None:
             obj.add_attr(fec_mode_attr_name, cfg_fec)
@@ -399,7 +412,7 @@ def _if_update_config(op, obj):
         if if_type != 'front-panel':
             return True
 
-        ietf_intf_type = nas_if.get_cps_attr(obj,get_value(attr_name,'intf_type'))
+        ietf_intf_type = nas_if.get_cps_attr(obj,nas_comm.get_value(nas_comm.attr_name,'intf_type'))
         config = if_config.IF_CONFIG(if_name, ietf_intf_type)
 
         if if_config.if_config_add(if_name, config) == False:
@@ -432,6 +445,7 @@ def _if_update_config(op, obj):
                 if fp_obj != None:
                     config.set_cfg_speed(fp_obj.get_port_speed())
                     config.set_breakout_mode(fp_obj.get_breakout_mode())
+                    obj.add_attr(supported_autoneg, fp_obj.get_supported_autoneg())
                 else:
                     nas_if.log_err('Unable to find front panel object for port %d' % fp_port)
 
@@ -467,13 +481,7 @@ def _if_update_config(op, obj):
         if not(_fp_identification_led_handle(obj)):
             nas_if.log_err('Setting identification led failed')
             return False
-        # if media supports Ethernet and intf type is ethernet then only proceeds
-        # otherwise ignore for now.
-        intf_phy_mode = get_value(ietf_type_2_phy_mode, config.get_ietf_intf_type())
-        media_type = config.get_media_type()
 
-        # if media supports Ethernet and intf type is ethernet then only proceeds
-        # otherwise ignore for now.
         if config.get_is_media_supported() == False:
             nas_if.log_info('media type not supported')
             # Do not do any further processing based on the media connected
@@ -507,6 +515,9 @@ def _if_update_config(op, obj):
                 nas_if.log_err('Failed to set FEC mode %d to interface %s' % (fec_mode, if_name))
                 return False
 
+        if op == 'create':
+            _set_hw_profile(config, obj)
+
         config.show()
 
     if op == 'delete':
@@ -531,7 +542,7 @@ def get_alloc_mac_addr_params(if_type, cps_obj):
             port_id = cps_obj.get_attr_data(port_attr_name)
         except ValueError:
             pass
-        if port_id == None:
+        if port_id is None:
             front_panel_port = None
             subport_id = 0
             try:
@@ -540,7 +551,7 @@ def get_alloc_mac_addr_params(if_type, cps_obj):
             except ValueError:
                 pass
 
-            if front_panel_port == None:
+            if front_panel_port is None:
                 nas_if.log_info('Create virtual interface without mac address assigned')
                 return None
 
@@ -560,7 +571,7 @@ def get_alloc_mac_addr_params(if_type, cps_obj):
                 nas_if.log_err('Physical port object not found')
                 return None
         npu = fp.get_npu(npu_id)
-        if hw_port == None or npu == None:
+        if hw_port is None or npu is None:
             nas_if.log_err('No hardware port id or npu object for front panel port')
             return None
         p = npu.port_from_hwport(hw_port)
@@ -602,7 +613,7 @@ def _get_op_id(cps_obj):
 
 def _handle_loopback_intf(cps_obj, params):
     op = _get_op_id(cps_obj)
-    if op == None:
+    if op is None:
         return False
 
     if op == 'set':
@@ -611,6 +622,18 @@ def _handle_loopback_intf(cps_obj, params):
         return if_lpbk.create_loopback_interface(cps_obj, params)
     if op == 'delete':
         return if_lpbk.delete_loopback_interface(cps_obj)
+
+def _handle_macvlan_intf(cps_obj, params):
+    op = _get_op_id(cps_obj)
+    if op is None:
+        return False
+
+    if op == 'create':
+        return if_macvlan.create_macvlan_interface(cps_obj)
+    if op == 'set':
+        return if_macvlan.set_macvlan_interface(cps_obj)
+    if op == 'delete':
+        return if_macvlan.delete_macvlan_interface(cps_obj)
 
 def set_intf_rpc_cb(methods, params):
     if params['operation'] != 'rpc':
@@ -623,9 +646,11 @@ def set_intf_rpc_cb(methods, params):
         return _handle_loopback_intf(cps_obj, params)
     elif if_type == 'management':
         return False
+    elif if_type == 'macvlan':
+        return _handle_macvlan_intf(cps_obj, params)
 
     op = _get_op_id(cps_obj)
-    if op == None:
+    if op is None:
         return False
 
     member_port = None
@@ -637,14 +662,14 @@ def set_intf_rpc_cb(methods, params):
     if_name = nas_if.get_cps_attr(cps_obj, ifname_attr_name)
     nas_if.log_info('Logical interface configuration: op %s if_name %s if_type %s' % (
                      op, if_name if if_name != None else '-', if_type))
-    if (op == 'create' and member_port == None):
+    if (op == 'create' and member_port is None):
         nas_if.log_info('Create interface, type: %s' % if_type)
         mac_addr = None
         try:
             mac_addr = cps_obj.get_attr_data(mac_attr_name)
         except ValueError:
             pass
-        if mac_addr == None:
+        if mac_addr is None:
             nas_if.log_info('No mac address given in input object, get assigned mac address')
             try:
                 param_list = get_alloc_mac_addr_params(if_type, cps_obj)
@@ -657,7 +682,7 @@ def set_intf_rpc_cb(methods, params):
                 except:
                     logging.exception('Failed to get mac address')
                     return False
-                if mac_addr == None:
+                if mac_addr is None:
                     nas_if.log_err('Failed to get mac address')
                     return False
                 if len(mac_addr) > 0:
@@ -701,6 +726,7 @@ def set_intf_rpc_cb(methods, params):
 
         try:
             if _if_update_config(op, cps_obj) == False:
+                params['change'] = cps_obj.get()
                 nas_if.log_err( "Interface update config failed during set or create ")
                 return False
         except:
@@ -731,7 +757,7 @@ def set_intf_rpc_cb(methods, params):
     if len(ret_data) == 0 or not 'change' in ret_data[0]:
         nas_if.log_err('Invalid return object from cps request')
         return False
-    if (op == 'create' and member_port == None):
+    if (op == 'create' and member_port is None):
         ret_obj = cps_object.CPSObject(obj = ret_data[0]['change'])
         try:
             ifindex = ret_obj.get_attr_data(ifindex_attr_name)
@@ -760,12 +786,12 @@ def get_mac_cb(methods, params):
         nas_if.log_err('Interface type %s not supported' % if_type)
         return False
     param_list = get_alloc_mac_addr_params(if_type, cps_obj)
-    if param_list == None:
+    if param_list is None:
         nas_if.log_err('No enough attributes in input object to get mac address')
         return False
 
     mac_addr = ma.if_get_mac_addr(**param_list)
-    if mac_addr == None or len(mac_addr) == 0:
+    if mac_addr is None or len(mac_addr) == 0:
         nas_if.log_err('Failed to get mac address')
         return False
     cps_obj.add_attr(mac_attr_name, mac_addr)
@@ -793,7 +819,7 @@ if __name__ == '__main__':
         nas_if.log_err('Create Interface: Base MAC address is not yet ready')
         time.sleep(1)
     fp_utils.init()
-    while cps.enabled(get_value(keys_id, 'physical_key'))  == False:
+    while cps.enabled(nas_comm.get_value(nas_comm.keys_id, 'physical_key'))  == False:
         nas_if.log_info('Create Interface: Physical port service is not ready')
         time.sleep(1)
 
@@ -813,14 +839,14 @@ if __name__ == '__main__':
     # Register Logical Interface handler
     d = {}
     d['transaction'] = set_intf_cb
-    cps.obj_register(handle, get_value(keys_id, 'set_intf_key'), d)
+    cps.obj_register(handle, nas_comm.get_value(nas_comm.keys_id, 'set_intf_key'), d)
 
     # Register MAc address allocation handler
     get_mac_hdl = cps.obj_init()
 
     d = {}
     d['transaction'] = get_mac_cb
-    cps.obj_register(get_mac_hdl, get_value(keys_id, 'get_mac_key'), d)
+    cps.obj_register(get_mac_hdl, nas_comm.get_value(nas_comm.keys_id, 'get_mac_key'), d)
 
     fp_identification_led_control = fp_led.identification_led_control_get()
 

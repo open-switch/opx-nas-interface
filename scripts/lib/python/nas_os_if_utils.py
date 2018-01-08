@@ -224,7 +224,7 @@ class FpPortCache(IfComponentCache):
         for e in l:
             obj = cps_object.CPSObject(obj=e)
 
-            if get_cps_attr(obj,'default-name') == None:
+            if get_cps_attr(obj,'default-name') is None:
                 continue
             self.m[obj.get_attr_data('default-name')] = obj
             self.m[obj.get_attr_data('front-panel-port')] = obj
@@ -293,21 +293,18 @@ class IfCache(IfComponentCache):
 def get_interface_name(chassis, slot, port, lane):
     return 'e%d%02d-%03d-%d' % (chassis, slot, port, lane)
 
-def is_40g_mode_on_100g_port(phy_obj):
+def is_40g_mode_on_100g_port(fp_obj):
     try:
-        supp_speed = phy_obj.get_attr_data('supported-speed')
+        port_speed = fp_obj.get_attr_data('port-speed')
+        def_port_speed = fp_obj.get_attr_data('default-port-speed')
     except ValueError:
         log_err('Unable to find supported-speed from cps object')
         return False
-    max_speed = max([get_value(yang_to_mbps_speed, x) for x in supp_speed])
-    try:
-        speed = phy_obj.get_attr_data('speed')
-        speed = get_value(yang_to_mbps_speed, speed)
-        if max_speed == 100000 and speed == 40000:
-            log_info('100G physical port was configured as 40G breakout mode')
-            return True
-    except ValueError:
-        pass
+    # Checking if default port speed is 100g and port speed is 40g
+    if (def_port_speed == nas_comm.get_value(nas_comm.yang_speed,'100G') and 
+        port_speed == nas_comm.get_value(nas_comm.yang_speed,'40G')):
+        log_info('100G physical port was configured as 40G breakout mode')
+        return True
     return False
 
 def make_interface_from_phy_port(obj, mode = None, speed = None):
@@ -331,12 +328,23 @@ def make_interface_from_phy_port(obj, mode = None, speed = None):
     slot_id = default_slot_id
     fp_port_id = elem.get_attr_data('front-panel-port')
     lane = elem.get_attr_data('subport-id')
-    if mode == None:
+    fp_obj = cps_object.CPSObject(module=get_fp_key(), data={
+        'front-panel-port': fp_port_id
+    })
+    l=[]
+    cps.get([fp_obj.get()],l)
+    if len(l) == 0:
+        log_err('No object found for hardware port %d' % hw_port_id)
+        log_err(str(elem.get()))
+        raise Exception('Invalid port %d - no matching hardware-port' % hw_port_id)
+
+    fp_obj = cps_object.CPSObject(obj=l[0])
+    if mode is None:
         mode = elem.get_attr_data('fanout-mode')
-    if speed == None:
+    if speed is None:
         speed = _yang_auto_speed
-    _subport = lane_to_subport(mode, lane, is_40g_mode_on_100g_port(obj))
-    if _subport == None:
+    _subport = lane_to_subport(mode, lane, is_40g_mode_on_100g_port(fp_obj))
+    if _subport is None:
         raise Exception('Failed to get subport id from br_mode %d lane %d' % (
                         mode, lane))
     name = get_interface_name(chassis_id, slot_id, fp_port_id, _subport)
@@ -399,7 +407,7 @@ class npuPort:
         self.port = 0
 def get_phy_port_from_if_index(if_index):
     l = nas_os_if_list(d={'if-index':if_index})
-    if l == None:
+    if l is None:
         return None
 
     phy_port = npuPort()
@@ -415,7 +423,7 @@ class hwPort:
 
 def get_hwport_from_phy_port(npu, port):
     port = nas_os_phy_list(d={'npu-id':npu,'port-id':port})
-    if port == None:
+    if port is None or not port:
         return None
     port_obj = cps_object.CPSObject(obj=port[0])
 
@@ -426,12 +434,20 @@ def get_hwport_from_phy_port(npu, port):
 
 def get_fp_from_hw_port(npu, hw_port):
     hwport_list = nas_os_hwport_list(d={'npu-id':npu, 'hw-port':hw_port})
-    if hwport_list == None:
+    if hwport_list is None:
         return None
     hwport_obj = cps_object.CPSObject(obj=hwport_list[0])
     fp_port = hwport_obj.get_attr_data('front-panel-port')
     return fp_port
 
+def get_subport_id_from_hw_port(npu, hw_port):
+    hwport_list = nas_os_hwport_list(d={'npu-id':npu, 'hw-port':hw_port})
+    if hwport_list is None:
+        return None
+    hwport_obj = cps_object.CPSObject(obj=hwport_list[0])
+    subport_id = hwport_obj.get_attr_data('subport-id')
+    fp_port = hwport_obj.get_attr_data('front-panel-port')
+    return fp_port, subport_id
 
 def get_media_id_from_fp_port(fp_port):
     fp_port_list = nas_os_fp_list()
@@ -584,7 +600,7 @@ def from_yang_duplex(dup):
 
 # Set speed , duplex and autoneg
 def nas_set_interface_attribute(if_name, speed, duplex, autoneg):
-    if if_name == None:
+    if if_name is None:
         log_err('not a valid interface')
         return False
     _data = {}
@@ -627,7 +643,7 @@ def get_lag_id_from_name(lag_name):
 
 def get_media_id_from_if_index(if_index):
     phy_port = get_phy_port_from_if_index(if_index)
-    if phy_port == None:
+    if phy_port is None:
         log_err('not a physical port')
         return False
     hwp = get_hwport_from_phy_port(phy_port.npu, phy_port.port)
@@ -638,7 +654,7 @@ def get_media_id_from_if_index(if_index):
 def get_front_port_from_name(if_name, check_if = True):
     if check_if:
         if_index = name_to_ifindex(if_name)
-        if if_index == None:
+        if if_index is None:
             log_err('Invalid interface name '+str(if_name))
             return None
     try:
@@ -657,15 +673,15 @@ def get_front_port_from_name(if_name, check_if = True):
 
 def get_breakoutCap_currentMode_mode(if_index):
     phy_port = get_phy_port_from_if_index(if_index)
-    if phy_port == None:
+    if phy_port is None:
         log_err('no physical port found for ifindex %d' % if_index)
         return None
     hwp = get_hwport_from_phy_port(phy_port.npu, phy_port.port)
-    if hwp == None:
+    if hwp is None:
         log_err('no hw port found for npu %d port %d' % (phy_port.npu, phy_port.port))
         return None
     fp_port = get_fp_from_hw_port(phy_port.npu, hwp.hw_port)
-    if fp_port == None:
+    if fp_port is None:
         log_err('no front panel port found for hw port %d' % hwp.hw_port)
         return None
     return (get_port_breakoutCap_currentMode_mode(fp_port))

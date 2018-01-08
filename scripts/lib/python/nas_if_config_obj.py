@@ -37,6 +37,7 @@ class IF_CONFIG:
         self.fec = None
         self.npu = None
         self.port = None
+        self.hw_profile = None
 
         self.media_supported = True
 
@@ -77,6 +78,12 @@ class IF_CONFIG:
     def set_negotiation(self, negotiation):
         self.negotiation = negotiation
 
+    def get_hw_profile(self):
+        return(self.hw_profile)
+
+    def set_hw_profile(self, hw_profile):
+        self.hw_profile = hw_profile
+
     def get_duplex(self):
         return(self.duplex)
 
@@ -114,6 +121,7 @@ class IF_CONFIG:
                      ('NPU ID', 'npu'),
                      ('Port ID', 'port'),
                      ('Media', 'media_type'),
+                     ('Hw Profile', 'hw_profile'),
                      ('Breakout', 'breakout_mode'),
                      ('Front Panel Port', 'fp_port'),
                      ('Subport ID', 'subport_id'),
@@ -161,7 +169,8 @@ def get_intf_type(cps_obj):
                    'ianaift:l2vlan': 'vlan',
                    'ianaift:ieee8023adLag': 'lag',
                    'ianaift:softwareLoopback': 'loopback',
-                   'base-if:management': 'management'}
+                   'base-if:management': 'management',
+                   'base-if:macvlan': 'macvlan'}
     try:
         obj_if_type = cps_obj.get_attr_data('if/interfaces/interface/type')
     except:

@@ -22,6 +22,7 @@
 
 #include "nas_int_lag.h"
 #include "hal_if_mapping.h"
+#include "nas_if_utils.h"
 #include "nas_int_lag_api.h"
 #include "std_mutex_lock.h"
 #include "event_log.h"
@@ -188,6 +189,24 @@ static bool nas_lag_intf_to_port(hal_ifindex_t ifindex, interface_ctrl_t *intf_c
     return true;
 }
 
+bool nas_lag_if_port_is_lag_member(hal_ifindex_t lag_master_id, hal_ifindex_t ifindex) {
+
+    nas_lag_slave_info_t *slave_entry = NULL;
+    slave_entry = nas_get_slave_node (ifindex);
+    if (slave_entry == NULL) {
+        return false;
+    }
+    if (slave_entry->master_idx != lag_master_id) {
+        EV_LOGGING(INTERFACE, ERR,"NAS-LAG",
+            "Slave and master records inconsistent: slave port %d master id %d, slave masterid %d",
+                ifindex, lag_master_id, slave_entry->master_idx);
+        return false;
+
+    }
+    return true;
+
+}
+
 
 t_std_error nas_lag_member_add(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex,
                                 nas_lag_id_t lag_id)
@@ -289,7 +308,7 @@ t_std_error nas_register_lag_intf(nas_lag_master_info_t *nas_lag_entry, hal_intf
     memset(&details,0,sizeof(details));
     details.q_type = HAL_INTF_INFO_FROM_IF;
     details.if_index = nas_lag_entry->ifindex;
-    details.lag_id = nas_lag_entry->lag_id;
+    details.lag_id = nas_lag_entry->ndi_lag_id;
     details.int_type = nas_int_type_LAG;
     strncpy(details.if_name, nas_lag_entry->name, sizeof(details.if_name)-1);
 
@@ -406,6 +425,10 @@ t_std_error nas_lag_set_mac(hal_ifindex_t index,const char *mac)
     }
 
     nas_lag_entry->mac_addr = mac;
+    if (dn_hal_update_intf_mac(index, mac) != STD_ERR_OK)  {
+        EV_LOGGING(INTERFACE, ERR ,"NAS-LAG", "Failure saving LAG %d MAC in intf block", index);
+        return cps_api_ret_code_ERR;
+    }
 
     return STD_ERR_OK;
 }
@@ -498,5 +521,20 @@ t_std_error nas_lag_get_port_mode(hal_ifindex_t slave_ifindex, bool& block_state
         return (STD_ERR(INTERFACE,FAIL,0));
     }
 
+    return STD_ERR_OK;
+}
+
+/* public API */
+t_std_error nas_lag_get_ndi_lag_id(hal_ifindex_t lag_index, ndi_obj_id_t *ndi_lag_id)
+{
+    if (ndi_lag_id == NULL) {
+        return STD_ERR(INTERFACE,FAIL, 0);
+    }
+
+    nas_lag_master_info_t * lag_node = nas_get_lag_node(lag_index);
+    if (lag_node == NULL) {
+        return STD_ERR(INTERFACE,FAIL, 0);
+    }
+    *ndi_lag_id = lag_node->ndi_lag_id;
     return STD_ERR_OK;
 }

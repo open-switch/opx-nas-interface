@@ -51,7 +51,7 @@ static auto npu_ids = new std::unordered_set<npu_id_t>;
 static t_std_error populate_vlan_stat_ids(){
 
     unsigned int max_vlan_stat_id;
-    if(ndi_plat_get_ids_len(NAS_STAT_VLAN,&max_vlan_stat_id ) != STD_ERR_OK){
+    if(get_stat_ids_len(NAS_STAT_VLAN,&max_vlan_stat_id ) != STD_ERR_OK){
         EV_LOG(ERR,INTERFACE, 0,"NAS-STAT", "Failed to get max length of supported stat ids");
         return STD_ERR(INTERFACE,FAIL,0);
     }
@@ -60,7 +60,7 @@ static t_std_error populate_vlan_stat_ids(){
 
     memset(ids_list,0,sizeof(ids_list));
 
-    if(ndi_plat_vlan_stat_list_get(ids_list, &max_vlan_stat_id) != STD_ERR_OK) {
+    if(vlan_stat_list_get(ids_list, &max_vlan_stat_id) != STD_ERR_OK) {
         return STD_ERR(INTERFACE,FAIL,0);
     }
 

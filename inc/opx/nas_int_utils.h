@@ -43,6 +43,7 @@ t_std_error nas_int_get_if_index_from_npu_port(hal_ifindex_t *port_index, ndi_po
 void nas_intf_to_npu_port_map_dump(std_parsed_string_t handle);
 void nas_shell_command_init(void);
 
+bool nas_is_non_npu_phy_port(hal_ifindex_t if_index);
 #ifdef __cplusplus
 }
 #endif

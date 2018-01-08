@@ -116,6 +116,15 @@ nas_bridge_t *nas_get_bridge_node(hal_ifindex_t index)
     return &it->second;
 }
 
+nas_bridge_t *nas_get_bridge_node_from_vid (hal_vlan_id_t vlan_id) {
+    auto iter = vid_to_bridge.find(vlan_id);
+    if (iter == vid_to_bridge.end()){
+        return NULL;
+    } else {
+        return (nas_get_bridge_node(vid_to_bridge[vlan_id]));
+    }
+}
+
 nas_bridge_t *nas_get_bridge_node_from_name (const char *vlan_if_name)
 {
     if (vlan_if_name == NULL) return NULL;
@@ -145,6 +154,7 @@ nas_bridge_t* nas_create_insert_bridge_node(hal_ifindex_t index, const char *nam
         std_dll_init (&p_node->tagged_list.port_list);
         std_dll_init (&p_node->untagged_list.port_list);
         std_dll_init (&p_node->untagged_lag.port_list);
+        std_dll_init (&p_node->tagged_lag.port_list);
         create = true;
         nas_os_set_bridge_default_mac_ageing(index);
         return p_node;

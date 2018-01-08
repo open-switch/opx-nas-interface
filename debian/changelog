@@ -1,3 +1,24 @@
+opx-nas-interface (5.10.1) unstable; urgency=medium
+
+  * Update: Remove tagged lag in bridge data ,when message comes from netlink.
+  * Update: Add logging for failure cases
+  * Update: Add L2MC clean-up for LAG upon vlan membership removal
+  * Update: Add check for vlan membership before going ahead with adding bridge in masterlist.
+  * Update: Add provision for fetching vlan interfaces based on vlan ID
+  * Update: Store MAC address inthe interface control block
+  * Update: publish correct npu id when port disassication event is published
+  * Update: Add non NPU port check API
+  * Update: Fixed some LAG related issues brought in by nas-common data structure changes
+  * Update: VRF object publish added.
+  * Update: Implementation for HW Port Profile
+  * Update: Macvlan interface create/update/delete support
+  * Update: Use new API for LAG add/remove to a vlan
+  * Update: Re-defining base fanout script for supporting mode
+  * Update: Addressing semmle comments: removing unused imports and using is for None comparision
+  * Update: Adding error string into the return failure object and refining nas-common-header usage
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 11 Dec 2017  14:47:07 -0800
+
 opx-nas-interface (5.6.1+opx1) unstable; urgency=medium
 
   * Bugfix: Fix for https://github.com/open-switch/opx-nas-interface/issues/24

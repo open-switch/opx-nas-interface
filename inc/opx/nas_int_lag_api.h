@@ -138,7 +138,10 @@ t_std_error nas_lag_member_add(hal_ifindex_t lag_master_id,hal_ifindex_t if_inde
 
 t_std_error nas_lag_member_delete(hal_ifindex_t lag_master_id,hal_ifindex_t if_index,nas_lag_id_t lag_id);
 
-
+/**
+ *  Check if a port is a member of bond.
+ */
+bool nas_lag_if_port_is_lag_member(hal_ifindex_t lag_master_id, hal_ifindex_t ifindex);
 /**
  * @brief init nas_lag rb tree.
 */
@@ -165,6 +168,9 @@ void nas_cps_handle_mac_set (const char *lag_name, hal_ifindex_t lag_index);
 
 cps_api_return_code_t lag_object_publish(nas_lag_master_info_t *nas_lag_entry,hal_ifindex_t lag_idx,
         cps_api_operation_types_t op);
+
+t_std_error nas_lag_get_ndi_lag_id(hal_ifindex_t lag_index, ndi_obj_id_t *ndi_lag_id);
+
 
 #endif /* NAS_INTF_LAG_API_H__ */
 

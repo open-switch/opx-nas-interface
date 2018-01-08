@@ -123,7 +123,7 @@ bool nas_stat_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index, bo
         strncpy(i.if_name,name,sizeof(i.if_name)-1);
         i.q_type = HAL_INTF_INFO_FROM_IF_NAME;
         if (dn_hal_get_interface_info(&i)!=STD_ERR_OK){
-            EV_LOG(ERR, INTERFACE, 0, "NAS-CPS-LAG",
+            EV_LOG(ERR, INTERFACE, 0, "NAS-STAT",
                     "Can't get interface control information for %s",name);
             return false;
         }
@@ -135,7 +135,7 @@ bool nas_stat_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index, bo
 static t_std_error populate_if_stat_ids(){
 
     unsigned int max_if_stat_id;
-    if(ndi_plat_get_ids_len(NAS_STAT_IF,&max_if_stat_id ) != STD_ERR_OK){
+    if(get_stat_ids_len(NAS_STAT_IF,&max_if_stat_id ) != STD_ERR_OK){
         EV_LOG(ERR,INTERFACE, 0,"NAS-STAT", "Failed to get max length of supported stat ids");
         return STD_ERR(INTERFACE,FAIL,0);
     }
@@ -143,7 +143,7 @@ static t_std_error populate_if_stat_ids(){
     ndi_stat_id_t ids_list[max_if_stat_id];
 
     memset(ids_list,0,sizeof(ids_list));
-    if(ndi_plat_port_stat_list_get(ids_list, &max_if_stat_id) != STD_ERR_OK) {
+    if(port_stat_list_get(ids_list, &max_if_stat_id) != STD_ERR_OK) {
         return STD_ERR(INTERFACE,FAIL,0);
     }
 
