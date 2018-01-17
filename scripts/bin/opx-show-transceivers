@@ -35,7 +35,15 @@ def display_media_inventory(verbose=False):
     for m in media_list:
         try:
             obj = cps_object.CPSObject(obj=m)
-            _port = obj.get_attr_data('port')
+
+            # If port density > 1, use logical port list 
+            _port_density =  obj.get_attr_data('port-density')
+            _sub_port_list = []
+            if (_port_density > 0):
+                _sub_port_list = obj.get_attr_data('sub-port-id')
+            else:
+                print 'Error: unable to read media info'
+                continue
             _media_type = obj.get_attr_data('type')
             if _media_type == 1:
                 _vendor_pn = ''
@@ -49,9 +57,11 @@ def display_media_inventory(verbose=False):
                     _qualified = 'Yes'
                 else:
                     _qualified = 'No'
-            print '%4s              %24s         %18s    %18s        %4s' % (str(_port), media.get_media_str(_media_type), _vendor_pn, _serial_no, _qualified)
+            for _port in _sub_port_list:
+                print '%4s              %24s         %18s    %18s        %4s' % (str(_port), media.get_media_str(_media_type), _vendor_pn, _serial_no, _qualified)
             if verbose == True :
-                display_media_info(_port)
+                for _port in _sub_port_list:
+                    display_media_info(_port)
         except:
             print 'Error: unable to read media info'
             continue

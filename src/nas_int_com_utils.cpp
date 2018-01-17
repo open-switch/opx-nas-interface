@@ -40,7 +40,7 @@ bool nas_intf_handle_intf_mode_change (const char * if_name, BASE_IF_MODE_t mode
     cps_api_key_t                keys;
     bool                         rc = true;
 
-    EV_LOGGING(INTERFACE, DEBUG, "IF_CONT", "Interface mode change update called");
+    EV_LOGGING(INTERFACE, DEBUG, "IF_CONT", "Interface mode change update called for %s", if_name);
     do {
         if ((obj = cps_api_object_create()) == NULL) {
             EV_LOGGING(INTERFACE,ERR,"IF_CONT", "Interface mode change update failed");
@@ -121,7 +121,9 @@ bool nas_intf_cleanup_l2mc_config (hal_ifindex_t ifx,  hal_vlan_id_t vlan_id)
                                         cps_api_qualifier_TARGET);
         cps_api_object_set_key(obj, &keys);
 
-        cps_api_object_attr_add_u32(obj, BASE_L2_MCAST_CLEANUP_L2MC_MEMBER_INPUT_IFINDEX, ifx);
+        if (ifx != 0) {
+            cps_api_object_attr_add_u32(obj, BASE_L2_MCAST_CLEANUP_L2MC_MEMBER_INPUT_IFINDEX, ifx);
+        }
         if (vlan_id != 0) {
             cps_api_object_attr_add_u32(obj,  BASE_L2_MCAST_CLEANUP_L2MC_MEMBER_INPUT_VLAN_ID, vlan_id);
         }

@@ -215,7 +215,7 @@ static cps_api_return_code_t _if_gen_interface_set (obj_intf_cat_t obj_cat, void
     } else {
         /*  extract type from if_name or if_index */
         if (_if_type_from_if_index_or_name(obj_cat, obj, &_type) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,DEBUG,"NAS-COM-INT-SET","No interface name or index passed to process "
+            EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-SET","No interface name or index passed to process "
                                                  "common interface set request");
             return cps_api_ret_code_ERR;
         }

@@ -164,15 +164,17 @@ nas_lag_master_table_t & nas_get_lag_table(void)
 }
 
 
-static bool nas_lag_exist(hal_ifindex_t ifindex)
+static bool nas_lag_exist(const char *bond_name)
 {
-    nas_lag_master_info_t *nas_lag_entry = NULL;
-    nas_lag_entry = nas_get_lag_node (ifindex);
-    if(nas_lag_entry !=NULL){
-        if(nas_lag_entry->ifindex == ifindex)
-            return true;
+    interface_ctrl_t intf_ctrl;
+    memset(&intf_ctrl, 0, sizeof(interface_ctrl_t));
+    intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+    safestrncpy(intf_ctrl.if_name, bond_name, sizeof(intf_ctrl.if_name));
+
+    if (dn_hal_get_interface_info(&intf_ctrl) != STD_ERR_OK) {
+        return false;
     }
-    return false;
+    return true;
 }
 
 
@@ -329,8 +331,8 @@ t_std_error nas_lag_master_add(hal_ifindex_t index,const char *if_name,
     t_std_error rc = STD_ERR_OK;
     nas_obj_id_t ndi_lag_id;
 
-    if(nas_lag_exist(index)){
-        EV_LOGGING(INTERFACE, INFO, "NAS-LAG", "Lag exists %d", index);
+    if(nas_lag_exist(if_name)){
+        EV_LOGGING(INTERFACE, INFO, "NAS-LAG", "Lag exists index %d name %s ", index, if_name);
         return STD_ERR(INTERFACE,FAIL, 0);
     }
 
