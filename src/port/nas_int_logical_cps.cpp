@@ -520,6 +520,15 @@ static cps_api_return_code_t if_state_get (void * context, cps_api_get_params_t 
     cps_api_object_t filt = cps_api_object_list_get(param->filters,key_ix);
     cps_api_object_attr_t ifix = cps_api_object_attr_get(filt, IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
     cps_api_object_attr_t name = cps_api_get_key_data(filt,IF_INTERFACES_STATE_INTERFACE_NAME);
+    cps_api_object_attr_t type_attr = cps_api_object_attr_get(filt, IF_INTERFACES_STATE_INTERFACE_TYPE);
+
+    char *req_if_type = NULL;
+    bool have_type_filter = false;
+    if (type_attr != nullptr) {
+        req_if_type = (char *)cps_api_object_attr_data_bin(type_attr);
+        have_type_filter = true;
+    }
+
     if (ifix != nullptr) {
         /*  Call os API with interface object  */
         cps_api_object_attr_add_u32(filt,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
@@ -540,6 +549,7 @@ static cps_api_return_code_t if_state_get (void * context, cps_api_get_params_t 
         return cps_api_ret_code_ERR;
     }
     size_t mx = cps_api_object_list_size(param->list);
+    char if_type[256];
     size_t ix = 0;
     while (ix < mx) {
         cps_api_object_t object = cps_api_object_list_get(param->list,ix);
@@ -553,6 +563,20 @@ static cps_api_return_code_t if_state_get (void * context, cps_api_get_params_t 
             _port.if_index = cps_api_object_attr_data_u32(ifix);
             _port.q_type = HAL_INTF_INFO_FROM_IF;
             if(dn_hal_get_interface_info(&_port)==STD_ERR_OK) {
+                if (!nas_to_ietf_if_type_get(_port.int_type, if_type, sizeof(if_type))) {
+                    EV_LOGGING(INTERFACE, ERR, "NAS-INT-GET", "Failed to get IETF interface type for type id %d",
+                               _port.int_type);
+                    return cps_api_ret_code_ERR;
+                }
+                // TODO revisit the logic since this handler is always expecting interface type in the  get call
+                if (have_type_filter) {
+                    if(strncmp(if_type,req_if_type, sizeof(if_type)) != 0) {
+                        cps_api_object_list_remove(param->list,ix);
+                        cps_api_object_delete(object);
+                        --mx;
+                        continue;
+                    }
+                }
                 cps_api_set_key_data(object,IF_INTERFACES_STATE_INTERFACE_NAME,
                                cps_api_object_ATTR_T_BIN, _port.if_name, strlen(_port.if_name)+1);
                 _if_fill_in_npu_intf_state(_port.npu_id, _port.port_id, _port.int_type, object);
@@ -565,6 +589,8 @@ static cps_api_return_code_t if_state_get (void * context, cps_api_get_params_t 
                                  _port.if_index);
                 cps_api_object_attr_delete(object, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
                 cps_api_object_attr_delete(object, IF_INTERFACES_INTERFACE_NAME);
+                cps_api_object_attr_add(object,IF_INTERFACES_STATE_INTERFACE_TYPE,
+                                                (const void *)if_type, strlen(if_type)+1);
 
             } else {
                 ifix = nullptr;    //use to indicate that we want to erase this entry
