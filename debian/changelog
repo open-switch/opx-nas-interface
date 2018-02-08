@@ -1,5 +1,5 @@
 opx-nas-interface (5.10.1+opx2) unstable; urgency=medium
-
+  * Update: Add loopback interface and interface-state get/set handler.
   * Update: Added interface type as an output when interface-state is queried.
   * Update: Added a type-filter to fix duplicate displays when interface-state is queried.
 

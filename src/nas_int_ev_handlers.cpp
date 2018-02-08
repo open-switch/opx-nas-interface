@@ -395,8 +395,8 @@ static void send_lpbk_intf_oper_event(cps_api_object_t obj)
     hal_interface_send_event(obj);
 
 }
-static void nas_int_loopback_handler(cps_api_object_t obj, const char *name) {
-
+static void nas_loopback_ev_handler(cps_api_object_t obj)
+{
     interface_ctrl_t details;
     hal_intf_reg_op_type_t reg_op;
 
@@ -404,19 +404,25 @@ static void nas_int_loopback_handler(cps_api_object_t obj, const char *name) {
     cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
     cps_api_object_attr_t if_attr = cps_api_object_attr_get(obj,
             DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
-    if (if_attr==nullptr) return ; // if index not present
+    cps_api_object_attr_t if_name_attr = cps_api_object_attr_get(obj,
+            IF_INTERFACES_INTERFACE_NAME);
+    if (if_attr == nullptr || if_name_attr == nullptr) {
+        EV_LOGGING(INTERFACE,INFO,"NAS-INT",
+                   "if index or if name missing for loopback interface type ");
+        return ; // if index or name not present
+    }
 
+    const char *name =  (const char*)cps_api_object_attr_data_bin(if_name_attr);
     safestrncpy(details.if_name,name,sizeof(details.if_name));
     details.if_index = cps_api_object_attr_data_u32(if_attr);
     details.int_type = nas_int_type_LPBK;
 
-    cps_api_object_attr_t if_name_attr = cps_api_object_attr_get(obj,
-            IF_INTERFACES_STATE_INTERFACE_NAME);
+    if_name_attr = cps_api_object_attr_get(obj, IF_INTERFACES_STATE_INTERFACE_NAME);
     if (if_name_attr == nullptr) {
         cps_api_object_attr_delete(obj, IF_INTERFACES_INTERFACE_NAME);
         name = details.if_name;
         cps_api_object_attr_add(obj, IF_INTERFACES_STATE_INTERFACE_NAME,
-                name, strlen(name) + 1);
+                                name, strlen(name) + 1);
     }
 
     if (op == cps_api_oper_CREATE) {
@@ -434,7 +440,6 @@ static void nas_int_loopback_handler(cps_api_object_t obj, const char *name) {
     }
     send_lpbk_intf_oper_event(obj);
     return;
-
 }
 
 static void nas_macvlan_ev_handler(cps_api_object_t obj) {
@@ -490,15 +495,6 @@ void nas_int_ev_handler(cps_api_object_t obj) {
 
     hal_ifindex_t if_index;
     ndi_port_t ndi_port;
-
-    cps_api_object_attr_t _name_attr = cps_api_object_attr_get(obj,IF_INTERFACES_INTERFACE_NAME);
-    if (_name_attr!=nullptr){
-        const char *name =  (const char*)cps_api_object_attr_data_bin(_name_attr);
-        if (strncmp(name, "lo", strlen("lo")) == 0) {
-            nas_int_loopback_handler(obj, name);
-            return;
-        }
-    }
 
     cps_api_object_attr_t attr = cps_api_object_attr_get(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
     if (attr==nullptr) return ; // if index not present
@@ -569,6 +565,7 @@ static auto _int_ev_handlers = new std::unordered_map<BASE_CMN_INTERFACE_TYPE_t,
     { BASE_CMN_INTERFACE_TYPE_VLAN, nas_vlan_ev_handler},
     { BASE_CMN_INTERFACE_TYPE_LAG, nas_lag_ev_handler},
     { BASE_CMN_INTERFACE_TYPE_MACVLAN, nas_macvlan_ev_handler},
+    { BASE_CMN_INTERFACE_TYPE_LOOPBACK, nas_loopback_ev_handler},
 };
 
 bool nas_int_ev_handler_cb(cps_api_object_t obj, void *param) {

@@ -752,6 +752,10 @@ void nas_pack_vlan_if(cps_api_object_t obj, nas_bridge_t *p_bridge)
 
     cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, p_bridge->ifindex);
 
+    cps_api_object_attr_add(obj,IF_INTERFACES_INTERFACE_TYPE,
+                            (const void *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN,
+                            strlen(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN)+1);
+
     cps_api_object_attr_add_u32(obj, BASE_IF_VLAN_IF_INTERFACES_INTERFACE_ID, p_bridge->vlan_id);
 
     nas_pack_vlan_port_list(obj, &p_bridge->tagged_list, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS);

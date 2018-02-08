@@ -816,8 +816,9 @@ static void nas_pack_lag_if(cps_api_object_t obj, nas_lag_master_info_t *nas_lag
 
     cps_api_object_attr_add_u32(obj, BASE_IF_LAG_IF_INTERFACES_INTERFACE_ID, nas_lag_entry->lag_id);
 
-    cps_api_object_attr_add(obj, IF_INTERFACES_INTERFACE_NAME, nas_lag_entry->name,
-            strlen(nas_lag_entry->name)+1);
+    cps_api_object_attr_add(obj,IF_INTERFACES_INTERFACE_TYPE,
+                            (const void *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_IEEE8023ADLAG,
+                            strlen(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_IEEE8023ADLAG)+1);
 
     nas_pack_lag_port_list(obj,nas_lag_entry,DELL_IF_IF_INTERFACES_INTERFACE_MEMBER_PORTS,true);
 
