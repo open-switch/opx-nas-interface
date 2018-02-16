@@ -26,11 +26,11 @@ from nas_common_header import *
 _g_if_name = 'if/interfaces/interface/name'
 
 def usage():
-    print ("Invalid arguments specified - os10-config-fanout [port] [true/false/mode] [speed]" \
-            + "\neg: os10-config-fanout e101-001-0 true" \
-            + "\n    os10-config-fanout e101-001-1 false" \
-            + "\n    os10-config-fanout e101-001-0 4x1 25g" \
-            + "\n    os10-config-fanout e101-001-1 1x1 100g")
+    print ("Invalid arguments specified - opx-config-fanout [port] [true/false/mode] [speed]" \
+            + "\neg: opx-config-fanout e101-001-0 true" \
+            + "\n    opx-config-fanout e101-001-1 false" \
+            + "\n    opx-config-fanout e101-001-0 4x1 25g" \
+            + "\n    opx-config-fanout e101-001-1 1x1 100g")
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
@@ -91,7 +91,7 @@ if __name__ == '__main__':
 
     if (sys.argv[2].lower()=='false' and len(port_speed_cap)>2):
         print ("Rejecting transaction, Please use mode and speed" \
-                "\neg: os10-config-fanout e101-001-1 1x1 100g")
+                "\neg: opx-config-fanout e101-001-1 1x1 100g")
         sys.exit(1)
 
     if _mode not in breakout_cap:
