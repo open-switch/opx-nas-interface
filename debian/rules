@@ -2,4 +2,5 @@
 
 %:
 	dh $@  --with autoreconf,systemd --parallel
+        override_dh_strip:
 

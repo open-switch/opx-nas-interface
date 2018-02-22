@@ -798,8 +798,6 @@ static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj)
     return rc;
 }
 
-
-
 static void nas_pack_lag_if(cps_api_object_t obj, nas_lag_master_info_t *nas_lag_entry)
 {
     cps_api_key_from_attr_with_qual(cps_api_object_key(obj),BASE_IF_LAG_IF_INTERFACES_INTERFACE_OBJ,
@@ -811,8 +809,6 @@ static void nas_pack_lag_if(cps_api_object_t obj, nas_lag_master_info_t *nas_lag
     cps_api_set_key_data(obj,IF_INTERFACES_INTERFACE_NAME,
                 cps_api_object_ATTR_T_BIN,
                 nas_lag_entry->name, strlen(nas_lag_entry->name)+1);
-
-    cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,nas_lag_entry->ifindex);
 
     cps_api_object_attr_add_u32(obj, BASE_IF_LAG_IF_INTERFACES_INTERFACE_ID, nas_lag_entry->lag_id);
 
@@ -841,13 +837,60 @@ static void nas_pack_lag_if(cps_api_object_t obj, nas_lag_master_info_t *nas_lag
             sizeof(attr_id_list)/sizeof(attr_id_list[0]));
 }
 
+static void nas_pack_lag_if_state(cps_api_object_t obj, nas_lag_master_info_t *nas_lag_entry)
+{
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj),BASE_IF_LAG_IF_INTERFACES_STATE_INTERFACE_OBJ,
+            cps_api_qualifier_OBSERVED);
 
-t_std_error nas_get_lag_intf(hal_ifindex_t ifindex, cps_api_object_list_t list)
+    cps_api_set_key_data(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
+            cps_api_object_ATTR_T_U32,
+            &nas_lag_entry->ifindex,sizeof(nas_lag_entry->ifindex));
+    cps_api_set_key_data(obj,IF_INTERFACES_STATE_INTERFACE_NAME,
+                cps_api_object_ATTR_T_BIN,
+                nas_lag_entry->name, strlen(nas_lag_entry->name)+1);
+
+    //cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,nas_lag_entry->ifindex);
+
+    cps_api_object_attr_add_u32(obj, BASE_IF_LAG_IF_INTERFACES_INTERFACE_ID, nas_lag_entry->lag_id);
+    cps_api_object_attr_add_u32(obj, IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS, nas_lag_entry->admin_status ?
+        IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_UP : IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_DOWN);
+    cps_api_object_attr_add_u32(obj, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS, nas_lag_entry->oper_status ?
+        IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP : IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN);
+    cps_api_object_attr_add_u32(obj, BASE_IF_LAG_IF_INTERFACES_INTERFACE_LEARN_MODE,
+        nas_lag_entry->mac_learn_mode_set ? nas_lag_entry->mac_learn_mode : BASE_IF_PHY_MAC_LEARN_MODE_DISABLE);
+    cps_api_object_attr_add_u32(obj, BASE_IF_LAG_IF_INTERFACES_STATE_INTERFACE_NUM_PORTS, (nas_lag_entry->port_list).size());
+
+    cps_api_object_attr_add(obj,IF_INTERFACES_STATE_INTERFACE_TYPE,
+                            (const void *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_IEEE8023ADLAG,
+                            strlen(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_IEEE8023ADLAG)+1);
+
+    nas_pack_lag_port_list(obj,nas_lag_entry,DELL_IF_IF_INTERFACES_INTERFACE_MEMBER_PORTS,true);
+
+    if(!nas_lag_entry->mac_addr.empty()){
+        cps_api_object_attr_add(obj,DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, nas_lag_entry->mac_addr.c_str(),
+           nas_lag_entry->mac_addr.length()+1);
+    }
+
+    cps_api_object_attr_add_u32(obj,IF_INTERFACES_INTERFACE_ENABLED ,nas_lag_entry->admin_status);
+    /*
+     * Get MTU on LAG Interface
+     */
+    nas_os_get_interface_mtu(nas_lag_entry->name, obj);
+
+    nas::ndi_obj_id_table_t lag_opaque_data_table;
+    //@TODO to retrive NPU ID in multi npu case
+    lag_opaque_data_table[0] = nas_lag_entry->ndi_lag_id;
+    cps_api_attr_id_t  attr_id_list[] = {BASE_IF_LAG_IF_INTERFACES_INTERFACE_LAG_OPAQUE_DATA};
+    nas::ndi_obj_id_table_cps_serialize (lag_opaque_data_table, obj, attr_id_list,
+            sizeof(attr_id_list)/sizeof(attr_id_list[0]));
+}
+
+static t_std_error nas_get_lag_intf(hal_ifindex_t ifindex, cps_api_object_list_t list, bool get_intf_state)
 {
     nas_lag_master_info_t *nas_lag_entry = NULL;
 
     EV_LOGGING(INTERFACE, INFO, "NAS-LAG-CPS",
-               "Get lag interface %d", ifindex);
+               "Get lag %s %d", (get_intf_state ? "interface-state" : "interface"), ifindex);
 
     nas_lag_entry = nas_get_lag_node(ifindex);
 
@@ -861,20 +904,23 @@ t_std_error nas_get_lag_intf(hal_ifindex_t ifindex, cps_api_object_list_t list)
     if(object == NULL){
         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "obj NULL failure");
         return(STD_ERR(INTERFACE, FAIL, 0));
-    }
+    } 
 
-    nas_pack_lag_if(object, nas_lag_entry);
+    if (get_intf_state) {
+        nas_pack_lag_if_state(object, nas_lag_entry);
+    } else {
+        nas_pack_lag_if(object, nas_lag_entry);
+    }
 
     return STD_ERR_OK;
 }
 
-
-t_std_error nas_lag_get_all_info(cps_api_object_list_t list)
+static t_std_error nas_lag_get_all_info(cps_api_object_list_t list, bool get_intf_state)
 {
     nas_lag_master_info_t *nas_lag_entry = NULL;
     nas_lag_master_table_t nas_lag_master_table;
 
-    EV_LOGGING(INTERFACE, INFO, "NAS-LAG-CPS", "Getting all lag interfaces");
+    EV_LOGGING(INTERFACE, INFO, "NAS-LAG-CPS", "Getting all lag %s", (get_intf_state ? "interface-states" : "interfaces"));
 
     nas_lag_master_table = nas_get_lag_table();
 
@@ -894,13 +940,18 @@ t_std_error nas_lag_get_all_info(cps_api_object_list_t list)
                        "Error finding lagnode %d for get operation", it->first);
             return(STD_ERR(INTERFACE, FAIL, 0));
         }
-        nas_pack_lag_if(obj,nas_lag_entry);
+
+        if(get_intf_state) {
+            nas_pack_lag_if_state(obj, nas_lag_entry);
+        } else {
+            nas_pack_lag_if(obj, nas_lag_entry);
+        }
     }
 
     return STD_ERR_OK;
 }
 
-t_std_error nas_lag_ndi_it_to_obj_fill(nas_obj_id_t ndi_lag_id,cps_api_object_list_t list)
+t_std_error nas_lag_ndi_it_to_obj_fill(nas_obj_id_t ndi_lag_id,cps_api_object_list_t list, bool get_intf_state)
 {
     nas_lag_master_info_t *nas_lag_entry = NULL;
     nas_lag_master_table_t nas_lag_master_table;
@@ -929,11 +980,17 @@ t_std_error nas_lag_ndi_it_to_obj_fill(nas_obj_id_t ndi_lag_id,cps_api_object_li
 
         if(nas_lag_entry->ndi_lag_id == ndi_lag_id){
             cps_api_object_t obj = cps_api_object_list_create_obj_and_append(list);
-            if (obj == NULL) {
+            if(obj == NULL) {
                 EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "obj NULL failure");
                 return STD_ERR(INTERFACE, NOMEM, 0);
             }
-            nas_pack_lag_if(obj,nas_lag_entry);
+            
+            if(get_intf_state) {
+                nas_pack_lag_if_state(obj,nas_lag_entry);
+            } else {
+                nas_pack_lag_if(obj,nas_lag_entry);
+            }
+
             return STD_ERR_OK;
         }
     }
@@ -965,14 +1022,14 @@ static cps_api_return_code_t nas_process_cps_lag_get(void * context, cps_api_get
     std_mutex_simple_lock_guard lock_t(nas_lag_mutex_lock());
 
     if(nas_lag_get_ifindex_from_obj(obj,&ifindex)){
-        if(nas_get_lag_intf(ifindex, param->list)!= STD_ERR_OK){
+        if(nas_get_lag_intf(ifindex, param->list, false)!= STD_ERR_OK){
             return cps_api_ret_code_ERR;
         }
     }else if(opaque_attr_data == true){
-        if(nas_lag_ndi_it_to_obj_fill(ndi_lag_id,param->list) != STD_ERR_OK)
+        if(nas_lag_ndi_it_to_obj_fill(ndi_lag_id,param->list, false) != STD_ERR_OK)
             return cps_api_ret_code_ERR;
     }else{
-        if(nas_lag_get_all_info(param->list) != STD_ERR_OK)
+        if(nas_lag_get_all_info(param->list, false) != STD_ERR_OK)
             return cps_api_ret_code_ERR;
     }
 
@@ -1010,6 +1067,51 @@ static cps_api_return_code_t nas_process_cps_lag_set(void *context, cps_api_tran
     }
 
     return rc;
+}
+
+static cps_api_return_code_t nas_process_cps_lag_state_get(void * context, cps_api_get_params_t * param,
+        size_t ix) {
+    hal_ifindex_t ifindex = 0;
+    bool opaque_attr_data = false;
+    nas_obj_id_t ndi_lag_id=0;
+
+    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "cps_nas_lag_state_get_function");
+
+    cps_api_object_t obj = cps_api_object_list_get(param->filters, ix);
+
+    cps_api_object_attr_t ndi_lag_id_attr = cps_api_object_attr_get(obj,
+                    BASE_IF_LAG_IF_INTERFACES_INTERFACE_LAG_OPAQUE_DATA);
+
+    if(ndi_lag_id_attr != nullptr){
+        EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
+                   "LAG OPAQUE DATA FOUND %lld!!!",
+                   cps_api_object_attr_data_u64(ndi_lag_id_attr));
+        ndi_lag_id = cps_api_object_attr_data_u64(ndi_lag_id_attr);
+        opaque_attr_data=true;
+    }
+
+    std_mutex_simple_lock_guard lock_t(nas_lag_mutex_lock());
+
+    if(nas_lag_get_ifindex_from_obj(obj,&ifindex)){
+        if(nas_get_lag_intf(ifindex, param->list, true)!= STD_ERR_OK){
+            return cps_api_ret_code_ERR;
+        }
+    }else if(opaque_attr_data == true){
+        if(nas_lag_ndi_it_to_obj_fill(ndi_lag_id,param->list, true) != STD_ERR_OK)
+            return cps_api_ret_code_ERR;
+    }else{
+        if(nas_lag_get_all_info(param->list, true) != STD_ERR_OK)
+            return cps_api_ret_code_ERR;
+    }
+
+    return cps_api_ret_code_OK;
+}
+
+static cps_api_return_code_t nas_process_cps_lag_state_set(void *context, cps_api_transaction_params_t *param,
+                                                      size_t ix)
+{
+    /* This shouldn't be called */
+    return cps_api_ret_code_ERR;
 }
 
 void nas_lag_port_oper_state_cb(npu_id_t npu, npu_port_t port, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t status)
@@ -1141,6 +1243,12 @@ t_std_error nas_cps_lag_init(cps_api_operation_handle_t lag_intf_handle) {
     if (intf_obj_handler_registration(obj_INTF, nas_int_type_LAG, nas_process_cps_lag_get, nas_process_cps_lag_set) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR, "NAS-LAG-INIT",
                    "Failed to register LAG interface CPS handler");
+           return STD_ERR(INTERFACE,FAIL,0);
+    }
+
+    if (intf_obj_handler_registration(obj_INTF_STATE, nas_int_type_LAG, nas_process_cps_lag_state_get, nas_process_cps_lag_state_set) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-LAG-INIT",
+                   "Failed to register LAG interface-state CPS handler");
            return STD_ERR(INTERFACE,FAIL,0);
     }
     /*  register a handler for physical port oper state change */

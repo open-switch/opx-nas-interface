@@ -1678,7 +1678,7 @@ static cps_api_return_code_t loopback_if_state_get (void * context, cps_api_get_
         }
 
         cps_api_key_from_attr_with_qual(cps_api_object_key(object), DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_OBJ,
-                cps_api_qualifier_TARGET);
+                cps_api_qualifier_OBSERVED);
         interface_ctrl_t _port;
         memset(&_port,0,sizeof(_port));
         _port.if_index = cps_api_object_attr_data_u32(ifix);
@@ -1695,10 +1695,10 @@ static cps_api_return_code_t loopback_if_state_get (void * context, cps_api_get_
         cps_api_set_key_data(object,IF_INTERFACES_STATE_INTERFACE_NAME,
                        cps_api_object_ATTR_T_BIN, _port.if_name, strlen(_port.if_name)+1);
         _if_fill_in_npu_intf_state(_port.npu_id, _port.port_id, _port.int_type, object);
-        _if_fill_in_supported_speeds_attrs(_port.npu_id,_port.port_id, _port.int_type, object);
-        _if_fill_in_eee_attrs(_port.npu_id,_port.port_id,object);
+        //_if_fill_in_supported_speeds_attrs(_port.npu_id,_port.port_id, _port.int_type, object);
+        //_if_fill_in_eee_attrs(_port.npu_id,_port.port_id,object);
         _if_fill_in_npu_speed_attr(_port.npu_id,_port.port_id, _port.int_type, object);
-        _if_fill_in_supported_autoneg_attr(_port.npu_id,_port.port_id, object);
+        //_if_fill_in_supported_autoneg_attr(_port.npu_id,_port.port_id, object);
         /*  Add if index with right key */
         cps_api_object_attr_add_u32(object,IF_INTERFACES_STATE_INTERFACE_IF_INDEX,
                          _port.if_index);
@@ -1776,3 +1776,4 @@ t_std_error nas_int_logical_init(cps_api_operation_handle_t handle)  {
 
     return STD_ERR_OK;
 }
+
