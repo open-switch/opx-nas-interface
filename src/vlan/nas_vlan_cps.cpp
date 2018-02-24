@@ -664,7 +664,8 @@ static cps_api_return_code_t nas_cps_create_vlan(cps_api_object_t obj)
     return rc;
 }
 
-static void nas_handle_mode_for_mem_list(hal_ifindex_t bridge_index, nas_list_t *p_list, nas_port_mode_t port_mode )
+static bool
+nas_handle_mode_for_mem_list(hal_ifindex_t bridge_index, nas_list_t *p_list, nas_port_mode_t port_mode )
 {
     nas_list_node_t *p_iter_node = NULL;
     if_master_info_t master_info = { nas_int_type_VLAN, port_mode, bridge_index};
@@ -677,26 +678,42 @@ static void nas_handle_mode_for_mem_list(hal_ifindex_t bridge_index, nas_list_t 
         BASE_IF_MODE_t intf_mode = nas_intf_get_mode(p_iter_node->ifindex);
 
         if(!nas_intf_del_master(p_iter_node->ifindex, master_info)){
-            EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN","VLAN DEL:Failed to del master for vlan memeber port");
+            EV_LOGGING(INTERFACE,ERR,"NAS-VLAN","VLAN DEL:Failed to del master for vlan memeber port");
         } else {
             BASE_IF_MODE_t new_mode = nas_intf_get_mode(p_iter_node->ifindex);
             if (new_mode != intf_mode) {
                 if (nas_intf_handle_intf_mode_change(p_iter_node->ifindex, new_mode) == false) {
-                    EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "VLAN DEL: Update to NAS-L3 about interface mode change failed(%d)",
+                    EV_LOGGING(INTERFACE,ERR,"NAS-VLAN", "VLAN DEL: Update to NAS-L3 about interface mode change failed(%d)",
                                                         p_iter_node->ifindex);
                 }
             }
         }
         p_iter_node = nas_get_next_link_node(&p_list->port_list, p_iter_node);
     }
+    return true;
 }
 
-static void nas_handle_vlan_members_mode_change(nas_bridge_t *p_bridge)
+static t_std_error nas_handle_vlan_members_mode_change(nas_bridge_t *p_bridge)
 {
-   nas_handle_mode_for_mem_list(p_bridge->ifindex, &p_bridge->tagged_list, NAS_PORT_TAGGED);
-   nas_handle_mode_for_mem_list(p_bridge->ifindex, &p_bridge->tagged_lag, NAS_PORT_TAGGED);
-   nas_handle_mode_for_mem_list(p_bridge->ifindex, &p_bridge->untagged_list, NAS_PORT_UNTAGGED);
-   nas_handle_mode_for_mem_list(p_bridge->ifindex, &p_bridge->untagged_lag, NAS_PORT_UNTAGGED);
+    if (!nas_handle_mode_for_mem_list(p_bridge->ifindex, &p_bridge->tagged_list, NAS_PORT_TAGGED)) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN", "bridge %d Mode change failed for vlan port tagged list",
+        p_bridge->ifindex);
+
+    }
+    if (!nas_handle_mode_for_mem_list(p_bridge->ifindex, &p_bridge->tagged_lag, NAS_PORT_TAGGED)) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN", "bridge %d Mode change failed for vlan lag tagged list",
+        p_bridge->ifindex);
+    }
+    if (!nas_handle_mode_for_mem_list(p_bridge->ifindex, &p_bridge->untagged_list, NAS_PORT_UNTAGGED)) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN", "bridge %d Mode change failed for vlan port untagged list",
+        p_bridge->ifindex);
+    }
+    if (!nas_handle_mode_for_mem_list(p_bridge->ifindex, &p_bridge->untagged_lag, NAS_PORT_UNTAGGED)) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN", "bridge %d Mode change failed for vlan lag untagged list",
+        p_bridge->ifindex);
+    }
+
+    return STD_ERR_OK;
 }
 
 
@@ -745,7 +762,11 @@ static cps_api_return_code_t nas_cps_delete_vlan(cps_api_object_t obj)
     cps_api_set_key_data(idx_obj,IF_INTERFACES_INTERFACE_NAME, cps_api_object_ATTR_T_BIN,
             p_bridge_node->name, strlen(p_bridge_node->name)+1);
 
-    nas_handle_vlan_members_mode_change(p_bridge_node);
+    if (nas_handle_vlan_members_mode_change(p_bridge_node) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "nas_handle_vlan_members_mode_change failed for %d",
+                p_bridge_node->ifindex);
+    }
+
     if (nas_intf_handle_intf_mode_change(p_bridge_node->ifindex, BASE_IF_MODE_MODE_L2) == false) {
         EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "Update to NAS-L3 about interface mode change failed(%d)",
                 p_bridge_node->ifindex);

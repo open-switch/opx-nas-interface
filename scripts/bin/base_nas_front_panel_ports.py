@@ -105,6 +105,7 @@ def _add_default_speed(config, cps_obj):
         if (cps_obj.get_attr_data(speed_attr_name)):
             cps_obj.del_attr(speed_attr_name)
     except ValueError:
+        # ignore exception
         pass
     if speed is None:
         nas_if.log_info('default speed setting not found')
@@ -659,21 +660,31 @@ def set_intf_rpc_cb(methods, params):
     except ValueError:
         member_port = None
 
+    have_fp_attr = True
+    front_panel_port = None
+    try:
+        front_panel_port = cps_obj.get_attr_data(fp_port_attr_name)
+    except ValueError:
+        have_fp_attr = False
+
     if_name = nas_if.get_cps_attr(cps_obj, ifname_attr_name)
     nas_if.log_info('Logical interface configuration: op %s if_name %s if_type %s' % (
                      op, if_name if if_name != None else '-', if_type))
-    if (op == 'create' and member_port is None):
-        nas_if.log_info('Create interface, type: %s' % if_type)
-        mac_addr = None
+    if ((op == 'create' or (op == 'set' and have_fp_attr == True and front_panel_port is not None))
+        and member_port is None):
+        if op == 'set' and if_type is None:
+            # For set operation, if front_panel_port is given, if_type should be front-panel
+            if_type = 'front-panel'
+        nas_if.log_info('Interface MAC address setup for type %s' % if_type)
         try:
             mac_addr = cps_obj.get_attr_data(mac_attr_name)
         except ValueError:
-            pass
+            mac_addr = None
         if mac_addr is None:
             nas_if.log_info('No mac address given in input object, get assigned mac address')
             try:
                 param_list = get_alloc_mac_addr_params(if_type, cps_obj)
-            except:
+            except Exception:
                 logging.exception('Failed to get params')
                 return False
             if param_list != None:
@@ -690,11 +701,6 @@ def set_intf_rpc_cb(methods, params):
                     cps_obj.add_attr(mac_attr_name, mac_addr)
 
     if op == 'set' or op == 'create':
-        have_fp_attr = True
-        try:
-            front_panel_port = cps_obj.get_attr_data(fp_port_attr_name)
-        except ValueError:
-            have_fp_attr = False
         if have_fp_attr == True:
             subport_id = 0
             try:
@@ -723,16 +729,14 @@ def set_intf_rpc_cb(methods, params):
             cps_obj.add_attr(npu_attr_name, npu_id)
             cps_obj.add_attr(port_attr_name, port_id)
 
-
         try:
             if _if_update_config(op, cps_obj) == False:
                 params['change'] = cps_obj.get()
                 nas_if.log_err( "Interface update config failed during set or create ")
                 return False
-        except:
+        except Exception:
             nas_if.log_err( "Interface update config failed during set or create ")
             logging.exception('Error:')
-            pass
 
     module_name = nas_if.get_if_key()
     in_obj = copy.deepcopy(cps_obj)
@@ -752,7 +756,6 @@ def set_intf_rpc_cb(methods, params):
         except:
             nas_if.log_err('update config failed for delete operation')
             logging.exception('Error:')
-            pass
         return True
     if len(ret_data) == 0 or not 'change' in ret_data[0]:
         nas_if.log_err('Invalid return object from cps request')

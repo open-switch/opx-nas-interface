@@ -43,7 +43,6 @@ vlanid_to_bridge_t vid_to_bridge;
 
 static std_mutex_lock_create_static_init_fast(br_lock);
 
-
 bool nas_vlan_id_in_use(hal_vlan_id_t vlan_id)
 {
     bool ret = true;
@@ -102,7 +101,6 @@ void nas_bridge_unlock(void)
     std_mutex_unlock (&br_lock);
 }
 
-
 nas_bridge_t *nas_get_bridge_node(hal_ifindex_t index)
 {
 
@@ -134,6 +132,7 @@ nas_bridge_t *nas_get_bridge_node_from_name (const char *vlan_if_name)
     }
     return NULL;
 }
+
 nas_bridge_t* nas_create_insert_bridge_node(hal_ifindex_t index, const char *name, bool &create)
 {
     nas_bridge_t *p_bridge_node;
@@ -165,12 +164,81 @@ nas_bridge_t* nas_create_insert_bridge_node(hal_ifindex_t index, const char *nam
     return p_bridge_node;
 }
 
-t_std_error nas_cleanup_bridge(nas_bridge_t *p_bridge_node)
+static t_std_error
+nas_handle_vlan_mem_list_delete(hal_ifindex_t bridge_index, nas_list_t *p_list,
+hal_vlan_id_t vid, nas_port_mode_t port_mode, bool lag) {
+
+
+    nas_list_node_t *p_iter_node = NULL,  *temp_node = NULL;
+    t_std_error ret;
+
+    p_iter_node = nas_get_first_link_node(&p_list->port_list);
+    while (p_iter_node != NULL)
+    {
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-Vlan",
+                    "delete memeber :Found vlan member %d in bridge %d", p_iter_node->ifindex, bridge_index);
+        temp_node = nas_get_next_link_node(&p_list->port_list, p_iter_node);
+        //delete the port from NPU if it is a NPU port
+        if (lag) {
+            if ((ret = nas_delete_lag_from_vlan_in_npu(p_iter_node->ifindex , vid, port_mode)) != STD_ERR_OK)  {
+                    return ret;
+            }
+        } else {
+            if (!nas_is_non_npu_phy_port(p_iter_node->ifindex)) {
+                if (nas_add_or_del_port_to_vlan(p_iter_node->ndi_port.npu_id, vid,
+                                    &(p_iter_node->ndi_port), port_mode, false) != STD_ERR_OK) {
+                    EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
+                      "Error deleting port %d with mode %d from vlan %d", p_iter_node->ifindex,
+                       port_mode, vid);
+                    return (STD_ERR(INTERFACE,FAIL, 0));
+                }
+            }
+        }
+        nas_delete_link_node(&p_list->port_list, p_iter_node);
+        p_iter_node = temp_node;
+        p_list->port_count--;
+    }
+    return STD_ERR_OK;
+}
+
+static t_std_error
+nas_handle_delete_all_mem(nas_bridge_t *p_bridge)
+{
+   t_std_error rc = STD_ERR_OK;
+
+   if ((rc = nas_handle_vlan_mem_list_delete(p_bridge->ifindex, &p_bridge->tagged_list, p_bridge->vlan_id, NAS_PORT_TAGGED, false))
+       != STD_ERR_OK ) {
+      return rc;
+
+   }
+   if ((rc = nas_handle_vlan_mem_list_delete(p_bridge->ifindex, &p_bridge->tagged_lag, p_bridge->vlan_id, NAS_PORT_TAGGED, true))
+       != STD_ERR_OK ) {
+      return rc;
+   }
+   if ((rc = nas_handle_vlan_mem_list_delete(p_bridge->ifindex, &p_bridge->untagged_list,p_bridge->vlan_id, NAS_PORT_UNTAGGED, false))
+       != STD_ERR_OK ) {
+      return rc;
+   }
+   if ((rc = nas_handle_vlan_mem_list_delete(p_bridge->ifindex, &p_bridge->untagged_lag,p_bridge->vlan_id, NAS_PORT_UNTAGGED, true))
+       != STD_ERR_OK ) {
+      return rc;
+   }
+   return rc;
+}
+
+t_std_error
+nas_cleanup_bridge(nas_bridge_t *p_bridge_node)
 {
     t_std_error rc = STD_ERR_OK;
     //If vlan is set for this bridge, delete VLAN from NPU
     if((p_bridge_node->vlan_id != 0) && (p_bridge_node->vlan_id != SYSTEM_DEFAULT_VLAN)) {
         /* @TODO - NPU ID for bridge structure */
+        if (nas_handle_delete_all_mem(p_bridge_node) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-Br",
+                       "Error deleting vlan members  for vlan_id %d and bridge idx %d",
+                        p_bridge_node->vlan_id, p_bridge_node->ifindex);
+             rc = (STD_ERR(INTERFACE,FAIL, 0));
+        }
         if(nas_vlan_delete(0, p_bridge_node->vlan_id) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE, ERR, "NAS-Br",
                        "Error deleting vlan %d for bridge %d",
@@ -178,9 +246,7 @@ t_std_error nas_cleanup_bridge(nas_bridge_t *p_bridge_node)
             rc = (STD_ERR(INTERFACE,FAIL, 0));
         }
     }
-    nas_delete_port_list(&(p_bridge_node->untagged_list));
-    nas_delete_port_list(&(p_bridge_node->tagged_list));
-    nas_delete_port_list(&(p_bridge_node->untagged_lag));
+
     /* Deregister the VLAN intf from ifCntrl - vlanId in open source gets created
      * only after an interface is added in the bridge */
     if(p_bridge_node->vlan_id !=0 ) {

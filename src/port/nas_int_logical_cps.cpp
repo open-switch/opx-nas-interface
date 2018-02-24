@@ -55,6 +55,7 @@
 #include "nas_switch.h"
 #include "nas_int_com_utils.h"
 
+#include <inttypes.h>
 #include <unordered_map>
 #include <list>
 
@@ -210,10 +211,6 @@ void _if_fill_in_eee_attrs (npu_id_t npu, port_t port, cps_api_object_t obj)
         cps_api_object_attr_add_u16(obj,
                                     DELL_IF_IF_INTERFACES_INTERFACE_TX_IDLE_TIME,
                                     idle_time);
-
-    } else {
-        EV_LOGGING(INTERFACE, DEBUG,"NAS-EEE",
-                   "EEE state not available for port %d", port);
     }
 }
 
@@ -260,6 +257,10 @@ static void _if_fill_in_speed_duplex_autoneg_state_attrs(npu_id_t npu, port_t po
     if (ndi_port_auto_neg_get(npu, port, &auto_neg) == STD_ERR_OK) {
         cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_STATE_INTERFACE_AUTO_NEGOTIATION, auto_neg);
     }
+
+    cps_api_object_attr_add(obj, IF_INTERFACES_STATE_INTERFACE_TYPE,
+                            (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD,
+                            sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD));
 }
 
 static void _if_fill_in_speed_duplex_attrs(npu_id_t npu, port_t port, cps_api_object_t obj) {
@@ -950,26 +951,27 @@ static cps_api_return_code_t _set_attr_oui(npu_id_t npu, port_t port, cps_api_ob
     return cps_api_ret_code_OK;
 }
 
+using intf_set_attr_handler_t = cps_api_return_code_t (*)(npu_id_t, port_t,cps_api_object_t);
 static const std::unordered_map<cps_api_attr_id_t,
-    cps_api_return_code_t (*)(npu_id_t, port_t,cps_api_object_t)> _set_attr_handlers = {
-        { IF_INTERFACES_INTERFACE_NAME, _set_attr_name },
-        { IF_INTERFACES_INTERFACE_ENABLED, _set_attr_up },
-        { DELL_IF_IF_INTERFACES_INTERFACE_MTU, _set_attr_mtu },
-        { IF_INTERFACES_STATE_INTERFACE_OPER_STATUS, _set_attr_fail },
-        { BASE_IF_PHY_IF_INTERFACES_INTERFACE_TAGGING_MODE, _set_attr_tagging_mode },
-        { DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS,_set_attr_mac },
-        { BASE_IF_PHY_IF_INTERFACES_INTERFACE_LEARN_MODE, _set_mac_learn_mode},
-        { BASE_IF_PHY_IF_INTERFACES_INTERFACE_PHY_MEDIA, _set_phy_media},
-        { BASE_IF_PHY_IF_INTERFACES_INTERFACE_IDENTIFICATION_LED, _set_identification_led},
-        { BASE_IF_PHY_IF_INTERFACES_INTERFACE_HW_PROFILE, _set_hw_profile},
-        { BASE_IF_PHY_IF_INTERFACES_INTERFACE_SUPPORTED_AUTONEG, _set_supported_autoneg},
-        { DELL_IF_IF_INTERFACES_INTERFACE_SPEED, _set_speed},
-        { DELL_IF_IF_INTERFACES_INTERFACE_AUTO_NEGOTIATION, _set_auto_neg},
-        { DELL_IF_IF_INTERFACES_INTERFACE_DUPLEX, _set_duplex_mode},
-        { DELL_IF_IF_INTERFACES_INTERFACE_MODE, _set_attr_mode},
-        { DELL_IF_IF_INTERFACES_INTERFACE_EEE, _set_attr_eee},
-        { DELL_IF_IF_INTERFACES_INTERFACE_FEC, _set_attr_fec},
-        { DELL_IF_IF_INTERFACES_INTERFACE_OUI, _set_attr_oui},
+    std::pair<intf_set_attr_handler_t, const char*>> _set_attr_handlers = {
+        { IF_INTERFACES_INTERFACE_NAME, {_set_attr_name, "name"} },
+        { IF_INTERFACES_INTERFACE_ENABLED, {_set_attr_up, "enabled"} },
+        { DELL_IF_IF_INTERFACES_INTERFACE_MTU, {_set_attr_mtu, "mtu"} },
+        { IF_INTERFACES_STATE_INTERFACE_OPER_STATUS, {_set_attr_fail, "oper_status"} },
+        { BASE_IF_PHY_IF_INTERFACES_INTERFACE_TAGGING_MODE, {_set_attr_tagging_mode, "tagging_mode"} },
+        { DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, {_set_attr_mac, "mac_addr"} },
+        { BASE_IF_PHY_IF_INTERFACES_INTERFACE_LEARN_MODE, {_set_mac_learn_mode, "mac_learn_mode"} },
+        { BASE_IF_PHY_IF_INTERFACES_INTERFACE_PHY_MEDIA, {_set_phy_media, "phy_media"} },
+        { BASE_IF_PHY_IF_INTERFACES_INTERFACE_IDENTIFICATION_LED, {_set_identification_led, "identification_led"} },
+        { BASE_IF_PHY_IF_INTERFACES_INTERFACE_HW_PROFILE, {_set_hw_profile, "hw_profile"} },
+        { BASE_IF_PHY_IF_INTERFACES_INTERFACE_SUPPORTED_AUTONEG, {_set_supported_autoneg, "supported_autoneg"} },
+        { DELL_IF_IF_INTERFACES_INTERFACE_SPEED, {_set_speed, "speed"} },
+        { DELL_IF_IF_INTERFACES_INTERFACE_AUTO_NEGOTIATION, {_set_auto_neg, "autoneg"} },
+        { DELL_IF_IF_INTERFACES_INTERFACE_DUPLEX, {_set_duplex_mode, "duplex_mode"} },
+        { DELL_IF_IF_INTERFACES_INTERFACE_MODE, {_set_attr_mode, "mode"} },
+        { DELL_IF_IF_INTERFACES_INTERFACE_EEE, {_set_attr_eee, "eee"} },
+        { DELL_IF_IF_INTERFACES_INTERFACE_FEC, {_set_attr_fec, "fec"} },
+        { DELL_IF_IF_INTERFACES_INTERFACE_OUI, {_set_attr_oui, "oui"} },
 };
 
 static void remove_same_values(cps_api_object_t now, cps_api_object_t req) {
@@ -1049,9 +1051,12 @@ static void if_rollback(cps_api_object_t rollback,interface_ctrl_t _port) {
         cps_api_attr_id_t id_rollback = cps_api_object_attr_id(it_rollback.attr);
         auto func = _set_attr_handlers.find(id_rollback);
         if (func ==_set_attr_handlers.end()) continue;
-        cps_api_return_code_t ret = func->second(_port.npu_id,_port.port_id,rollback);
+        EV_LOGGING(INTERFACE, INFO, "NAS-IF-REG", "Calling rollback attribute %s for interface %s",
+                   func->second.second, _port.if_name);
+        cps_api_return_code_t ret = func->second.first(_port.npu_id,_port.port_id,rollback);
         if (ret!=cps_api_ret_code_OK)
-            EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to rollback Attribute for interface %s",_port.if_name);
+            EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to rollback Attribute %s for interface %s",
+                       func->second.second, _port.if_name);
     }
 }
 
@@ -1180,9 +1185,12 @@ static cps_api_return_code_t _if_update(cps_api_object_t req_if, cps_api_object_
                  id  == DELL_IF_IF_INTERFACES_STATE_INTERFACE_DUPLEX)) {
                 continue; /*  AN/Speed/Duplex should not be set in the NPU for FC interface */
             }
-            ret = func->second(_port.npu_id,_port.port_id,req_if);
+            EV_LOGGING(INTERFACE, INFO, "NAS-IF-REG", "Set attribute %s (%" PRId64 ") for interface %s",
+                       func->second.second, id, _port.if_name);
+            ret = func->second.first(_port.npu_id,_port.port_id,req_if);
             if (ret!=cps_api_ret_code_OK) {
-                EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set Attribute  %d for interface  %s",id,_port.if_name);
+                EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set Attribute %s (%" PRId64 ") for interface  %s",
+                           func->second.second, id, _port.if_name);
                 if_rollback(rollback,_port);
                 cps_api_object_delete(rollback);
                 return ret;

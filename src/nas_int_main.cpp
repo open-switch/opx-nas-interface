@@ -62,7 +62,6 @@
 #include <unistd.h>
 #include <set>
 
-
 #define NUM_INT_CPS_API_THREAD 1
 
 static cps_api_operation_handle_t nas_if_handle;
@@ -166,24 +165,67 @@ bool mgmt_intf_event_handler (cps_api_object_t obj, void * context)
 {
 
     interface_ctrl_t details;
-    cps_api_object_attr_t if_name_attr, if_attr;
-    hal_intf_reg_op_type_t reg_op = HAL_INTF_OP_REG;
+    cps_api_object_attr_t if_name_attr, if_attr, vrf_name_attr;
 
     memset(&details, 0, sizeof(details));
     if_name_attr = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_NAME);
+    vrf_name_attr = cps_api_object_attr_get(obj, NI_IF_INTERFACES_INTERFACE_BIND_NI_NAME);
     if_attr = cps_api_object_attr_get(obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
 
-    if (if_name_attr != NULL) {
-        strncpy(details.if_name, (char *) cps_api_object_attr_data_bin(if_name_attr),
-                cps_api_object_attr_len(if_name_attr));
-    }
-    if (if_attr != NULL) {
+    if (if_name_attr == NULL)
+        return true;
+
+    if (if_attr) {
         details.if_index = cps_api_object_attr_data_u32(if_attr);
     }
-    details.int_type = nas_int_type_MGMT;
-    if (dn_hal_if_register(reg_op,&details)!=STD_ERR_OK) {
+    safestrncpy(details.if_name, (char *) cps_api_object_attr_data_bin(if_name_attr),
+                cps_api_object_attr_len(if_name_attr));
+    /* Get the interface info. check if there is a change in VRF-name and/or if-index */
+    interface_ctrl_t intf_ctrl;
+    memset(&intf_ctrl, 0, sizeof(interface_ctrl_t));
+    intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+    safestrncpy(intf_ctrl.if_name, (const char *)details.if_name, sizeof(intf_ctrl.if_name));
+    if (vrf_name_attr) {
+        char  vrf_name[NAS_VRF_NAME_STR_SZ+1];
+
+        memset (vrf_name,0,sizeof(vrf_name));
+        safestrncpy(vrf_name, (const char *)cps_api_object_attr_data_bin(vrf_name_attr),
+                    sizeof(vrf_name));
         EV_LOGGING(INTERFACE, INFO, "NAS-SYS-MGMT-INTF",
-                "interface register Error %s - already present", details.if_name);
+                   "New interface VRF:%s intf:%s if-index:%d", vrf_name, intf_ctrl.if_name,
+                   details.if_index);
+        if (strncmp(vrf_name, NAS_DEFAULT_VRF_NAME, sizeof(vrf_name)) == 0) {
+            details.vrf_id = NAS_DEFAULT_VRF_ID;
+        } else if (strncmp(vrf_name, NAS_MGMT_VRF_NAME, sizeof(vrf_name)) == 0) {
+            details.vrf_id = NAS_MGMT_VRF_ID;
+        } else {
+            /* Invalid VRF name for mgmt.*/
+            return true;
+        }
+    }
+
+    if ((dn_hal_get_interface_info(&intf_ctrl)) == STD_ERR_OK) {
+        if (if_attr == NULL) {
+            details.if_index = intf_ctrl.if_index;
+        }
+        if ((intf_ctrl.vrf_id != details.vrf_id) ||
+            (intf_ctrl.if_index != details.if_index)) {
+            EV_LOGGING(INTERFACE, INFO, "NAS-SYS-MGMT-INTF",
+                       "interface:%s new VRF:%d intf:%d current info - vrf-id:%d if-index:%d",
+                       intf_ctrl.if_name, details.vrf_id, details.if_index,
+                       intf_ctrl.vrf_id, intf_ctrl.if_index);
+            if (dn_hal_if_register(HAL_INTF_OP_DEREG,&intf_ctrl)!=STD_ERR_OK) {
+                EV_LOGGING(INTERFACE, ERR, "NAS-SYS-MGMT-INTF",
+                           "interface deregister Error %s ", intf_ctrl.if_name);
+            }
+        } else {
+            return true;
+        }
+    }
+    details.int_type = nas_int_type_MGMT;
+    if (dn_hal_if_register(HAL_INTF_OP_REG,&details)!=STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, INFO, "NAS-SYS-MGMT-INTF",
+                   "interface register Error %s - already present", details.if_name);
     }
     return true;
 }
@@ -201,7 +243,7 @@ t_std_error nas_sys_mgmt_intf_register(cps_api_operation_handle_t handle)
     memset(&reg, 0, sizeof(cps_api_event_reg_t));
     cps_api_key_from_attr_with_qual(&keys,
             BASE_IF_MGMT_IF_INTERFACES_INTERFACE_OBJ,
-            cps_api_qualifier_TARGET);
+            cps_api_qualifier_OBSERVED);
 
     reg.objects = &keys;
     reg.number_of_objects = 1;
@@ -210,6 +252,10 @@ t_std_error nas_sys_mgmt_intf_register(cps_api_operation_handle_t handle)
             != cps_api_ret_code_OK) {
            EV_LOGGING(INTERFACE,ERR,"NAS-SYS-MGMT-INTF", "MGMT intf event registration failed.");
     }
+
+    cps_api_key_from_attr_with_qual(&keys,
+            BASE_IF_MGMT_IF_INTERFACES_INTERFACE_OBJ,
+            cps_api_qualifier_TARGET);
 
     if (cps_api_get_request_init(&get_req) != cps_api_ret_code_OK) {
            EV_LOGGING(INTERFACE,ERR,"NAS-SYS-MGMT-INTF", "MGMT intf get request init failed.");

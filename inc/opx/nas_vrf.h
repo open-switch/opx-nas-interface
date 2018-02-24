@@ -25,6 +25,13 @@
 #include "std_error_codes.h"
 #include "cps_api_operation.h"
 
+#define NAS_VRF_NAME_STR_SZ 32
+/* VRF name with VRF-id mapping */
+#define NAS_DEFAULT_VRF_NAME  "default"
+#define NAS_MGMT_VRF_NAME     "management"
+#define NAS_DEFAULT_VRF_ID    0
+#define NAS_MGMT_VRF_ID       1
+
 #define NAS_VRF_LOG_ERR(ID, ...) EV_LOGGING(INTERFACE, ERR, ID, __VA_ARGS__)
 #define NAS_VRF_LOG_INFO(ID, ...) EV_LOGGING(INTERFACE, INFO, ID, __VA_ARGS__)
 #define NAS_VRF_LOG_DEBUG(ID, ...) EV_LOGGING(INTERFACE, DEBUG, ID, __VA_ARGS__)

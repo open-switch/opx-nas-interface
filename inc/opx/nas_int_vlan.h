@@ -18,7 +18,6 @@
  * filename: nas_int_vlan.h
  */
 
-
 #ifndef NAS_INTF_VLAN_H_
 #define NAS_INTF_VLAN_H_
 
@@ -34,7 +33,6 @@
 #define MIN_VLAN_ID 1
 #define MAX_VLAN_ID 4094
 
-
 t_std_error nas_vlan_get_default_info(cps_api_object_list_t list);
 
 t_std_error nas_vlan_create(npu_id_t npu_id, hal_vlan_id_t vlan_id);
@@ -48,6 +46,8 @@ bool nas_ck_port_exist(hal_vlan_id_t vlan_id, hal_ifindex_t port_index);
 t_std_error nas_vlan_delete(npu_id_t npu_id, hal_vlan_id_t vlan_id);
 void nas_pack_vlan_if(cps_api_object_t obj, nas_bridge_t *p_bridge);
 
+t_std_error nas_delete_lag_from_vlan_in_npu(hal_ifindex_t ifindex ,hal_vlan_id_t vid,
+                 nas_port_mode_t port_mode);
 t_std_error nas_process_lag_for_vlan_del(nas_list_t *p_list,
                                               hal_ifindex_t if_index);
 cps_api_return_code_t nas_cps_set_vlan_mac(cps_api_object_t obj, nas_bridge_t *p_bridge);

@@ -157,7 +157,10 @@ def monitor_interface_event():
                     set_media_transceiver(if_obj_list[0])
                 except:
                     nas_if.log_err("Unable to set media transceiver for if_index {}".format(str(if_index)))
-            if _led_control == True:
+
+            if_type = _get_obj_attr_value(obj, 'if/interfaces-state/interface/type')
+
+            if _led_control == True or (if_type is not None and if_type == nas_if._g_if_fc_type):
                 oper_state = _get_obj_attr_value(obj, 'if/interfaces-state/interface/oper-status')
                 if oper_state != None:
                     try:

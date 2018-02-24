@@ -1,3 +1,16 @@
+opx-nas-interface (5.10.1+opx5) unstable; urgency=medium
+
+  * Update: Optimize memory consumption- Delete each member of the VLAN in NPU before deleting the
+            vlan in NPU
+  * Update: Assigned mac address to interface when it is associated with front panel port
+  * Update: Cleanup for not needed log and added log for set interface attribute handler
+  * Update: Since sys-mgmt-intf module does not publish the interface info. with if-index when the
+            if-index is not changing, dont throw an error if if-index is not present
+  * Update: Change for using safestrncpy
+  * Update: Updating the mgmt. interface control block information for the VRF-id and/or if-index changes
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 19 Feb 2018  19:47:07 -0800
+
 opx-nas-interface (5.10.1+opx4) unstable; urgency=medium
 
   * Update: Add get-handler for LAG interface-state.

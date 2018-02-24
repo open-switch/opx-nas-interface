@@ -50,14 +50,11 @@ typedef std::unordered_map <hal_ifindex_t, nas_vlan_lag_t >::iterator nas_lag_li
 
 static auto lag_list = new nas_lag_list_t;
 
-
-
 static std_mutex_lock_create_static_init_rec(vlan_lag_lock);
 std_mutex_type_t *vlan_lag_mutex_lock()
 {
     return &vlan_lag_lock;
 }
-
 
 static t_std_error nas_vlan_create_lag(hal_ifindex_t ifindex)
 {
@@ -99,8 +96,7 @@ static t_std_error nas_vlan_delete_lag(hal_ifindex_t ifindex) {
     return STD_ERR_OK;
 }
 
-
-static
+static 
 void nas_set_vlan_enable(nas_vlan_lag_t *lag_entry) {
 
     if (lag_entry->tagged_list.empty() && lag_entry->untagged_list.empty()) {
@@ -135,6 +131,31 @@ void nas_handle_del_vlan_lag(hal_vlan_id_t vlan_id) {
         }
         nas_set_vlan_enable(lag_entry);
     }
+}
+
+t_std_error nas_delete_lag_from_vlan_in_npu(hal_ifindex_t ifindex ,hal_vlan_id_t vid, nas_port_mode_t port_mode) {
+
+    ndi_obj_id_t *untagged_lag = NULL;
+    ndi_obj_id_t *tagged_lag = NULL;
+    size_t tag_cnt =0, untag_cnt=0;
+    ndi_obj_id_t ndi_lag_id;
+    t_std_error ret;
+
+    (port_mode == NAS_PORT_TAGGED) ?  (tagged_lag = &ndi_lag_id, tag_cnt=1) :
+                                      (untagged_lag = &ndi_lag_id,untag_cnt=1);
+
+
+    if ((ret = nas_lag_get_ndi_lag_id (ifindex, &ndi_lag_id)) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, INFO, "NAS-VLAN", "Error finding NDI LAG ID %d  %d ",
+                 ifindex, vid);
+        return ret;
+    }
+    ret = ndi_del_lag_from_vlan(0, vid, tagged_lag, tag_cnt, untagged_lag, untag_cnt);
+    if (ret != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-VLAN", "nas_delete_lag_from_vlan failed to delete LAG from vlan id <%d>",  vid );
+        return ret;
+    }
+    return STD_ERR_OK;
 }
 
 void nas_vlan_set_tagged_lag_mtu(hal_vlan_id_t vlan_id,uint32_t mtu) {
@@ -191,7 +212,6 @@ void nas_dump_val_lag_list()
     }
 
 }
-
 
 /*  TODO LAG event is not processed anymore. Will be cleaned up in the next phase of bridgeport  */
 bool nas_vlan_lag_event_func_cb(const cps_api_object_t obj) {
@@ -258,7 +278,6 @@ static t_std_error nas_add_or_del_lag_in_vlan(nas_vlan_lag_t *lag_entry, hal_vla
     return ret;
 }
 
-
 /*  Function to add LAG interface to kernel and in the bridge
  *  Once kernel succesful, add all the members in SAI
  *  Create LAG to vlan mapping for traversal when new member gets added or deleted
@@ -321,7 +340,6 @@ t_std_error nas_handle_lag_add_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_t lag
             }
         }
     }
-
 
     if (nas_add_or_del_lag_in_vlan(lag_entry, p_bridge->vlan_id,
                                port_mode, true, roll_bk_sup) != STD_ERR_OK) {
@@ -482,7 +500,6 @@ t_std_error nas_handle_lag_index_in_cps_set(nas_bridge_t *p_bridge, nas_port_lis
 
     return STD_ERR_OK;
 }
-
 
 t_std_error nas_base_handle_lag_del(hal_ifindex_t br_index, hal_ifindex_t lag_index,
                                     hal_vlan_id_t vlan_id )

@@ -26,7 +26,7 @@
 #include "event_log.h"
 #include "dell-interface.h"
 #include "dell-base-if-phy.h"
-
+#include "iana-if-type.h"
 #include <unordered_map>
 
 #define MAX_NO_OF_SUPP_SPEED 10
@@ -190,6 +190,9 @@ void nas_fc_fill_speed_autoneg_state(npu_id_t npu, port_t port, cps_api_object_t
         cps_api_object_attr_delete(obj, DELL_IF_IF_INTERFACES_STATE_INTERFACE_AUTO_NEGOTIATION);
         cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_STATE_INTERFACE_AUTO_NEGOTIATION, param.value.ty_bool);
     }
+    cps_api_object_attr_add(obj, IF_INTERFACES_STATE_INTERFACE_TYPE,
+                            (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_FIBRECHANNEL,
+                            sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_FIBRECHANNEL));
     return;
 }
 
