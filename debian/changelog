@@ -1,3 +1,9 @@
+opx-nas-interface (5.10.1+opx6) unstable; urgency=medium
+
+  * Bugfix: Incorrect speed shown when interface is queried after speed is configured.
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Fri, 02 Mar 2018  19:47:07 -0800
+
 opx-nas-interface (5.10.1+opx5) unstable; urgency=medium
 
   * Update: Optimize memory consumption- Delete each member of the VLAN in NPU before deleting the

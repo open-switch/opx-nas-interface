@@ -263,10 +263,12 @@ static void _if_fill_in_speed_duplex_autoneg_state_attrs(npu_id_t npu, port_t po
                             sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD));
 }
 
-static void _if_fill_in_speed_duplex_attrs(npu_id_t npu, port_t port, cps_api_object_t obj) {
+static void _if_fill_in_speed_duplex_attrs(npu_id_t npu, port_t port, bool check_link, cps_api_object_t obj) {
 
     BASE_IF_SPEED_t speed;
-    if (ndi_port_speed_get(npu,port,&speed)==STD_ERR_OK) {
+    if (check_link && ndi_port_speed_get(npu,port,&speed)==STD_ERR_OK) {
+        cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_SPEED,speed);
+    } else if (ndi_port_speed_get_nocheck(npu,port,&speed)==STD_ERR_OK) {
         cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_SPEED,speed);
     }
 
@@ -278,7 +280,7 @@ static void _if_fill_in_speed_duplex_attrs(npu_id_t npu, port_t port, cps_api_ob
 
 
 static cps_api_return_code_t _if_fill_in_npu_attrs(npu_id_t npu, port_t port,
-                                    nas_int_type_t int_type, cps_api_object_t obj) {
+                                    nas_int_type_t int_type, bool check_link, cps_api_object_t obj) {
     IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_t state;
     if (ndi_port_admin_state_get(npu,port,&state)==STD_ERR_OK) {
         cps_api_object_attr_delete(obj,IF_INTERFACES_INTERFACE_ENABLED);
@@ -311,8 +313,8 @@ static cps_api_return_code_t _if_fill_in_npu_attrs(npu_id_t npu, port_t port,
         cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_OUI, oui);
     }
 
-    _if_fill_in_speed_duplex_attrs(npu,port,obj);
-    _if_fill_in_supported_speeds_attrs(npu,port,int_type, obj);
+    _if_fill_in_speed_duplex_attrs(npu,port, check_link, obj);
+    _if_fill_in_supported_speeds_attrs(npu, port, int_type, obj);
     _if_fill_in_eee_attrs(npu, port, obj);
 
     return cps_api_ret_code_OK;
@@ -337,7 +339,7 @@ static cps_api_return_code_t _if_get_prev_from_cache(npu_id_t npu, port_t port,
     } else {
         cps_api_object_clone(obj,os_if);
     }
-    return _if_fill_in_npu_attrs(npu,port,nas_int_type_PORT,obj);
+    return _if_fill_in_npu_attrs(npu,port,nas_int_type_PORT, true, obj);
 }
 
 
@@ -448,7 +450,7 @@ static cps_api_return_code_t if_get (void * context, cps_api_get_params_t * para
                     if (_port.int_type == nas_int_type_FC) {
                         nas_fc_fill_intf_attr(_port.npu_id, _port.port_id, object);
                     } else {
-                        _if_fill_in_npu_attrs(_port.npu_id, _port.port_id, _port.int_type, object);
+                        _if_fill_in_npu_attrs(_port.npu_id, _port.port_id, _port.int_type, false, object);
                     }
                 }
             } else {
