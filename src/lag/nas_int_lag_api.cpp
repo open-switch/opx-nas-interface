@@ -312,6 +312,7 @@ t_std_error nas_register_lag_intf(nas_lag_master_info_t *nas_lag_entry, hal_intf
     details.if_index = nas_lag_entry->ifindex;
     details.lag_id = nas_lag_entry->ndi_lag_id;
     details.int_type = nas_int_type_LAG;
+    details.desc = NULL;
     strncpy(details.if_name, nas_lag_entry->name, sizeof(details.if_name)-1);
 
     if (dn_hal_if_register(op, &details)!=STD_ERR_OK) {
@@ -411,6 +412,28 @@ t_std_error nas_lag_master_delete(hal_ifindex_t ifindex)
 
     return rc;
 }
+
+t_std_error nas_lag_set_desc(hal_ifindex_t index, const char *desc) {
+    nas_lag_master_info_t *nas_lag_entry = NULL;
+
+    EV_LOGGING(INTERFACE, INFO, "NAS-LAG", "Lag intf %d for set_desc", index);
+
+    nas_lag_entry = nas_get_lag_node(index);
+
+    if(nas_lag_entry == NULL){
+        EV_LOGGING(INTERFACE, ERR, "NAS-LAG", "Lag intf %d Err in set_desc",
+                   index);
+        return STD_ERR(INTERFACE,FAIL, 0);
+    }
+
+    if (dn_hal_update_intf_desc(index, desc) != STD_ERR_OK)  {
+        EV_LOGGING(INTERFACE, ERR ,"NAS-LAG", "Failure saving LAG %d desc in intf block", index);
+        return cps_api_ret_code_ERR;
+    }
+
+    return STD_ERR_OK;
+}
+
 
 t_std_error nas_lag_set_mac(hal_ifindex_t index,const char *mac)
 {

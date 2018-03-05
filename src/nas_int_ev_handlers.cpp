@@ -215,6 +215,7 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                 nas_cps_handle_mac_set (bond_name, nas_lag_entry->ifindex);
                 create = true;
             }
+            /* TODO Add function to set intf description on netlink message */
         }
         /*   Check if Member port is present then add the members in the lag */
         if (_mem_attr != nullptr) {
@@ -416,6 +417,7 @@ static void nas_loopback_ev_handler(cps_api_object_t obj)
     safestrncpy(details.if_name,name,sizeof(details.if_name));
     details.if_index = cps_api_object_attr_data_u32(if_attr);
     details.int_type = nas_int_type_LPBK;
+    details.desc = nullptr;
 
     if_name_attr = cps_api_object_attr_get(obj, IF_INTERFACES_STATE_INTERFACE_NAME);
     if (if_name_attr == nullptr) {

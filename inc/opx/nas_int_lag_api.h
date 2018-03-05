@@ -159,6 +159,7 @@ std_mutex_type_t  *nas_lag_mutex_lock();
 
 nas_lag_master_info_t *nas_get_lag_node(hal_ifindex_t index);
 nas_lag_master_table_t & nas_get_lag_table(void);
+t_std_error nas_lag_set_desc(hal_ifindex_t index,const char *desc);
 t_std_error nas_lag_set_mac(hal_ifindex_t index,const char *lag_mac);
 t_std_error nas_lag_set_admin_status(hal_ifindex_t index, bool enable);
 t_std_error nas_lag_block_port(nas_lag_master_info_t  *p_lag_info ,hal_ifindex_t slave_ifindex,bool block_state);

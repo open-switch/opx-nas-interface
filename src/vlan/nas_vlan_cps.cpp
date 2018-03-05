@@ -218,6 +218,31 @@ cps_api_return_code_t nas_cps_set_vlan_mac(cps_api_object_t obj, nas_bridge_t *p
     return cps_api_ret_code_OK;
 }
 
+cps_api_return_code_t nas_cps_set_vlan_desc(cps_api_object_t obj, nas_bridge_t *p_bridge)
+{
+    cps_api_object_attr_t _desc_attr = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_DESCRIPTION);
+
+    if (_desc_attr == nullptr) { return cps_api_ret_code_ERR; }
+
+    cps_api_object_attr_add_u32(obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, p_bridge->ifindex);
+
+    /** TODO set intf description into OS **/
+
+    char * desc = (char *) cps_api_object_attr_data_bin(_desc_attr); 
+    if (strlen(desc) > MAX_INTF_DESC_LEN)  {
+        EV_LOGGING(INTERFACE, ERR ,"NAS-Vlan", "Failure saving bridge %d desc. Desc length exceed max (%d)",
+                MAX_INTF_DESC_LEN);
+        return cps_api_ret_code_ERR;
+    }
+
+    if (dn_hal_update_intf_desc(p_bridge->ifindex, (const char *)desc) != STD_ERR_OK)  {
+        EV_LOGGING(INTERFACE, ERR ,"NAS-Vlan", "Failure saving bridge %d desc in intf block",
+                p_bridge->ifindex);
+        return cps_api_ret_code_ERR;
+    }
+    return cps_api_ret_code_OK;
+}
+
 bool nas_set_vlan_member_port_mtu(hal_ifindex_t ifindex, uint32_t mtu, hal_vlan_id_t vlan_id){
     cps_api_object_guard og(cps_api_object_create());
     if(og.get() == nullptr){
@@ -271,7 +296,7 @@ static auto set_vlan_attr = new std::unordered_map<cps_api_attr_id_t,
     { IF_INTERFACES_INTERFACE_ENABLED, nas_vlan_set_admin_status },
     { DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, nas_cps_set_vlan_learning_mode },
     { DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, nas_cps_set_vlan_mac},
-    { DELL_IF_IF_INTERFACES_INTERFACE_MTU, nas_cps_set_vlan_mtu},
+    { DELL_IF_IF_INTERFACES_INTERFACE_MTU, nas_cps_set_vlan_mtu}
 };
 
 static auto get_vlan_attr = new  std::unordered_map<cps_api_attr_id_t,
@@ -280,7 +305,7 @@ static auto get_vlan_attr = new  std::unordered_map<cps_api_attr_id_t,
     { IF_INTERFACES_INTERFACE_ENABLED, nas_vlan_get_admin_status },
     { DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, nas_vlan_get_learning_mode },
     { DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, nas_vlan_get_mac},
-    { DELL_IF_IF_INTERFACES_INTERFACE_MTU, nas_vlan_get_mtu},
+    { DELL_IF_IF_INTERFACES_INTERFACE_MTU, nas_vlan_get_mtu}
 };
 
 void handle_vlan_create_roll_bk(nas_bridge_t *p_bridge_node) {
@@ -453,6 +478,13 @@ static cps_api_return_code_t nas_cps_update_vlan(nas_bridge_t *p_bridge, cps_api
                                      == STD_ERR_OK) {
                     tag_port_list.insert(port_if_index);
                 }
+            }
+            break;
+        case IF_INTERFACES_INTERFACE_DESCRIPTION:
+            if (nas_cps_set_vlan_desc(obj, p_bridge) != cps_api_ret_code_OK) {
+                EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
+                    "Error setting vlan intf description.");
+                return cps_api_ret_code_ERR;
             }
             break;
 

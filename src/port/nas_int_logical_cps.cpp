@@ -453,6 +453,16 @@ static cps_api_return_code_t if_get (void * context, cps_api_get_params_t * para
                         _if_fill_in_npu_attrs(_port.npu_id, _port.port_id, _port.int_type, false, object);
                     }
                 }
+
+                if (_port.desc) {
+                    cps_api_object_attr_add(object, IF_INTERFACES_INTERFACE_DESCRIPTION,
+                                                (const void*)_port.desc, strlen(_port.desc) + 1);
+                } else {
+                    /* If there is no description, return a empty string */
+                    cps_api_object_attr_add(object, IF_INTERFACES_INTERFACE_DESCRIPTION,
+                                                (const void*)"", 1);
+                }
+
             } else {
                 ifix = nullptr;    //use to indicate that we want to erase this entry
             }
@@ -659,6 +669,24 @@ static cps_api_return_code_t _set_attr_mac(npu_id_t npu, port_t port, cps_api_ob
     hal_ifindex_t if_index = cps_api_object_attr_data_u32(_ifix);
     char *mac_addr = (char *)cps_api_object_attr_data_bin(attr);
     return (dn_hal_update_intf_mac(if_index, mac_addr));
+}
+
+static cps_api_return_code_t _set_attr_desc(npu_id_t npu, port_t port, cps_api_object_t obj) {
+    cps_api_object_attr_t attr = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_DESCRIPTION);
+    if (attr == nullptr) {
+        return cps_api_ret_code_ERR;
+    }
+
+    /* TODO OS Update for interface description? */
+
+    cps_api_object_attr_t _ifix = cps_api_object_attr_get(obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+    if ((_ifix == nullptr)) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-IF-SET","update intf desc failure for npu %d port %d", npu,port);
+        return cps_api_ret_code_ERR;
+    }
+    hal_ifindex_t if_index = cps_api_object_attr_data_u32(_ifix);
+    char *desc = (char *)cps_api_object_attr_data_bin(attr);
+    return (dn_hal_update_intf_desc(if_index, desc));
 }
 
 static cps_api_return_code_t _set_attr_mtu (npu_id_t npu, port_t port, cps_api_object_t obj) {
@@ -974,6 +1002,7 @@ static const std::unordered_map<cps_api_attr_id_t,
         { DELL_IF_IF_INTERFACES_INTERFACE_EEE, {_set_attr_eee, "eee"} },
         { DELL_IF_IF_INTERFACES_INTERFACE_FEC, {_set_attr_fec, "fec"} },
         { DELL_IF_IF_INTERFACES_INTERFACE_OUI, {_set_attr_oui, "oui"} },
+        { IF_INTERFACES_INTERFACE_DESCRIPTION, {_set_attr_desc, "description"}}
 };
 
 static void remove_same_values(cps_api_object_t now, cps_api_object_t req) {
@@ -1086,6 +1115,7 @@ static cps_api_return_code_t _if_update(cps_api_object_t req_if, cps_api_object_
     bool rpt_disconn_port = false;
     port_t disconn_port = 0;
     npu_id_t disconn_npu = 0;
+
     if (if_set && npu_attr != nullptr && port_attr != nullptr) {
         npu_id_t npu;
         port_t port;
@@ -1314,6 +1344,7 @@ static cps_api_return_code_t _if_create(cps_api_object_t cur, cps_api_object_t p
     cps_api_object_attr_t _npu = cps_api_object_attr_get(cur,BASE_IF_PHY_IF_INTERFACES_INTERFACE_NPU_ID);
     cps_api_object_attr_t _port = cps_api_object_attr_get(cur,BASE_IF_PHY_IF_INTERFACES_INTERFACE_PORT_ID);
     cps_api_object_attr_t _ietf_type = cps_api_object_attr_get(cur, IF_INTERFACES_INTERFACE_TYPE);
+    cps_api_object_attr_t _ietf_desc = cps_api_object_attr_get(cur, IF_INTERFACES_INTERFACE_DESCRIPTION);
 
     if (_name == nullptr) {
         EV_LOGGING(INTERFACE,ERR,"NAS-INT-CREATE", "Interface create fail: Name not present ");
@@ -1334,6 +1365,11 @@ static cps_api_return_code_t _if_create(cps_api_object_t cur, cps_api_object_t p
 
     const char *name = (const char*)cps_api_object_attr_data_bin(_name);
     EV_LOGGING(INTERFACE,INFO,"NAS-INT-CREATE", "Interface create received for  %s", name);
+
+    char *desc = NULL;
+    if (_ietf_desc != nullptr) {
+        desc = (char*)cps_api_object_attr_data_bin(_ietf_desc);
+    }
 
     t_std_error rc;
     bool npu_port_present = false;
@@ -1358,9 +1394,9 @@ static cps_api_return_code_t _if_create(cps_api_object_t cur, cps_api_object_t p
     EV_LOGGING(INTERFACE, INFO, "NAS-INT-CREATE", "Create interface %s for npu %d port %d",
                name, (int)npu, (int)port);
     if (npu_port_present) {
-        rc = nas_int_port_create_mapped(npu, port, name, _type);
+        rc = nas_int_port_create_mapped(npu, port, name, desc, _type);
     } else {
-        rc = nas_int_port_create_unmapped(name, _type);
+        rc = nas_int_port_create_unmapped(name, desc, _type);
     }
     if (rc != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR, "NAS-INT-CREATE", "Failed to create interface");
@@ -1527,7 +1563,7 @@ static t_std_error _nas_int_npu_port_init(void) {
         if (ndi_cpu_port_get(npu, &cpu_port)==STD_ERR_OK) {
             char buff[100]; //plenty of space for a name
             snprintf(buff,sizeof(buff),"npu-%d",npu);
-            t_std_error rc = nas_int_port_create_mapped(npu, cpu_port, buff, nas_int_type_CPU);
+            t_std_error rc = nas_int_port_create_mapped(npu, cpu_port, buff, NULL, nas_int_type_CPU);
             if (rc==STD_ERR_OK) {
                 nas_int_port_link_change(npu,cpu_port,IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP);
                 cps_api_object_guard og(cps_api_object_create());
@@ -1620,6 +1656,9 @@ static cps_api_return_code_t loopback_if_get(void* context, cps_api_get_params_t
                         (const void *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_SOFTWARELOOPBACK,
                         strlen(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_SOFTWARELOOPBACK)+1);
 
+        /** TODO implement description for loopback **/
+        cps_api_object_attr_add(object, IF_INTERFACES_INTERFACE_DESCRIPTION,
+                        (const void*)"", 1);
         ++ ix;
     }
 

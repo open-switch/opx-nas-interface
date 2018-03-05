@@ -780,7 +780,7 @@ void nas_int_port_link_change(npu_id_t npu, port_t port,
 }
 
 static t_std_error nas_int_port_create_int(npu_id_t npu, port_t port, const char *name,
-                                           nas_int_type_t type,
+                                           const char *desc, nas_int_type_t type,
                                            bool mapped) {
 
     std_rw_lock_write_guard l(&ports_lock);
@@ -815,6 +815,13 @@ static t_std_error nas_int_port_create_int(npu_id_t npu, port_t port, const char
     details.int_type = type;
     details.port_mapped = mapped;
 
+    if (desc && (strlen(desc) < MAX_INTF_DESC_LEN))  {
+        details.desc = (char*) malloc(sizeof(char) * (strlen(desc) + 1));
+        safestrncpy(details.desc, desc, strlen(desc) + 1);
+    } else {
+        details.desc = NULL;
+    }
+
     if (dn_hal_if_register(HAL_INTF_OP_REG,&details)!=STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"INT-CREATE", "Not created %d:%d:%s - mapping error",
                         (int)npu,(int)port,name);
@@ -832,12 +839,13 @@ static t_std_error nas_int_port_create_int(npu_id_t npu, port_t port, const char
 }
 
 t_std_error nas_int_port_create_mapped(npu_id_t npu, port_t port, const char *name,
-                                       nas_int_type_t type) {
-    return nas_int_port_create_int(npu, port, name, type, true);
+                                       const char *desc, nas_int_type_t type) {
+    return nas_int_port_create_int(npu, port, name, desc, type, true);
 }
 
-t_std_error nas_int_port_create_unmapped(const char *name, nas_int_type_t type) {
-    return nas_int_port_create_int(0, 0, name, type, false);
+t_std_error nas_int_port_create_unmapped(const char *name, const char *desc,
+                                        nas_int_type_t type) {
+    return nas_int_port_create_int(0, 0, name, desc, type, false);
 }
 
 t_std_error nas_int_port_delete(const char *name) {

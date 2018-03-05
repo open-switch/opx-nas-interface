@@ -215,6 +215,21 @@ static t_std_error nas_add_port_list_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan
     return rc;
 }
 
+static t_std_error nas_vlan_get_intf_ctrl_info(hal_ifindex_t index, interface_ctrl_t &i){
+    t_std_error rc;
+    memset(&i,0,sizeof(i));
+    i.if_index = index;
+    i.q_type = HAL_INTF_INFO_FROM_IF;
+    if ((rc = dn_hal_get_interface_info(&i)) != STD_ERR_OK){
+        EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
+                   "Failed to get interface control information for "
+                   "interface %d", index);
+        return rc;
+    }
+    return STD_ERR_OK;
+
+}
+
 //@TODO change this to the vector..
 static void nas_copy_bridge_ports_to_ndi_port_list(std_dll_head *p_port_list,
                                                    ndi_port_list_t *p_ndi_ports)
@@ -782,6 +797,23 @@ void nas_pack_vlan_if(cps_api_object_t obj, nas_bridge_t *p_bridge)
      * Get MTU on vlan Interface
      */
     nas_os_get_interface_mtu(p_bridge->name, obj);
+
+
+    interface_ctrl_t intf_ctrl_blk;
+    if(nas_vlan_get_intf_ctrl_info(p_bridge->ifindex, intf_ctrl_blk) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
+                "Error getting intf ctrl blk info.");
+        return;
+    }
+
+    if(intf_ctrl_blk.desc) {
+        cps_api_object_attr_add(obj, IF_INTERFACES_INTERFACE_DESCRIPTION,
+                                    (const void*)intf_ctrl_blk.desc, strlen(intf_ctrl_blk.desc) + 1);
+    }else {
+        /* If there is no description, return a empty string */
+        cps_api_object_attr_add(obj, IF_INTERFACES_INTERFACE_DESCRIPTION,
+                                    (const void*)"", 1);
+    }
 }
 
 
@@ -842,6 +874,7 @@ t_std_error nas_register_vlan_intf(nas_bridge_t *p_bridge, hal_intf_reg_op_type_
     details.vlan_id = p_bridge->vlan_id;
     details.int_type = nas_int_type_VLAN;
     details.int_sub_type = p_bridge->int_sub_type;
+    details.desc = NULL;
     strncpy(details.if_name, p_bridge->name, sizeof(details.if_name)-1);
 
     if (dn_hal_if_register(op, &details)!=STD_ERR_OK) {
