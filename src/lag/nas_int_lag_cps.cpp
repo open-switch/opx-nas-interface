@@ -878,10 +878,6 @@ static void nas_pack_lag_if(cps_api_object_t obj, nas_lag_master_info_t *nas_lag
     if (intf_ctrl_blk.desc) {
         cps_api_object_attr_add(obj, IF_INTERFACES_INTERFACE_DESCRIPTION,
                                     (const void*)intf_ctrl_blk.desc, strlen(intf_ctrl_blk.desc) + 1);
-    } else {
-        /* If there is no description, return a empty string */
-        cps_api_object_attr_add(obj, IF_INTERFACES_INTERFACE_DESCRIPTION,
-                                    (const void*)"", 1);
     }
 }
 

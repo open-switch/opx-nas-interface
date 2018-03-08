@@ -78,6 +78,7 @@ struct _port_cache {
     uint32_t mode;
     uint32_t media_type;
     BASE_IF_SUPPORTED_AUTONEG_t supported_autoneg;
+    BASE_IF_SPEED_t configured_speed = BASE_IF_SPEED_0MBPS;
 
     _port_cache() : mode( BASE_IF_MODE_MODE_NONE),
                     media_type(PLATFORM_MEDIA_TYPE_AR_POPTICS_NOTPRESENT),
@@ -263,14 +264,11 @@ static void _if_fill_in_speed_duplex_autoneg_state_attrs(npu_id_t npu, port_t po
                             sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD));
 }
 
-static void _if_fill_in_speed_duplex_attrs(npu_id_t npu, port_t port, bool check_link, cps_api_object_t obj) {
+static void _if_fill_in_speed_duplex_attrs(npu_id_t npu, port_t port, cps_api_object_t obj) {
 
-    BASE_IF_SPEED_t speed;
-    if (check_link && ndi_port_speed_get(npu,port,&speed)==STD_ERR_OK) {
-        cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_SPEED,speed);
-    } else if (ndi_port_speed_get_nocheck(npu,port,&speed)==STD_ERR_OK) {
-        cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_SPEED,speed);
-    }
+    _npu_port_t npu_port  = {(uint_t)npu, (uint_t)port};
+    cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_SPEED,
+        _logical_port_tbl[npu_port].configured_speed);
 
     BASE_CMN_DUPLEX_TYPE_t duplex;
     if (ndi_port_duplex_get(npu,port,&duplex)==STD_ERR_OK) {
@@ -280,7 +278,7 @@ static void _if_fill_in_speed_duplex_attrs(npu_id_t npu, port_t port, bool check
 
 
 static cps_api_return_code_t _if_fill_in_npu_attrs(npu_id_t npu, port_t port,
-                                    nas_int_type_t int_type, bool check_link, cps_api_object_t obj) {
+                                    nas_int_type_t int_type, cps_api_object_t obj) {
     IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_t state;
     if (ndi_port_admin_state_get(npu,port,&state)==STD_ERR_OK) {
         cps_api_object_attr_delete(obj,IF_INTERFACES_INTERFACE_ENABLED);
@@ -313,7 +311,7 @@ static cps_api_return_code_t _if_fill_in_npu_attrs(npu_id_t npu, port_t port,
         cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_OUI, oui);
     }
 
-    _if_fill_in_speed_duplex_attrs(npu,port, check_link, obj);
+    _if_fill_in_speed_duplex_attrs(npu,port, obj);
     _if_fill_in_supported_speeds_attrs(npu, port, int_type, obj);
     _if_fill_in_eee_attrs(npu, port, obj);
 
@@ -339,7 +337,7 @@ static cps_api_return_code_t _if_get_prev_from_cache(npu_id_t npu, port_t port,
     } else {
         cps_api_object_clone(obj,os_if);
     }
-    return _if_fill_in_npu_attrs(npu,port,nas_int_type_PORT, true, obj);
+    return _if_fill_in_npu_attrs(npu,port,nas_int_type_PORT, obj);
 }
 
 
@@ -450,19 +448,14 @@ static cps_api_return_code_t if_get (void * context, cps_api_get_params_t * para
                     if (_port.int_type == nas_int_type_FC) {
                         nas_fc_fill_intf_attr(_port.npu_id, _port.port_id, object);
                     } else {
-                        _if_fill_in_npu_attrs(_port.npu_id, _port.port_id, _port.int_type, false, object);
+                        _if_fill_in_npu_attrs(_port.npu_id, _port.port_id, _port.int_type, object);
                     }
                 }
 
                 if (_port.desc) {
                     cps_api_object_attr_add(object, IF_INTERFACES_INTERFACE_DESCRIPTION,
                                                 (const void*)_port.desc, strlen(_port.desc) + 1);
-                } else {
-                    /* If there is no description, return a empty string */
-                    cps_api_object_attr_add(object, IF_INTERFACES_INTERFACE_DESCRIPTION,
-                                                (const void*)"", 1);
                 }
-
             } else {
                 ifix = nullptr;    //use to indicate that we want to erase this entry
             }
@@ -866,6 +859,8 @@ static cps_api_return_code_t _set_speed(npu_id_t npu, port_t port, cps_api_objec
 
     cps_api_object_attr_t _speed = cps_api_object_attr_get(obj,
                                            DELL_IF_IF_INTERFACES_INTERFACE_SPEED);
+    _npu_port_t npu_port  = {(uint_t)npu, (uint_t)port};
+
     if(_speed == nullptr) {
         return cps_api_ret_code_ERR;
     }
@@ -876,6 +871,7 @@ static cps_api_return_code_t _set_speed(npu_id_t npu, port_t port, cps_api_objec
                "npu %d port %d",speed,npu,port);
         return cps_api_ret_code_ERR;
     }
+    _logical_port_tbl[npu_port].configured_speed = speed;
     EV_LOGGING(INTERFACE,INFO,"NAS-IF-REG","set speed %d for npu %d port %d",speed,npu,port);
     return cps_api_ret_code_OK;
 }

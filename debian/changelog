@@ -1,3 +1,11 @@
+opx-nas-interface (5.10.1+opx8) unstable; urgency=medium
+
+  * Update: Cache the configured speed
+  * Update: opx-ethtool now shows configured and operating speed
+  * Update: interface description to conform with IETF specification
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Thu, 08 Mar 2018  19:47:07 -0800
+
 opx-nas-interface (5.10.1+opx7) unstable; urgency=medium
 
   * Update: Add interface description field for PHY, LAG, and VLAN interfaces.

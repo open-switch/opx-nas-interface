@@ -127,7 +127,8 @@ def ethtool_show_interface(argv):
     print '    Operational State: ' + nas_if.oper_status_str_get(_oper_status)
     print '    Supported Speed (in Mbps):  '  + str(_str)
     print '    Auto Negotiation : ' + nas_if.from_yang_autoneg(_if_obj.get_attr_data('dell-if/if/interfaces/interface/auto-negotiation'))
-    print '    Speed   : ' + str(nas_if.from_yang_speed(_if_obj.get_attr_data('dell-if/if/interfaces/interface/speed')))
+    print '    Configured Speed   : ' + str(nas_if.from_yang_speed(_if_obj.get_attr_data('dell-if/if/interfaces/interface/speed')))
+    print '    Operating Speed   : ' + str(nas_if.from_yang_speed(_if_state_obj.get_attr_data('if/interfaces-state/interface/speed')))
     print '    Duplex   : ' + str(nas_if.from_yang_duplex(_if_obj.get_attr_data('dell-if/if/interfaces/interface/duplex')))
 
 def _nas_media_show(if_name):
