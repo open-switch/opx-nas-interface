@@ -526,14 +526,6 @@ static cps_api_return_code_t if_state_get (void * context, cps_api_get_params_t 
     cps_api_object_t filt = cps_api_object_list_get(param->filters,key_ix);
     cps_api_object_attr_t ifix = cps_api_object_attr_get(filt, IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
     cps_api_object_attr_t name = cps_api_get_key_data(filt,IF_INTERFACES_STATE_INTERFACE_NAME);
-    cps_api_object_attr_t type_attr = cps_api_object_attr_get(filt, IF_INTERFACES_STATE_INTERFACE_TYPE);
-
-    char *req_if_type = NULL;
-    bool have_type_filter = false;
-    if (type_attr != nullptr) {
-        req_if_type = (char *)cps_api_object_attr_data_bin(type_attr);
-        have_type_filter = true;
-    }
 
     if (ifix != nullptr) {
         /*  Call os API with interface object  */
@@ -549,6 +541,14 @@ static cps_api_return_code_t if_state_get (void * context, cps_api_get_params_t 
         }
         cps_api_object_attr_add_u32(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
                                     _port.if_index);
+    }
+    cps_api_object_attr_t type_attr = cps_api_object_attr_get(filt, IF_INTERFACES_STATE_INTERFACE_TYPE);
+    char *req_if_type = NULL;
+    bool have_type_filter = false;
+    if (type_attr != nullptr) {
+        // Taking the pointer to if type once input filt object is done with all modifications
+        req_if_type = (char *)cps_api_object_attr_data_bin(type_attr);
+        have_type_filter = true;
     }
 
     if (nas_os_get_interface(filt,param->list)!=STD_ERR_OK) {

@@ -108,6 +108,10 @@ bool nas_stat_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index, bo
     }
     cps_api_object_attr_t if_index_attr = cps_api_object_attr_get(obj, attr_id);
 
+    // Since interfaces state object is used to get stats, ifindex can also be searched in the ifindex attribute from interfaces state object
+    if(if_index_attr == NULL)
+        if_index_attr = cps_api_object_attr_get(obj, IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
+
     if(if_index_attr == NULL && if_name_attr == NULL) {
         EV_LOG(ERR, INTERFACE, ev_log_s_CRITICAL, "NAS-STAT",
             "Missing Name/ifindex attribute for STAT Get");

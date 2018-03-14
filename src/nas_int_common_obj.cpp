@@ -41,6 +41,7 @@ typedef struct _intf_obj_handler_s {
     cps_wrfn obj_wr;
 } intf_obj_handler_t;
 
+#define INTF_TYPE_MAX_LEN 256
 #define NUM_INT_CPS_API_THREAD 1
 
 static cps_api_operation_handle_t nas_if_stat_handle;
@@ -116,85 +117,134 @@ static void cps_api_object_list_swap(cps_api_object_list_t &a, cps_api_object_li
     b = t;
 }
 
-static cps_api_return_code_t _if_get_all_interfaces(obj_intf_cat_t obj_cat, void* context,
-                                             cps_api_get_params_t* param, size_t key_ix) {
-    cps_api_attr_id_t _type_attr_id = (obj_cat == obj_INTF) ?
-                       (cps_api_attr_id_t) IF_INTERFACES_INTERFACE_TYPE :
-                       (cps_api_attr_id_t) IF_INTERFACES_STATE_INTERFACE_TYPE ;
+static bool _get_if_info (const char *if_name, hal_ifindex_t *ifindex, nas_int_type_t *type) {
+    interface_ctrl_t if_info;
+    memset(&if_info,0,sizeof(if_info));
 
-    cps_api_object_t filt = cps_api_object_list_get(param->filters,key_ix);
-
-    cps_api_object_list_t list = cps_api_object_list_create();
-    char if_type[256];
-    for (auto& iter: _intf_handlers[obj_cat]) {
-        if (iter.second != NULL && iter.second->obj_rd != NULL) {
-            if (!nas_to_ietf_if_type_get(iter.first, if_type, sizeof(if_type))) {
-                EV_LOGGING(INTERFACE, ERR, "NAS-COM-INT-GET", "Failed to get IETF type for NAS type %d",
-                           iter.first);
-                continue;
-            }
-            cps_api_object_attr_add(filt, _type_attr_id, if_type, strlen(if_type) + 1);
-            cps_api_object_list_swap(param->list, list);
-            if (iter.second->obj_rd(context, param, key_ix) != cps_api_ret_code_OK) {
-                EV_LOGGING(INTERFACE, ERR, "NAS-COM-INT-GET", "Failed to get interfaces for type %d",
-                           iter.first);
-                cps_api_object_attr_delete(filt, _type_attr_id);
-                cps_api_object_list_destroy(list, true);
-                return cps_api_ret_code_ERR;
-            }
-            cps_api_object_list_swap(param->list, list);
-            cps_api_object_list_merge(param->list, list);
-            cps_api_object_attr_delete(filt, _type_attr_id);
-            cps_api_object_list_clear(list, true);
-        }
+    if( if_name != nullptr) {
+        strncpy(if_info.if_name,if_name,sizeof(if_info.if_name)-1);
+        if_info.q_type = HAL_INTF_INFO_FROM_IF_NAME;
     }
-    cps_api_object_list_destroy(list, true);
+    else if( ifindex != nullptr) {
+        if_info.if_index = *ifindex;
+        if_info.q_type = HAL_INTF_INFO_FROM_IF;
 
-    return cps_api_ret_code_OK;
-}
+    }
+
+    if (dn_hal_get_interface_info(&if_info) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR,"INTF-C","Failed to get if_info");
+        return false;
+    }
+    *ifindex = if_info.if_index;
+    *type = if_info.int_type;
+    return true;
+};
 
 static cps_api_return_code_t _if_gen_interface_get(obj_intf_cat_t obj_cat, void * context,
                                              cps_api_get_params_t * param, size_t key_ix) {
 
-    nas_int_type_t  _type;
-    bool _type_found = false;
-
+    cps_api_object_t filt = cps_api_object_list_get(param->filters,key_ix);
     cps_api_attr_id_t _type_attr_id = (obj_cat == obj_INTF) ?
                        (cps_api_attr_id_t) IF_INTERFACES_INTERFACE_TYPE :
                        (cps_api_attr_id_t) IF_INTERFACES_STATE_INTERFACE_TYPE ;
+    cps_api_object_list_t list = cps_api_object_list_create();
 
-    cps_api_object_t filt = cps_api_object_list_get(param->filters,key_ix);
-    cps_api_object_attr_t _ietf_type_attr = cps_api_object_attr_get(filt,
-                                            _type_attr_id);
-    if (_ietf_type_attr != nullptr) {
-        const char *ietf_intf_type = (const char *)cps_api_object_attr_data_bin(_ietf_type_attr);
-        if(!ietf_to_nas_if_type_get(ietf_intf_type, &_type)) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-GET","Could not convert the %s type to nas if type",ietf_intf_type);
-            return cps_api_ret_code_ERR; //Not supported interface type
+    auto _process_get_request = [&](intf_obj_handler_t  *h, nas_int_type_t type) -> bool{
+
+        if(h == nullptr || h->obj_rd == nullptr ) {
+             EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-GET","Get request handler not present");
+             return false;
         }
-        _type_found = true;
-    } else {
-    /*  extract type from if_name or if_index if present otherwise return*/
-        if (_if_type_from_if_index_or_name(obj_cat, filt, &_type) == STD_ERR_OK) {
-            _type_found = true;
+
+        char if_type[256];
+        if (!nas_to_ietf_if_type_get(type, if_type, sizeof(if_type))) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-COM-INT-GET", "Failed to get IETF type for NAS type %d",
+	                                                   type);
+            return false;
         }
+        cps_api_object_attr_add(filt, _type_attr_id, if_type, strlen(if_type) + 1);
+        cps_api_object_list_swap(param->list, list);
+        if (h->obj_rd(context, param, key_ix) != cps_api_ret_code_OK) {
+	    EV_LOGGING(INTERFACE, ERR, "NAS-COM-INT-GET", "Failed to get interfaces for type %d",
+				   type);
+            cps_api_object_attr_delete(filt, _type_attr_id);
+            cps_api_object_list_clear(list, true);
+            return false;
+        }
+        cps_api_object_list_swap(param->list, list);
+        // Merge the output of get handlers in the output param->list
+        cps_api_object_list_merge(param->list, list);
+        cps_api_object_attr_delete(filt, _type_attr_id);
+        cps_api_object_list_clear(list, true);
+        return true;
+
+    };
+
+
+    cps_api_object_attr_t ifix = cps_api_object_attr_get(filt, (obj_cat == obj_INTF) ? 
+                                        (cps_api_attr_id_t)DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX:
+                                        (cps_api_attr_id_t)IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
+    cps_api_object_attr_t _name = cps_api_get_key_data(filt, (obj_cat == obj_INTF) ?
+                                                     (cps_api_attr_id_t)IF_INTERFACES_INTERFACE_NAME :
+                                                     (cps_api_attr_id_t)IF_INTERFACES_STATE_INTERFACE_NAME);
+    bool is_get_next = cps_api_filter_is_getnext(filt);
+    nas_int_type_t type;
+    hal_ifindex_t index = 0;
+    size_t count = 0;
+
+    if(ifix != nullptr || _name != nullptr) {
+        const char *name = nullptr;
+        if(ifix) index = cps_api_object_attr_data_u32(ifix);
+        if(_name) name = (const char *)cps_api_object_attr_data_bin(_name);
+         _get_if_info(name, &index, &type);
+        count =1 ;
     }
-    if (_type_found) {
-        auto iter = _intf_handlers[obj_cat].find(_type);
-        if (iter == _intf_handlers[obj_cat].end()) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-GET","Get request handler was not registered for obj "
-                                    "Category %d and type %d", obj_cat, _type);
-            return cps_api_ret_code_ERR; //Handler not registered for this interface type
-        }
-        if ((_intf_handlers[obj_cat][_type] == NULL) || (_intf_handlers[obj_cat][_type]->obj_rd == NULL))  {
-            EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-GET","Get request handler not present for obj "
-                                    "Category %d and type %d", obj_cat, _type);
-            return cps_api_ret_code_ERR; //Handler not present for this interface type
-        }
-        return(_intf_handlers[obj_cat][_type]->obj_rd(context, param,key_ix));
-    } else {
-        return (_if_get_all_interfaces(obj_cat, context, param, key_ix));
+
+    cps_api_filter_get_count(filt, &count);
+    
+    hal_ifindex_t *current_ifindex = nullptr;
+    hal_ifindex_t next_ifindex;
+    t_std_error ret;
+    bool res = true;
+
+    // Get Exact by interface name or ifindex
+    if(count == 1 && !is_get_next) {
+        if(! _process_get_request(_intf_handlers[obj_cat][type], type) )
+            return cps_api_ret_code_ERR;
+        else return cps_api_ret_code_OK;
     }
+
+    if(is_get_next && (ifix != nullptr || _name != nullptr)) current_ifindex = &index;
+    do {
+        ret = dn_hal_get_next_ifindex(current_ifindex, &next_ifindex);
+        if(ret == STD_ERR_OK && _get_if_info(nullptr, &next_ifindex, &type)) {
+          if(obj_cat == obj_INTF) {
+            cps_api_object_attr_delete(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+            cps_api_object_attr_add_u32(filt,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, next_ifindex);
+          } else {
+            cps_api_object_attr_delete(filt, IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
+            cps_api_object_attr_delete(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+            cps_api_object_attr_add_u32(filt,IF_INTERFACES_STATE_INTERFACE_IF_INDEX, next_ifindex);
+          }
+ 
+            res = _process_get_request(_intf_handlers[obj_cat][type], type);
+            if(res) {
+                // Get First
+                if(ifix == nullptr && _name == nullptr && is_get_next) break;
+                // Get Next with count
+                if(count != 0) {
+                    --count;
+                    if(!count) break;
+                }
+            }
+        }
+
+        current_ifindex = &next_ifindex;
+    } while(ret == STD_ERR_OK);
+
+    cps_api_object_list_destroy(list, true);
+    
+    return cps_api_ret_code_OK;
 }
 
 static cps_api_return_code_t _if_gen_interface_set (obj_intf_cat_t obj_cat, void * context,
