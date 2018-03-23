@@ -3,7 +3,7 @@ Section: net
 Priority: optional
 Maintainer: Dell <support@dell.com>
 Build-Depends: debhelper (>= 9),dh-autoreconf,dh-systemd,autotools-dev,libevent-dev,libopx-common-dev (>= 1.4.0),
-            libopx-nas-common-dev (>= 6.1.0),libopx-cps-dev (>= 3.6.2),libopx-logging-dev (>= 2.1.0),libopx-nas-linux-dev (>= 5.11.0),
+            libopx-nas-common-dev (>= 6.1.0+opx3),libopx-cps-dev (>= 3.6.2),libopx-logging-dev (>= 2.1.0),libopx-nas-linux-dev (>= 5.11.0),
             libopx-nas-ndi-dev (>= 3.26.0),opx-ndi-api-dev (>= 6.12.0), libopx-base-model-dev (>= 3.109.0)
 Standards-Version: 3.9.3
 Vcs-Browser: https://github.com/open-switch/opx-nas-interface
@@ -11,13 +11,13 @@ Vcs-Git: https://github.com/open-switch/opx-nas-interface.git
 
 Package: libopx-nas-interface1
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends},libopx-nas-common1 (>= 6.1.0),libopx-common1 (>= 1.4.0),libopx-cps1 (>= 3.6.2),
+Depends: ${shlibs:Depends}, ${misc:Depends},libopx-nas-common1 (>= 6.1.0+opx3),libopx-common1 (>= 1.4.0),libopx-cps1 (>= 3.6.2),
         libopx-logging1 (>= 2.1.0),libopx-nas-linux1 (>= 5.11.0),libopx-nas-ndi1 (>= 3.26.0)
 Description: This package contains nas-interface for the Openswitch software.
 
 Package: libopx-nas-interface-dev
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends},libopx-common-dev (>= 1.4.0),libopx-nas-common-dev (>= 6.1.0),libopx-cps-dev (>=3.6.2),
+Depends: ${shlibs:Depends}, ${misc:Depends},libopx-common-dev (>= 1.4.0),libopx-nas-common-dev (>= 6.1.0+opx3),libopx-cps-dev (>=3.6.2),
         libopx-logging-dev (>= 2.1.0),libopx-nas-linux-dev (>= 5.11.0),libopx-nas-ndi-dev (>= 3.26.0),opx-ndi-api-dev (>= 6.12.0),
         libopx-nas-interface1 (=${binary:Version}),libopx-base-model-dev (>= 3.109.0)
 Description: This package contains nas-interface for the Openswitch software.

@@ -1,3 +1,10 @@
+opx-nas-interface (5.10.1+opx10) unstable; urgency=medium
+  
+  * Bugfix: delete LAG when there are member ports fail.
+  * Bugfix: Fix opx-nas-common dependency
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Thu, 22 Mar 2018 13:17:52 -0800
+
 opx-nas-interface (5.10.1+opx9) unstable; urgency=medium
 
   * Update: Support to get interfaces information using next ifindex

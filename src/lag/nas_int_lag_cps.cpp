@@ -56,7 +56,7 @@ const static int MAX_CPS_MSG_BUFF=4096;
 
 typedef std::unordered_set <hal_ifindex_t> nas_port_list_t;
 static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj);
-
+static cps_api_return_code_t nas_cps_delete_port_from_lag(nas_lag_master_info_t *nas_lag_entry, hal_ifindex_t ifindex);
 
 static bool nas_lag_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index){
     cps_api_object_attr_t lag_name_attr = cps_api_get_key_data(obj, IF_INTERFACES_INTERFACE_NAME);
@@ -212,11 +212,26 @@ static cps_api_return_code_t nas_cps_delete_lag(cps_api_object_t obj)
     cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,lag_index);
     cps_api_object_attr_t type = cps_api_object_attr_get(obj,DELL_IF_IF_INTERFACES_INTERFACE_MEMBER_PORTS);
     cps_api_object_attr_t member_port_attr = cps_api_get_key_data(obj, DELL_IF_IF_INTERFACES_INTERFACE_MEMBER_PORTS_NAME);
+    nas_lag_master_info_t *nas_lag_entry = nas_get_lag_node(lag_index);
 
     if(type || member_port_attr){
         EV_LOGGING(INTERFACE, INFO,"NAS-CPS-LAG",
                    "Remove Member Port for Lag %d",lag_index);
         return nas_cps_set_lag(obj);
+    }
+
+    if(!nas_lag_entry) {
+        EV_LOGGING(INTERFACE, INFO,"NAS-CPS-LAG",
+                    "Can't find LAG entry for Lag %d", lag_index);
+        return cps_api_ret_code_ERR;
+    }
+
+    for (auto it : nas_lag_entry->port_list) {
+        if (nas_cps_delete_port_from_lag(nas_lag_entry, it) !=  cps_api_ret_code_OK) {
+            EV_LOGGING(INTERFACE, INFO,"NAS-CPS-LAG",
+                        "Error clearing port %d from member port list", it);
+            return cps_api_ret_code_ERR;
+        }
     }
 
     //Acquring lock to avoid pocessing netlink msg from kernel.
