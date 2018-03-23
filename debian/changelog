@@ -1,3 +1,9 @@
+opx-nas-interface (5.10.1+opx11) unstable; urgency=medium
+
+  * Update: opx-config-fanout usability
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Fri, 23 Mar 2018 15:07:52 -0800
+
 opx-nas-interface (5.10.1+opx10) unstable; urgency=medium
   
   * Bugfix: delete LAG when there are member ports fail.

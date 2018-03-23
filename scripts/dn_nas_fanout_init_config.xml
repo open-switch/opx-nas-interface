@@ -19,10 +19,8 @@
     example
 
 <interfaces>
-    <interface name="e101-001-0" fanout="true" />
-    <interface name="e101-002-0" fanout="true" />
-    <interface name="e101-003-0" fanout="4x1" speed="10G"/>
-    <interface name="e101-004-0" fanout="1x1" speed="40G"/>
+    <interface name="e101-001-0" fanout="4x1" speed="10G"/>
+    <interface name="e101-002-0" fanout="1x1" speed="40G"/>
 </interfaces>
 
 -->

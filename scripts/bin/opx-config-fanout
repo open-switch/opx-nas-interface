@@ -26,31 +26,22 @@ from nas_common_header import *
 _g_if_name = 'if/interfaces/interface/name'
 
 def usage():
-    print ("Invalid arguments specified - opx-config-fanout [port] [true/false/mode] [speed]" \
-            + "\neg: opx-config-fanout e101-001-0 true" \
-            + "\n    opx-config-fanout e101-001-1 false" \
-            + "\n    opx-config-fanout e101-001-0 4x1 25g" \
+    print ("Invalid arguments specified - opx-config-fanout <port> <mode> <speed>" \
+            + "\neg: opx-config-fanout e101-001-0 4x1 25g" \
             + "\n    opx-config-fanout e101-001-1 1x1 100g")
 
 if __name__ == '__main__':
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 4:
         usage()
         sys.exit(0)
     br_mode = sys.argv[2].lower()
-    if br_mode == 'true':
-        br_mode = '4x1'
-    elif br_mode == 'false':
-        br_mode = '1x1'
     if not is_key_valid(yang_breakout, br_mode):
         print 'Invalid breakout mode %s' % br_mode
         sys.exit(0)
-    if len(sys.argv) > 3:
-        port_speed = sys.argv[3].upper()
-        if not is_key_valid(yang_speed, port_speed):
-            print 'Invalid port speed %s' % port_speed
-            sys.exit(0)
-    else:
-        port_speed = None
+    port_speed = sys.argv[3].upper()
+    if not is_key_valid(yang_speed, port_speed):
+        print 'Invalid port speed %s' % port_speed
+        sys.exit(0)
 
     nas_fp_cache = nas_if.FpPortCache()
     if_cache = nas_if.IfCache()
@@ -70,13 +61,9 @@ if __name__ == '__main__':
         exit(0)
 
     allowed_speed = get_value(breakout_allowed_speed, br_mode)
-    if port_speed != None:
-        if port_speed not in allowed_speed:
-           print 'Invalid break mode and port speed combination'
-           sys.exit(0)
-    else:
-        # Use first allowed speed as default speed
-        port_speed = allowed_speed[0]
+    if port_speed not in allowed_speed:
+        print 'Invalid break mode and port speed combination'
+        sys.exit(0)
     _speed = get_value(yang_speed, port_speed)
     _mode = get_value(yang_breakout, br_mode)
 
@@ -88,11 +75,6 @@ if __name__ == '__main__':
         if br_cap not in breakout_cap:
             breakout_cap.append(br_cap)
             port_speed_cap.append(cap_item['port-speed'])
-
-    if (sys.argv[2].lower()=='false' and len(port_speed_cap)>2):
-        print ("Rejecting transaction, Please use mode and speed" \
-                "\neg: opx-config-fanout e101-001-1 1x1 100g")
-        sys.exit(1)
 
     if _mode not in breakout_cap:
         print 'breakout mode %d not supported on this port' % _mode

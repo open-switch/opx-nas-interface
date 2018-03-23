@@ -33,17 +33,9 @@ def parse_intf_config(intf_list):
         for i in intf_list:
             interface = i.attributes["name"].value
             fanout_mode = i.attributes["fanout"].value
-            if fanout_mode == "true":
-                subprocess.call(["/usr/bin/python",
-                                 "/usr/bin/opx-config-fanout",interface,"true"])
-            elif fanout_mode == "false":
-                  subprocess.call(["/usr/bin/python",
-                                   "/usr/bin/opx-config-fanout",interface,"false"])
-            else:
-                speed = i.attributes["speed"].value
-                subprocess.call(["/usr/bin/python",
-                                 "/usr/bin/opx-config-fanout",interface,fanout_mode,speed])
-
+            speed = i.attributes["speed"].value
+            subprocess.call(["/usr/bin/python",
+                             "/usr/bin/opx-config-fanout",interface,fanout_mode,speed])
     except Exception as ex:
         nas_if.log_err(str(ex))
 
