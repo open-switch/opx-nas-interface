@@ -24,6 +24,7 @@
 #include "iana-if-type.h"
 
 #include "std_error_codes.h"
+#include "std_utils.h"
 #include "cps_api_operation.h"
 #include "cps_api_object_key.h"
 
@@ -122,7 +123,7 @@ static bool _get_if_info (const char *if_name, hal_ifindex_t *ifindex, nas_int_t
     memset(&if_info,0,sizeof(if_info));
 
     if( if_name != nullptr) {
-        strncpy(if_info.if_name,if_name,sizeof(if_info.if_name)-1);
+        safestrncpy(if_info.if_name,if_name,sizeof(if_info.if_name)-1);
         if_info.q_type = HAL_INTF_INFO_FROM_IF_NAME;
     }
     else if( ifindex != nullptr) {
@@ -148,6 +149,10 @@ static cps_api_return_code_t _if_gen_interface_get(obj_intf_cat_t obj_cat, void 
                        (cps_api_attr_id_t) IF_INTERFACES_INTERFACE_TYPE :
                        (cps_api_attr_id_t) IF_INTERFACES_STATE_INTERFACE_TYPE ;
     cps_api_object_list_t list = cps_api_object_list_create();
+    if(list == NULL) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-GET","Can't create CPS Object output list");
+        return false;
+    }
 
     auto _process_get_request = [&](intf_obj_handler_t  *h, nas_int_type_t type) -> bool{
 
@@ -162,7 +167,10 @@ static cps_api_return_code_t _if_gen_interface_get(obj_intf_cat_t obj_cat, void 
 	                                                   type);
             return false;
         }
-        cps_api_object_attr_add(filt, _type_attr_id, if_type, strlen(if_type) + 1);
+        cps_api_object_attr_t _ietf_type_attr = cps_api_object_attr_get(filt,
+                                            _type_attr_id);
+        if(! _ietf_type_attr)  cps_api_object_attr_add(filt, _type_attr_id, if_type, strlen(if_type) + 1);
+
         cps_api_object_list_swap(param->list, list);
         if (h->obj_rd(context, param, key_ix) != cps_api_ret_code_OK) {
 	    EV_LOGGING(INTERFACE, ERR, "NAS-COM-INT-GET", "Failed to get interfaces for type %d",
@@ -187,6 +195,17 @@ static cps_api_return_code_t _if_gen_interface_get(obj_intf_cat_t obj_cat, void 
     cps_api_object_attr_t _name = cps_api_get_key_data(filt, (obj_cat == obj_INTF) ?
                                                      (cps_api_attr_id_t)IF_INTERFACES_INTERFACE_NAME :
                                                      (cps_api_attr_id_t)IF_INTERFACES_STATE_INTERFACE_NAME);
+    cps_api_object_attr_t _ietf_type_attr = cps_api_object_attr_get(filt,
+                                            _type_attr_id);
+    nas_int_type_t input_type;
+    if (_ietf_type_attr != nullptr) {
+        const char *ietf_intf_type = (const char *)cps_api_object_attr_data_bin(_ietf_type_attr);
+        if(!ietf_to_nas_if_type_get(ietf_intf_type, &input_type)) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-GET","Could not convert the %s type to nas if type",ietf_intf_type);
+            return cps_api_ret_code_ERR; //Not supported interface type
+        }
+    }
+    /* If this attribute is present in an object, then the caller would like the next object in lexicographic order*/
     bool is_get_next = cps_api_filter_is_getnext(filt);
     nas_int_type_t type;
     hal_ifindex_t index = 0;
@@ -200,6 +219,7 @@ static cps_api_return_code_t _if_gen_interface_get(obj_intf_cat_t obj_cat, void 
         count =1 ;
     }
 
+    /*Number of entries to retrieve at one time to support the concept of range along with the get next attribute*/
     cps_api_filter_get_count(filt, &count);
     
     hal_ifindex_t *current_ifindex = nullptr;
@@ -209,26 +229,28 @@ static cps_api_return_code_t _if_gen_interface_get(obj_intf_cat_t obj_cat, void 
 
     // Get Exact by interface name or ifindex
     if(count == 1 && !is_get_next) {
-        if(! _process_get_request(_intf_handlers[obj_cat][type], type) )
-            return cps_api_ret_code_ERR;
-        else return cps_api_ret_code_OK;
+        res = _process_get_request(_intf_handlers[obj_cat][type], type);
+        cps_api_object_list_destroy(list, true);
+        if(!res) return cps_api_ret_code_ERR;
+        return cps_api_ret_code_OK;
     }
 
     if(is_get_next && (ifix != nullptr || _name != nullptr)) current_ifindex = &index;
     do {
         ret = dn_hal_get_next_ifindex(current_ifindex, &next_ifindex);
         if(ret == STD_ERR_OK && _get_if_info(nullptr, &next_ifindex, &type)) {
-          if(obj_cat == obj_INTF) {
-            cps_api_object_attr_delete(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
-            cps_api_object_attr_add_u32(filt,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, next_ifindex);
-          } else {
-            cps_api_object_attr_delete(filt, IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
-            cps_api_object_attr_delete(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
-            cps_api_object_attr_add_u32(filt,IF_INTERFACES_STATE_INTERFACE_IF_INDEX, next_ifindex);
-          }
+          if(_ietf_type_attr == nullptr || type == input_type) { 
+              if(obj_cat == obj_INTF) {
+                cps_api_object_attr_delete(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+                cps_api_object_attr_add_u32(filt,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, next_ifindex);
+              } else {
+                cps_api_object_attr_delete(filt, IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
+                cps_api_object_attr_delete(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+                cps_api_object_attr_add_u32(filt,IF_INTERFACES_STATE_INTERFACE_IF_INDEX, next_ifindex);
+              }
  
-            res = _process_get_request(_intf_handlers[obj_cat][type], type);
-            if(res) {
+              res = _process_get_request(_intf_handlers[obj_cat][type], type);
+              if(res) {
                 // Get First
                 if(ifix == nullptr && _name == nullptr && is_get_next) break;
                 // Get Next with count
@@ -236,7 +258,8 @@ static cps_api_return_code_t _if_gen_interface_get(obj_intf_cat_t obj_cat, void 
                     --count;
                     if(!count) break;
                 }
-            }
+              }
+          }
         }
 
         current_ifindex = &next_ifindex;

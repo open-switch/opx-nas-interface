@@ -908,12 +908,17 @@ static cps_api_return_code_t nas_process_cps_vlan_get(void * context,
          cps_api_object_t filter = cps_api_object_list_get(param->filters, ix);
          cps_api_object_attr_t name_attr = cps_api_get_key_data(filter,
                                             IF_INTERFACES_INTERFACE_NAME);
+         cps_api_object_attr_t if_index_attr = cps_api_get_key_data(filter,
+                                            DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
          cps_api_object_attr_t vlan_id_attr = cps_api_object_attr_get(filter,
                                     BASE_IF_VLAN_IF_INTERFACES_INTERFACE_ID);
 
-         if (name_attr != NULL) {
-              const char *if_name = (char *)cps_api_object_attr_data_bin(name_attr);
-              if (nas_get_vlan_intf(if_name, param->list) != STD_ERR_OK) {
+         if (name_attr != NULL || if_index_attr != NULL) {
+              const char *if_name = NULL;
+              hal_ifindex_t index = 0;
+              if(name_attr) if_name = (char *)cps_api_object_attr_data_bin(name_attr);
+              if(if_index_attr) index = cps_api_object_attr_data_u32(if_index_attr);
+              if (nas_get_vlan_intf(if_name, index, param->list) != STD_ERR_OK) {
                   nas_bridge_unlock();
                   return cps_api_ret_code_ERR;
               }

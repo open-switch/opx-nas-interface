@@ -1,3 +1,9 @@
+opx-nas-interface (5.10.1+opx12) unstable; urgency=medium
+
+  * Bugfix: Get interfaces information filtered by type
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Wed, 28 Mar 2018 17:17:56 -0800
+
 opx-nas-interface (5.10.1+opx11) unstable; urgency=medium
 
   * Update: opx-config-fanout usability

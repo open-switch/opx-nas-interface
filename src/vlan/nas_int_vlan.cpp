@@ -813,14 +813,18 @@ void nas_pack_vlan_if(cps_api_object_t obj, nas_bridge_t *p_bridge)
 }
 
 
-t_std_error nas_get_vlan_intf(const char *if_name, cps_api_object_list_t list)
+t_std_error nas_get_vlan_intf(const char *if_name, hal_ifindex_t ifindex, cps_api_object_list_t list)
 {
     nas_bridge_t *p_bridge = NULL;
 
-    EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
+    if(if_name) EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
            "Get vlan interface %s", if_name);
+    else if(ifindex) EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
+           "Get vlan index %s", ifindex);
 
-    p_bridge = nas_get_bridge_node_from_name(if_name);
+
+    if(if_name) p_bridge = nas_get_bridge_node_from_name(if_name);
+    else p_bridge = nas_get_bridge_node(ifindex);
 
     if(p_bridge == NULL) {
         EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",

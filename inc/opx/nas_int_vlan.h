@@ -125,7 +125,7 @@ t_std_error nas_vlan_get_all_info(cps_api_object_list_t list);
  *
  * @return : Standard error code
  */
-t_std_error nas_get_vlan_intf(const char *if_name, cps_api_object_list_t list);
+t_std_error nas_get_vlan_intf(const char *if_name, hal_ifindex_t ifindex, cps_api_object_list_t list);
 
 t_std_error nas_get_vlan_intf_from_vid(hal_vlan_id_t vid, cps_api_object_list_t list);
 t_std_error nas_register_vlan_intf(nas_bridge_t *p_bridge, hal_intf_reg_op_type_t op);
