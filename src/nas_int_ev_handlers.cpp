@@ -225,7 +225,7 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                                mem_idx, bond_idx);
                 return ;
             }
-            if(nas_lag_member_add(bond_idx,mem_idx,lag_id) != STD_ERR_OK) {
+            if(nas_lag_member_add(bond_idx,mem_idx) != STD_ERR_OK) {
                 EV_LOGGING(INTERFACE,INFO, "NAS-LAG",
                     "Failed to Add member %s to the Lag %s", mem_name, bond_name);
                 return ;
@@ -277,7 +277,7 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                         "ifindex for delete operation",bond_idx);
                 return;
             }
-            if(nas_lag_member_delete(bond_idx, mem_idx,lag_id) != STD_ERR_OK) {
+            if(nas_lag_member_delete(bond_idx, mem_idx) != STD_ERR_OK) {
                 EV_LOGGING(INTERFACE,INFO,"NAS-LAG",
                         "Failed to Delete member %s to the Lag %d", mem_name, bond_idx);
                 return ;

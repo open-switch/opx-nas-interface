@@ -122,7 +122,7 @@ t_std_error nas_lag_master_delete(hal_ifindex_t index);
  * @return STD_ERR or STD_ERR_OK
  */
 
-t_std_error nas_lag_member_add(hal_ifindex_t lag_master_id,hal_ifindex_t if_index,nas_lag_id_t lag_id);
+t_std_error nas_lag_member_add(hal_ifindex_t lag_master_id,hal_ifindex_t if_index);
 
 /**
  * @brief Delete member from LAG
@@ -136,7 +136,7 @@ t_std_error nas_lag_member_add(hal_ifindex_t lag_master_id,hal_ifindex_t if_inde
  * @return STD_ERR or STD_ERR_OK
  */
 
-t_std_error nas_lag_member_delete(hal_ifindex_t lag_master_id,hal_ifindex_t if_index,nas_lag_id_t lag_id);
+t_std_error nas_lag_member_delete(hal_ifindex_t lag_master_id,hal_ifindex_t if_index);
 
 /**
  *  Check if a port is a member of bond.

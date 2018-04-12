@@ -210,8 +210,7 @@ bool nas_lag_if_port_is_lag_member(hal_ifindex_t lag_master_id, hal_ifindex_t if
 }
 
 
-t_std_error nas_lag_member_add(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex,
-                                nas_lag_id_t lag_id)
+t_std_error nas_lag_member_add(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex)
 {
     nas_lag_master_info_t *nas_lag_entry = NULL;
     t_std_error ret = STD_ERR_OK;
@@ -254,8 +253,7 @@ t_std_error nas_lag_member_add(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex
 
 
 
-t_std_error nas_lag_member_delete(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex,
-                                  nas_lag_id_t lag_id)
+t_std_error nas_lag_member_delete(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex)
 {
     nas_lag_master_info_t *nas_lag_entry= NULL;
     nas_lag_slave_info_t *nas_slave_entry = NULL;

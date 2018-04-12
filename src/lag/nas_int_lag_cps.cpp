@@ -86,12 +86,16 @@ static bool nas_lag_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *ind
     return true;
 }
 
-
 static inline bool nas_get_lag_id_from_str(const char * str, nas_lag_id_t * id){
     std::string full_str(str);
     std::size_t pos = full_str.find_first_of("0123456789");
-    std::string id_str = full_str.substr(pos);
-    *id = std::stoi(id_str);
+
+    if (pos != std::string::npos) {
+        std::string id_str = full_str.substr(pos);
+        *id = std::stoi(id_str);
+    } else {
+        *id = INVALID_LAG_ID;
+    }
     return true;
 }
 
@@ -364,7 +368,7 @@ static cps_api_return_code_t nas_cps_add_port_to_lag(nas_lag_master_info_t *nas_
      * Check for virtual port and if it is a virtual port don't add it
      */
     if(!nas_is_virtual_port(port_idx)){
-        if(nas_lag_member_add(nas_lag_entry->ifindex,port_idx,0) != STD_ERR_OK)
+        if(nas_lag_member_add(nas_lag_entry->ifindex,port_idx) != STD_ERR_OK)
         {
             EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
                     "Error inserting index %d in list", port_idx);
@@ -392,7 +396,7 @@ static cps_api_return_code_t nas_cps_delete_port_from_lag(nas_lag_master_info_t 
 
     if(!nas_is_virtual_port(ifindex)){
         //delete the port from NPU
-        if((nas_lag_member_delete(0,ifindex,0) != STD_ERR_OK)){
+        if((nas_lag_member_delete(0,ifindex) != STD_ERR_OK)){
             EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
                         "Error deleting interface %d from NPU", ifindex);
             return cps_api_ret_code_ERR;
@@ -856,7 +860,8 @@ static void nas_pack_lag_if(cps_api_object_t obj, nas_lag_master_info_t *nas_lag
                 cps_api_object_ATTR_T_BIN,
                 nas_lag_entry->name, strlen(nas_lag_entry->name)+1);
 
-    cps_api_object_attr_add_u32(obj, BASE_IF_LAG_IF_INTERFACES_INTERFACE_ID, nas_lag_entry->lag_id);
+    if (nas_lag_entry->lag_id != INVALID_LAG_ID)
+        cps_api_object_attr_add_u32(obj, BASE_IF_LAG_IF_INTERFACES_INTERFACE_ID, nas_lag_entry->lag_id);
 
     cps_api_object_attr_add(obj,IF_INTERFACES_INTERFACE_TYPE,
                             (const void *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_IEEE8023ADLAG,
@@ -910,7 +915,8 @@ static void nas_pack_lag_if_state(cps_api_object_t obj, nas_lag_master_info_t *n
 
     //cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,nas_lag_entry->ifindex);
 
-    cps_api_object_attr_add_u32(obj, BASE_IF_LAG_IF_INTERFACES_INTERFACE_ID, nas_lag_entry->lag_id);
+    if (nas_lag_entry->lag_id != INVALID_LAG_ID)
+        cps_api_object_attr_add_u32(obj, BASE_IF_LAG_IF_INTERFACES_INTERFACE_ID, nas_lag_entry->lag_id);
     cps_api_object_attr_add_u32(obj, IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS, nas_lag_entry->admin_status ?
         IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_UP : IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_DOWN);
     cps_api_object_attr_add_u32(obj, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS, nas_lag_entry->oper_status ?
@@ -963,7 +969,7 @@ static t_std_error nas_get_lag_intf(hal_ifindex_t ifindex, cps_api_object_list_t
     if(object == NULL){
         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "obj NULL failure");
         return(STD_ERR(INTERFACE, FAIL, 0));
-    } 
+    }
 
     if (get_intf_state) {
         nas_pack_lag_if_state(object, nas_lag_entry);
@@ -1043,7 +1049,7 @@ t_std_error nas_lag_ndi_it_to_obj_fill(nas_obj_id_t ndi_lag_id,cps_api_object_li
                 EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "obj NULL failure");
                 return STD_ERR(INTERFACE, NOMEM, 0);
             }
-            
+
             if(get_intf_state) {
                 nas_pack_lag_if_state(obj,nas_lag_entry);
             } else {
@@ -1245,13 +1251,13 @@ static bool nas_lag_process_port_association(hal_ifindex_t ifindex, npu_id_t npu
                     continue;
                 }
 
-                if(nas_lag_member_add(nas_lag_entry->ifindex,ifindex,0) != STD_ERR_OK){
+                if(nas_lag_member_add(nas_lag_entry->ifindex,ifindex) != STD_ERR_OK){
                     EV_LOGGING(INTERFACE, ERR, "NAS-LAG-MAP","Error inserting index %d in list",
                                 ifindex);
                     continue;
                 }
             }else{
-                if((nas_lag_member_delete(0,ifindex,0) != STD_ERR_OK)){
+                if((nas_lag_member_delete(0,ifindex) != STD_ERR_OK)){
                     EV_LOGGING(INTERFACE, ERR, "NAS-LAG-MAP","Error deleting lag"
                                 " interface %d from NPU", ifindex);
                     continue;

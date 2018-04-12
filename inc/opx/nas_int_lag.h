@@ -29,6 +29,8 @@
 extern "C" {
 #endif
 
+#define INVALID_LAG_ID -1
+
 /**
  * @brief Handle the lag interface create request
  *
