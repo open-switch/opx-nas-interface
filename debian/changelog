@@ -1,3 +1,8 @@
+opx-nas-interface (5.10.1+opx14) unstable; urgency=medium
+
+  * Bugfix: Fix fanout hang during apt-get dist-upgrade
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Wed, 18 Apr 2018 17:17:56 -0800
 opx-nas-interface (5.10.1+opx13) unstable; urgency=medium
   
   * Bugfix: Crash LAG name doesn't have a number during interface creation
