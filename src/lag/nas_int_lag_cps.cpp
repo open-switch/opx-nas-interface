@@ -736,7 +736,7 @@ static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj)
     cps_api_return_code_t rc = cps_api_ret_code_OK;
     nas_lag_master_info_t *nas_lag_entry;
     cps_api_object_it_t it;
-    nas_port_list_t port_list;
+    nas_port_list_t port_list, block_port_list, unblock_port_list;
 
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "CPS Set LAG");
 
@@ -799,9 +799,8 @@ static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj)
                         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "CPS block list processing failed for LAG %d", lag_index);
                         return cps_api_ret_code_ERR;
                     }
-                    port_list.insert(i.if_index);
+                    block_port_list.insert(i.if_index);
                 }
-                rc = nas_process_lag_block_ports(nas_lag_entry, port_list,true);
                 break;
             case BASE_IF_LAG_IF_INTERFACES_INTERFACE_UNBLOCK_PORT_LIST:
                 if (cps_api_object_attr_len(it.attr) != 0) {
@@ -809,9 +808,8 @@ static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj)
                         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "CPS unblock list processing failed for LAG %d", lag_index);
                         return cps_api_ret_code_ERR;
                     }
-                    port_list.insert(i.if_index);
+                    unblock_port_list.insert(i.if_index);
                 }
-                rc = nas_process_lag_block_ports(nas_lag_entry, port_list,false);
                 break;
             case IF_INTERFACES_INTERFACE_DESCRIPTION:
                 rc = nas_cps_set_desc(obj, lag_index);
@@ -822,6 +820,16 @@ static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj)
                 break;
         }
     }
+
+    if(unblock_port_list.size()) {
+        rc |= nas_process_lag_block_ports(nas_lag_entry, unblock_port_list,false);
+    }
+
+    if(block_port_list.size()) {
+        rc |= nas_process_lag_block_ports(nas_lag_entry, block_port_list,true);
+    }
+
+    rc = (rc == cps_api_ret_code_OK) ? cps_api_ret_code_OK : cps_api_ret_code_ERR;
 
     if(port_list_attr) {
         EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
