@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Dell Inc.
+ * Copyright (c) 2018 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -21,7 +21,45 @@
 #include "event_log.h"
 #include "ietf-network-instance.h"
 #include "nas_vrf.h"
+#include "nas_vrf_utils.h"
+#include "nas_vrf_extn.h"
+#include "vrf-mgmt.h"
+#define NUM_INT_CPS_API_THREAD 1
 
+static cps_api_operation_handle_t nas_vrf_handle;
+extern "C" {
+t_std_error nas_vrf_init(void) {
+
+    //Create a handle for CPS objects
+    if (cps_api_operation_subsystem_init(&nas_vrf_handle,NUM_INT_CPS_API_THREAD)!=cps_api_ret_code_OK) {
+        return STD_ERR(ROUTE,FAIL,0);
+    }
+
+    /* Create the handle for publishing the messages. */
+    if (nas_vrf_create_publish_handle() != STD_ERR_OK) {
+        return STD_ERR(ROUTE,FAIL,0);
+    }
+
+    /* Create the default VRF oid */
+    if (nas_vrf_update_vrf_id(NAS_DEFAULT_VRF_NAME, true) == false) {
+        NAS_VRF_LOG_ERR("NAS-RT-CPS", "Default VRF initialisation failed!");
+        return STD_ERR(ROUTE,FAIL,0);
+    }
+    NAS_VRF_LOG_INFO("NAS-RT-CPS", "Default VRF initialisation successful!");
+
+    if (nas_vrf_object_vrf_init(nas_vrf_handle) != STD_ERR_OK) {
+        NAS_VRF_LOG_ERR("NAS-VRF", "Failed to initialize VRF handler");
+        return STD_ERR(ROUTE,FAIL,0);
+    }
+
+    if (nas_vrf_object_vrf_intf_init(nas_vrf_handle) != STD_ERR_OK) {
+        NAS_VRF_LOG_ERR("NAS-VRF-INTF", "Failed to initialize VRF and Intf bind handler");
+        return STD_ERR(ROUTE,FAIL,0);
+    }
+
+    return STD_ERR_OK;
+}
+}
 
 static cps_api_return_code_t nas_vrf_cps_vrf_set_func(void *ctx,
                                                         cps_api_transaction_params_t * param,
@@ -87,8 +125,55 @@ static cps_api_return_code_t nas_vrf_cps_vrf_intf_get_func (void *ctx,
                                                          cps_api_get_params_t * param,
                                                          size_t ix) {
     NAS_VRF_LOG_DEBUG("NAS-RT-CPS", "VRF Intf get function");
+    cps_api_return_code_t rc = cps_api_ret_code_OK;
+
+    cps_api_object_t filt = cps_api_object_list_get(param->filters,ix);
+    if (filt == NULL) {
+        NAS_VRF_LOG_ERR("NAS-RT-CPS","VRF intf object is not present");
+        return cps_api_ret_code_ERR;
+    }
+
+    const char *vrf_name  = (const char *)cps_api_object_get_data(filt, NI_IF_INTERFACES_INTERFACE_BIND_NI_NAME);
+    const char *if_name  = (const char *)cps_api_object_get_data(filt, IF_INTERFACES_INTERFACE_NAME);
+
+    if (if_name == nullptr) {
+        NAS_VRF_LOG_DEBUG("NAS-RT-CPS","No If-name, VRF-Intf get failed!");
+        return cps_api_ret_code_ERR;
+    }
+
+    if((rc = nas_vrf_get_intf_info(param->list, vrf_name, if_name)) != STD_ERR_OK){
+        return (cps_api_return_code_t)rc;
+    }
+
     return cps_api_ret_code_OK;
 }
+
+static cps_api_return_code_t nas_vrf_cps_vrf_router_intf_get_func (void *ctx,
+                                                                   cps_api_get_params_t * param,
+                                                                   size_t ix) {
+    NAS_VRF_LOG_DEBUG("NAS-RT-CPS", "VRF Intf get function");
+    cps_api_return_code_t rc = cps_api_ret_code_OK;
+
+    cps_api_object_t filt = cps_api_object_list_get(param->filters,ix);
+    if (filt == NULL) {
+        NAS_VRF_LOG_ERR("NAS-RT-CPS","VRF intf object is not present");
+        return cps_api_ret_code_ERR;
+    }
+
+    const char *if_name  = (const char *)cps_api_object_get_data(filt, VRF_MGMT_ROUTER_INTF_ENTRY_NAME);
+
+    if (if_name == nullptr) {
+        NAS_VRF_LOG_DEBUG("NAS-RT-CPS","No If-name, VRF-Intf get failed!");
+        return cps_api_ret_code_ERR;
+    }
+
+    if((rc = nas_vrf_get_router_intf_info(param->list, if_name)) != STD_ERR_OK){
+        return (cps_api_return_code_t)rc;
+    }
+
+    return cps_api_ret_code_OK;
+}
+
 
 static cps_api_return_code_t nas_vrf_cps_vrf_intf_rollback_func(void * ctx,
                                                              cps_api_transaction_params_t * param, size_t ix){
@@ -137,12 +222,12 @@ t_std_error nas_vrf_object_vrf_intf_init(cps_api_operation_handle_t nas_vrf_cps_
 
     if (!cps_api_key_from_attr_with_qual(&f.key,NI_IF_INTERFACES_INTERFACE_OBJ,cps_api_qualifier_TARGET)) {
         NAS_VRF_LOG_ERR("NAS-RT-CPS","Could not translate %d to key %s",
-                       (int)(NI_IF_INTERFACES_INTERFACE_OBJ),cps_api_key_print(&f.key,buff,sizeof(buff)-1));
+                        (int)(NI_IF_INTERFACES_INTERFACE_OBJ),cps_api_key_print(&f.key,buff,sizeof(buff)-1));
         return STD_ERR(ROUTE,FAIL,0);
     }
 
     NAS_VRF_LOG_DEBUG("NAS-RT-CPS", "Registering for %s",
-                     cps_api_key_print(&f.key,buff,sizeof(buff)-1));
+                      cps_api_key_print(&f.key,buff,sizeof(buff)-1));
 
     f.handle                 = nas_vrf_cps_handle;
     f._read_function         = nas_vrf_cps_vrf_intf_get_func;
@@ -152,6 +237,48 @@ t_std_error nas_vrf_object_vrf_intf_init(cps_api_operation_handle_t nas_vrf_cps_
     if (cps_api_register(&f)!=cps_api_ret_code_OK) {
         return STD_ERR(ROUTE,FAIL,0);
     }
+
+    memset(&f,0,sizeof(f));
+
+    /* Register for interface bind with VRF rpc object with CPS */
+    if (!cps_api_key_from_attr_with_qual(&f.key, VRF_MGMT_INTF_BIND_NI_OBJ,
+                                         cps_api_qualifier_TARGET)) {
+        NAS_VRF_LOG_ERR("NAS-RT-CPS","Could not translate %d to key %s",
+                        (int)(VRF_MGMT_INTF_BIND_NI_OBJ),
+                        cps_api_key_print(&f.key,buff,sizeof(buff)-1));
+        return STD_ERR(ROUTE,FAIL,0);
+    }
+
+    NAS_VRF_LOG_DEBUG("NAS-RT-CPS", "Registering for %s",
+                     cps_api_key_print(&f.key,buff,sizeof(buff)-1));
+
+    f.handle = nas_vrf_cps_handle;
+    f._write_function = nas_intf_bind_vrf_rpc_handler;
+
+    if (cps_api_register(&f)!=cps_api_ret_code_OK) {
+        return STD_ERR(ROUTE,FAIL,0);
+    }
+
+    memset(&f,0,sizeof(f));
+
+    NAS_VRF_LOG_DEBUG("NAS-RT-CPS", "VRF router Intf binding CPS Initialization");
+
+    if (!cps_api_key_from_attr_with_qual(&f.key,VRF_MGMT_ROUTER_INTF_ENTRY_OBJ,cps_api_qualifier_TARGET)) {
+        NAS_VRF_LOG_ERR("NAS-RT-CPS","Could not translate router intf obj %d to key %s",
+                        (int)(VRF_MGMT_ROUTER_INTF_ENTRY_OBJ),cps_api_key_print(&f.key,buff,sizeof(buff)-1));
+        return STD_ERR(ROUTE,FAIL,0);
+    }
+
+    NAS_VRF_LOG_DEBUG("NAS-RT-CPS", "Registering for %s",
+                      cps_api_key_print(&f.key,buff,sizeof(buff)-1));
+
+    f.handle                 = nas_vrf_cps_handle;
+    f._read_function         = nas_vrf_cps_vrf_router_intf_get_func;
+
+    if (cps_api_register(&f)!=cps_api_ret_code_OK) {
+        return STD_ERR(ROUTE,FAIL,0);
+    }
+
     return STD_ERR_OK;
 }
 

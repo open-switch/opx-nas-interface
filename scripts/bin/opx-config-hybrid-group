@@ -1,0 +1,92 @@
+#!/usr/bin/python
+# Copyright (c) 2018 Dell Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+#
+# THIS CODE IS PROVIDED ON AN *AS IS* BASIS, WITHOUT WARRANTIES OR
+# CONDITIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT
+# LIMITATION ANY IMPLIED WARRANTIES OR CONDITIONS OF TITLE, FITNESS
+# FOR A PARTICULAR PURPOSE, MERCHANTABLITY OR NON-INFRINGEMENT.
+#
+# See the Apache Version 2.0 License for specific language governing
+# permissions and limitations under the License.
+
+import argparse
+import nas_hybrid_group_utils as hg_utils
+import nas_common_header as common
+import cps_object
+import cps_utils
+from argparse import ArgumentParser
+
+OPX_HYBRID_GROUP_CONFIG_TOOL_VERSION = 1.0
+
+def _parse_args(args):
+    if args.command == 'get':
+        if args.subcommand == 'hybrid-group':
+            ret = hg_utils.get_hg(args.name)
+            for l in ret:
+                hg_utils.print_hg_cps_obj(l)
+        elif args.subcommand == 'hybrid-group-state':
+            ret = hg_utils.get_hg_state(args.name)
+            for l in ret:
+                o = cps_object.CPSObject(obj=l)
+                cps_utils.print_obj(o.get())
+        return None
+
+    elif args.command == 'set':
+        if args.subcommand == 'hybrid-group':
+            
+            if args.config == 'profile':
+                return hg_utils.set_hg(hg_name=args.name, profile=args.profile)
+            
+            if args.config == 'port':
+                br_mode,port_speed = common.get_value(common.yang_breakout_port_speed, args.breakout)
+                return hg_utils.set_hg(hg_name=args.name, port_id=args.port_id, br_mode=br_mode, port_speed=port_speed, phy_mode=common.yang_phy_mode[args.phy_mode])
+        return
+
+if __name__ == '__main__':
+
+    parser = ArgumentParser(version=OPX_HYBRID_GROUP_CONFIG_TOOL_VERSION, description="This is a Hybrid Group config tool.")
+    parser.add_argument('--verbose',
+                        dest='verbose',
+                        default=False,
+                        action='store_true',
+                        help='Verbose mode. Default: %(default)s')
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(help='command', title="command", dest="command")
+
+    # Get SubParser
+    get_parser = subparsers.add_parser('get', help='Get Hybrid Group or Hybrid Group State Object')
+    get_subparsers = get_parser.add_subparsers(help='subcommand', title="subcommand", dest="subcommand")
+
+    # Get Hybrid Group
+    get_hybrid_group_parser = get_subparsers.add_parser('hybrid-group', help='Get Hybrid Group Object')
+    get_hybrid_group_parser.add_argument('--name', dest='name', required=False, action='store', type=str, help='Name of the Hybrid Group')
+
+    # Get Hybrid State Group
+    get_hybrid_group_state_parser = get_subparsers.add_parser('hybrid-group-state', help='Get Hybrid Group State Object')
+    get_hybrid_group_state_parser.add_argument('--name', dest='name', required=False, action='store', type=str, help='Name of the Hybrid Group')
+    
+    # Set Hybrid Group
+    set_parser = subparsers.add_parser('set', help='Set Hybrid Group Object')
+    set_subparsers = set_parser.add_subparsers(help='subcommand', title="subcommand", dest="subcommand")
+
+    # Set Hybrid Group
+    set_hybrid_group_parser = set_subparsers.add_parser('hybrid-group', help='Set Hybrid Group Object')
+    set_hybrid_group_subparser = set_hybrid_group_parser.add_subparsers(help='config', title="config", dest="config")
+    
+    set_hybrid_group_profile_parser = set_hybrid_group_subparser.add_parser('profile', help='Set Hybrid Group Profile')
+    set_hybrid_group_profile_parser.add_argument('--name', dest='name', required=True, action='store', type=str, help='Name of the Hybrid Group')
+    set_hybrid_group_profile_parser.add_argument('--profile', dest='profile', choices=["restricted", "unrestricted"], required=True, action='store', type=str, help='Profile-mode to be configured on hybrid-group')
+    
+    set_hybrid_group_port_parser = set_hybrid_group_subparser.add_parser('port', help='Set Hybrid Group Port')
+    set_hybrid_group_port_parser.add_argument('--name', dest='name', required=True, action='store', type=str, help='Name of the Hybrid Group')
+    set_hybrid_group_port_parser.add_argument('--port-id', dest='port_id', required=True, action='store', type=str, help='Port ID of the Hybrid Group')
+    set_hybrid_group_port_parser.add_argument('--breakout', choices=common.yang_breakout_port_speed.keys(), dest='breakout',required=True, action='store', type=str, help='Breakout options for hybrid-group port')
+    set_hybrid_group_port_parser.add_argument('--phy-mode', choices=['ether', 'fc'], default='ether', dest='phy_mode', required=False, action='store', type=str, help='Phy Mode to configure on the Port of the Hybrid Group')
+
+    args = parser.parse_args()
+    print(args)
+    _parse_args(args)                       

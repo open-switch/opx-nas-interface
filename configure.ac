@@ -1,11 +1,12 @@
 #                                               -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 AC_PREREQ([2.69])
-AC_INIT([opx-nas-interface], [5.10.1+opx15], [ops-dev@lists.openswitch.net])
+AC_INIT([opx-nas-interface], [5.17.0], [ops-dev@lists.openswitch.net])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 AC_CONFIG_SRCDIR([.])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIRS([m4])
+AM_MAINTAINER_MODE([enable])
 # Checks for programs.
 AC_PROG_CXX
 AC_PROG_CC

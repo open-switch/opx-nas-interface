@@ -50,7 +50,7 @@ def create_and_add_fp_caps(fp_port, resp):
         for speed in hw_speeds:
             phy_speed = fp.get_phy_npu_port_speed(mode, speed * hwp_count)
             if fp.verify_npu_supported_speed(phy_speed) == False:
-                nas_if.log_err("create_and_add_fp_caps: fp port %d doesn't support yang speed %d " % (fp_port.id, phy_speed))
+                nas_if.log_info("create_and_add_fp_caps: fp port %s doesn't support yang speed %s " % (str(fp_port.id),str(phy_speed)))
 # breakout mode and this speed is excluded from cps show
                 continue
             cps_obj = cps_object.CPSObject(module='base-if-phy/front-panel-port/br-cap',
@@ -76,8 +76,8 @@ def add_fp_caps_to_fp_obj(fp_port, fp_obj):
         for speed in hw_speeds:
             phy_speed = fp.get_phy_npu_port_speed(mode, speed * hwp_count)
             if fp.verify_npu_supported_speed(phy_speed) == False:
-                nas_if.log_err("create_and_add_fp_caps: fp port %d doesn't support yang speed %d " % (
-                               fp_port.id, phy_speed))
+                nas_if.log_info("create_and_add_fp_caps: fp port %s doesn't support yang speed %s " % (
+                               str(fp_port.id), str(phy_speed)))
                 # breakout mode and this speed is excluded from cps show
                 continue
             cap_list[str(cap_index)] = {'phy-mode':phy_mode,

@@ -36,10 +36,10 @@ oper_type = {'create':'1','delete':'2','set':'3','get':'4'}
 
 def show_intf(args):
     if args.intf_name == 'all':
-        call(['cps_get_oid.py', '-qua', 'target', intf_key, intf_type_key + '=' + intf_types[args.type]])
+        call(["cps_get_oid.py", "target/"+intf_key, intf_type_key + '=' + intf_types[args.type]])
 
     else:
-        call(['cps_get_oid.py', '-qua', 'target', intf_key, intf_name_key + '=' + args.intf_name])
+        call(["cps_get_oid.py", "target/"+intf_key, intf_name_key + '=' + args.intf_name])
 
 
 def config_intf(args):
@@ -51,13 +51,14 @@ def config_intf(args):
 	if len(l) > 2:
             fp_port_id = l[1]
             subport_id = l[2]
-        call(['cps_set_oid.py', '-qua', 'target', '-oper', 'action', set_intf_key, oper_key + '=' + oper_type[args.operation], intf_type_key+'='+intf_types[args.type], \
-		intf_name_key+'='+ args.intf_name, fp_port_key+'='+fp_port_id, subport_id_key+'='+subport_id])
+        call(["cps_set_oid.py", "-qua", "target", "-oper", "action", set_intf_key, oper_key + '=' + oper_type[args.operation],
+              intf_type_key+'='+intf_types[args.type], intf_name_key+'='+ args.intf_name, fp_port_key+'='+fp_port_id, subport_id_key+'='+subport_id])
     elif args.operation == 'delete':
-        call(['cps_set_oid.py', '-qua', 'target', '-oper', 'action',  set_intf_key, oper_key + '=' + oper_type[args.operation], intf_name_key+'='+ args.intf_name,intf_type_key+'='+intf_types[args.type]])
+        call(["cps_set_oid.py", "-qua", "target", "-oper", "action", set_intf_key, oper_key + '=' + oper_type[args.operation],
+              intf_name_key+'='+ args.intf_name])
     else:
-        call(['cps_set_oid.py', '-qua', 'target', '-oper', 'action',  set_intf_key, oper_key + '=' + oper_type[args.operation], intf_name_key+'='+ args.intf_name,
-                                                                                                           args.Key+'='+args.Value])
+        call(["cps_set_oid.py", "-qua", "target", "-oper", "action", set_intf_key, oper_key + '=' + oper_type[args.operation],
+              intf_name_key+'='+ args.intf_name, args.Key+'='+args.Value])
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -78,5 +79,3 @@ if __name__ == '__main__':
         show_intf(args)
     else:
         config_intf(args)
-
-

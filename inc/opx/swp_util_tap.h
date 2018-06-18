@@ -121,6 +121,7 @@ int swp_util_tap_fd_set_add(register swp_util_tap_descr *p, register int descrs,
  * \param[in] set The fd_set that contains the set fds
  * */
 int swp_util_tap_fd_locate_from_set(register swp_util_tap_descr p, register fd_set *set);
+bool swp_util_tap_is_fd_in_tap_fd_set(register swp_util_tap_descr p, int fd);
 
 #ifdef __cplusplus
 }

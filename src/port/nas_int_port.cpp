@@ -23,6 +23,9 @@
 
 #include "hal_if_mapping.h"
 #include "hal_interface_common.h"
+#include "cps_api_object_key.h"
+#include "cps_api_operation.h"
+#include "cps_class_map.h"
 #include "nas_os_interface.h"
 #include "dell-base-if.h"
 #include "dell-base-if-phy.h"
@@ -35,6 +38,7 @@
 #include "event_log.h"
 #include "std_assert.h"
 #include "std_rw_lock.h"
+#include "std_mutex_lock.h"
 #include "std_time_tools.h"
 #include "std_ip_utils.h"
 
@@ -54,10 +58,12 @@
 #define NAS_PKT_COUNT_TO_READ 10
 /* num packets to read from nflog fd */
 #define NAS_NFLOG_PKT_COUNT_TO_READ 1
-
+/* invalid port id to indicate virtual interface */
+#define INVALID_PORT_ID    -1
 
 //Lock for a interface structures
 static std_rw_lock_t ports_lock = PTHREAD_RWLOCK_INITIALIZER;
+static std_mutex_lock_create_static_init_fast(tap_fd_lock);
 
 class CNasPortDetails {
 private:
@@ -299,6 +305,7 @@ static t_std_error tap_fd_deregister_from_evt (swp_util_tap_descr tap) {
 
 
 static bool tap_link_down(swp_util_tap_descr tap) {
+    std_mutex_simple_lock_guard l(&tap_fd_lock);
     //during link down, deregister fd from event poll before closing fd's.
     tap_fd_deregister_from_evt (tap);
     swp_util_close_fds(tap);
@@ -317,14 +324,14 @@ static bool tap_link_up(swp_util_tap_descr tap, CNasPortDetails *npu) {
     for ( ; retry < MAX_RETRY ; ++retry ) {
         if (swp_util_alloc_tap(tap,SWP_UTIL_TYPE_TAP)!=STD_ERR_OK) {
             EV_LOGGING(INTERFACE,ERR,"INT-LINK",
-                    "Can not bring the link up %s had issues opening device (%d)",
+                    "Can not bring the link up %s had issues opening device (%lu)",
                     swp_util_tap_descr_get_name(tap),retry);
             std_usleep(MILLI_TO_MICRO((1<<retry)));
             continue;
         }
         if (tap_fd_register_with_evt(tap, npu) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE,ERR,"INT-LINK",
-                    "Can not bring the link up %s had issues in registering device fd with event handler (%d)",
+                    "Can not bring the link up %s had issues in registering device fd with event handler (%lu)",
                     swp_util_tap_descr_get_name(tap),retry);
             //on event reg failure, deregister fd from event poll for already registered fd's and retry
             tap_fd_deregister_from_evt (tap);
@@ -600,13 +607,25 @@ void process_packets (evutil_socket_t fd, short evt, void *arg)
     npu = details->npu();
     port  = details->port();
 
+    swp_util_tap_descr tap = details->tap();
+
     /* event is received in level-triggered mode,
      * so read data as required and w/o starving other ports
      */
     while (pkt_count < NAS_PKT_COUNT_TO_READ)
     {
-        pkt_len = read(fd, g_vif_pkt_tx.tx_buf, g_vif_pkt_tx.tx_buf_len);
+        {
+            std_mutex_simple_lock_guard l(&tap_fd_lock);
+            if (swp_util_tap_is_fd_in_tap_fd_set(tap, fd) == false)
+            {
+                EV_LOGGING(INTERFACE,ERR, "TAP-TX", "TAP fd closed already. "
+                        "npu:%d, port:%d, fd:%d",
+                        npu, port, fd);
+                break;
+            }
 
+            pkt_len = read(fd, g_vif_pkt_tx.tx_buf, g_vif_pkt_tx.tx_buf_len);
+        }
         if (pkt_len <=0)
         {
             /* no more data to read */
@@ -780,7 +799,7 @@ void nas_int_port_link_change(npu_id_t npu, port_t port,
 }
 
 static t_std_error nas_int_port_create_int(npu_id_t npu, port_t port, const char *name,
-                                           const char *desc, nas_int_type_t type,
+                                           nas_int_type_t type,
                                            bool mapped) {
 
     std_rw_lock_write_guard l(&ports_lock);
@@ -811,21 +830,17 @@ static t_std_error nas_int_port_create_int(npu_id_t npu, port_t port, const char
         details.npu_id = npu;
         details.port_id = port;
         details.tap_id = (npu << 16) + port;
+    } else {
+        details.port_id = static_cast<npu_port_t>(INVALID_PORT_ID);
     }
     details.int_type = type;
     details.port_mapped = mapped;
-
-    if (desc && (strlen(desc) < MAX_INTF_DESC_LEN))  {
-        details.desc = (char*) malloc(sizeof(char) * (strlen(desc) + 1));
-        safestrncpy(details.desc, desc, strlen(desc) + 1);
-    } else {
-        details.desc = NULL;
-    }
+    details.desc = nullptr;
 
     if (dn_hal_if_register(HAL_INTF_OP_REG,&details)!=STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"INT-CREATE", "Not created %d:%d:%s - mapping error",
                         (int)npu,(int)port,name);
-        if (npu != 0 || port != 0) {
+        if (mapped) {
             _ports[npu][port] = _ports.dummy_port();
         }
         _ports.erase(name);
@@ -839,13 +854,12 @@ static t_std_error nas_int_port_create_int(npu_id_t npu, port_t port, const char
 }
 
 t_std_error nas_int_port_create_mapped(npu_id_t npu, port_t port, const char *name,
-                                       const char *desc, nas_int_type_t type) {
-    return nas_int_port_create_int(npu, port, name, desc, type, true);
+                                       nas_int_type_t type) {
+    return nas_int_port_create_int(npu, port, name, type, true);
 }
 
-t_std_error nas_int_port_create_unmapped(const char *name, const char *desc,
-                                        nas_int_type_t type) {
-    return nas_int_port_create_int(0, 0, name, desc, type, false);
+t_std_error nas_int_port_create_unmapped(const char *name, nas_int_type_t type) {
+    return nas_int_port_create_int(0, 0, name, type, false);
 }
 
 t_std_error nas_int_port_delete(const char *name) {
@@ -961,8 +975,6 @@ static t_std_error update_if_reg_info(const char *name, npu_id_t npu, port_t por
         info.tap_id = (npu << 16) + port;
         info.port_mapped = true;
     } else {
-        info.npu_id = 0;
-        info.port_id = 0;
         info.tap_id = 0;
         info.port_mapped = false;
     }
@@ -974,6 +986,31 @@ static t_std_error update_if_reg_info(const char *name, npu_id_t npu, port_t por
     }
 
     return STD_ERR_OK;
+}
+
+static void nas_send_port_oper_event (const char *name , IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t status) {
+
+
+    char buff[CPS_API_MIN_OBJ_LEN];
+    cps_api_object_t obj = cps_api_object_init(buff,sizeof(buff));
+
+
+    if (!cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
+                DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_OBJ,
+                cps_api_qualifier_OBSERVED)) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG",
+                   "Could not translate to logical interface key for intf %s" ,name);
+        return;
+    }
+
+    cps_api_set_key_data(obj,IF_INTERFACES_STATE_INTERFACE_NAME,
+                               cps_api_object_ATTR_T_BIN, name, strlen(name)+1);
+    cps_api_object_attr_add_u32(obj,IF_INTERFACES_STATE_INTERFACE_OPER_STATUS,
+            status);
+
+    EV_LOGGING(INTERFACE,NOTICE,"NAS-INTF-EVENT",
+               "Sending oper event notification for interface %s: oper_status %d", name, status);
+    hal_interface_send_event(obj);
 }
 
 t_std_error nas_int_update_npu_port(const char *name, npu_id_t npu, port_t port,
@@ -988,7 +1025,7 @@ t_std_error nas_int_update_npu_port(const char *name, npu_id_t npu, port_t port,
         EV_LOGGING(INTERFACE, ERR, "INT-UPDATE", "Interface %s could not be connected or disconnected",
                    name);
         EV_LOGGING(INTERFACE, ERR, "INT-UPDATE", "npu %d port %d connect %s \
-                   logical_port mapped %s physical_port used %s",
+ logical_port mapped %s physical_port used %s",
                    npu, port, connect ? "TRUE" : "FALSE",
                    nas_int_port_mapped(name) ? "TRUE" : "FALSE",
                    nas_int_port_used_int(nullptr, npu, port, true) ? "TRUE" : "FALSE");
@@ -1008,6 +1045,8 @@ t_std_error nas_int_update_npu_port(const char *name, npu_id_t npu, port_t port,
         IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t state =
                         ndi_to_cps_oper_type(link_state.oper_status);
         _ports[npu][port]->set_link_state(state);
+        /*  Send event for oper status */
+        nas_send_port_oper_event (name, state);
     } else {
         _ports[npu][port]->set_link_state(IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN);
         _ports[name].init();

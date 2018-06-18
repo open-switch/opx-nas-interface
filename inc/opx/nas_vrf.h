@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Dell Inc.
+ * Copyright (c) 2018 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -25,20 +25,19 @@
 #include "std_error_codes.h"
 #include "cps_api_operation.h"
 
-#define NAS_VRF_NAME_STR_SZ 32
-/* VRF name with VRF-id mapping */
-#define NAS_DEFAULT_VRF_NAME  "default"
-#define NAS_MGMT_VRF_NAME     "management"
-#define NAS_DEFAULT_VRF_ID    0
-#define NAS_MGMT_VRF_ID       1
-
-#define NAS_VRF_LOG_ERR(ID, ...) EV_LOGGING(INTERFACE, ERR, ID, __VA_ARGS__)
-#define NAS_VRF_LOG_INFO(ID, ...) EV_LOGGING(INTERFACE, INFO, ID, __VA_ARGS__)
-#define NAS_VRF_LOG_DEBUG(ID, ...) EV_LOGGING(INTERFACE, DEBUG, ID, __VA_ARGS__)
+#define NAS_VRF_LOG_ERR(ID, ...) EV_LOGGING(VRF, ERR, ID, __VA_ARGS__)
+#define NAS_VRF_LOG_INFO(ID, ...) EV_LOGGING(VRF, INFO, ID, __VA_ARGS__)
+#define NAS_VRF_LOG_DEBUG(ID, ...) EV_LOGGING(VRF, DEBUG, ID, __VA_ARGS__)
 
 t_std_error nas_vrf_object_vrf_init(cps_api_operation_handle_t nas_vrf_cps_handle );
 t_std_error nas_vrf_object_vrf_intf_init(cps_api_operation_handle_t nas_vrf_cps_handle );
 
 t_std_error nas_vrf_process_cps_vrf_msg(cps_api_transaction_params_t * param, size_t ix);
 t_std_error nas_vrf_process_cps_vrf_intf_msg(cps_api_transaction_params_t * param, size_t ix);
+cps_api_return_code_t nas_intf_bind_vrf_rpc_handler (void * context, cps_api_transaction_params_t * param, size_t ix);
+bool nas_vrf_update_vrf_id(const char *vrf_name, bool is_add);
+cps_api_return_code_t nas_vrf_get_intf_info(cps_api_object_list_t list, const char *vrf_name,
+                                            const char *if_name);
+cps_api_return_code_t nas_vrf_get_router_intf_info(cps_api_object_list_t list, const char *if_name);
+t_std_error nas_vrf_create_publish_handle();
 #endif /* NAS_VRF_H_ */

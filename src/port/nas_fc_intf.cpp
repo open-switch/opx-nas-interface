@@ -20,6 +20,7 @@
 
 
 #include "nas_ndi_fc.h"
+#include "nas_ndi_port.h"
 #include "cps_api_events.h"
 #include "cps_api_object_attr.h"
 #include "std_mac_utils.h"
@@ -149,11 +150,11 @@ cps_api_return_code_t nas_cps_set_fc_attr(npu_id_t npu_id, port_t port, cps_api_
         auto func = _set_attr_handlers.find(id);
         if (func ==_set_attr_handlers.end()) continue;
 
-        EV_LOGGING(INTERFACE, DEBUG ,"NAS-FCOE-MAP"," Set attribute for npu %u, port %u, attr %llu ",
+        EV_LOGGING(INTERFACE, DEBUG ,"NAS-FCOE-MAP"," Set attribute for npu %u, port %u, attr %lu ",
               npu_id, port, id);
         t_std_error ret = func->second(npu_id, port, id, obj );
         if (ret != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-FCOE-MAP","Failed to set Attribute  %d for port  %u", id, port);
+            EV_LOGGING(INTERFACE,ERR,"NAS-FCOE-MAP","Failed to set Attribute  %lu for port  %u", id, port);
             /* TODO: Roll back */
             return cps_api_ret_code_ERR;;
         }
@@ -175,15 +176,31 @@ cps_api_return_code_t nas_cps_delete_fc_port(npu_id_t npu_id, port_t port)
 void nas_fc_fill_speed_autoneg_state(npu_id_t npu, port_t port, cps_api_object_t obj)
 {
     nas_fc_id_value_t param;
+    uint64_t speed = 0;
+    t_std_error rc;
+    ndi_intf_link_state_t state;
 
     EV_LOGGING(INTERFACE,DEBUG,"NAS-FCOE-MAP", "nas_fc_fill_speed_autoneg  %d for port  %u", npu, port);
+
     memset(&param, 0, sizeof(nas_fc_id_value_t));
     param.attr_id = IF_INTERFACES_STATE_INTERFACE_SPEED;
-    if ((ndi_get_fc_attr(npu, port, &param, 1)) == STD_ERR_OK) {
-        uint64_t speed = param.value.u64;
-        cps_api_object_attr_delete(obj, IF_INTERFACES_STATE_INTERFACE_SPEED);
-        cps_api_object_attr_add_u64(obj, IF_INTERFACES_STATE_INTERFACE_SPEED, speed);
+
+    rc = ndi_port_link_state_get(npu, port,&state);
+    if (rc == STD_ERR_OK) {
+        if (state.oper_status != ndi_port_OPER_UP) {
+            speed = 0;
+            EV_LOGGING(INTERFACE,DEBUG,"NAS-FCOE-MAP", "nas_fc_fill_speed_autoneg speed set to zero");
+            cps_api_object_attr_delete(obj, IF_INTERFACES_STATE_INTERFACE_SPEED);
+            cps_api_object_attr_add_u64(obj, IF_INTERFACES_STATE_INTERFACE_SPEED, speed);
+        } else {
+            if (ndi_get_fc_attr(npu, port, &param, 1) == STD_ERR_OK) {
+                speed = param.value.u64;
+                cps_api_object_attr_delete(obj, IF_INTERFACES_STATE_INTERFACE_SPEED);
+                cps_api_object_attr_add_u64(obj, IF_INTERFACES_STATE_INTERFACE_SPEED, speed);
+            }
+        }
     }
+
     memset(&param, 0, sizeof(nas_fc_id_value_t));
     param.attr_id = DELL_IF_IF_INTERFACES_STATE_INTERFACE_AUTO_NEGOTIATION;
     if ((ndi_get_fc_attr(npu, port, &param, 1)) == STD_ERR_OK) {
@@ -252,7 +269,7 @@ t_std_error _get_generic_mac (npu_id_t npu, port_t port, cps_api_attr_id_t attr,
     cps_api_object_attr_add(obj, BASE_IF_FC_IF_INTERFACES_INTERFACE_INGRESS_SRC_MAC,
             mac_str, strlen(mac_str)+1);
 
-    EV_LOGGING(INTERFACE, DEBUG, "NAS-FCOE-MAP", "_get_generic_mac  mac address %s,  len %d",
+    EV_LOGGING(INTERFACE, DEBUG, "NAS-FCOE-MAP", "_get_generic_mac  mac address %s,  len %lu",
                 mac_str, strlen(mac_str));
     return STD_ERR_OK;
 
@@ -303,7 +320,7 @@ static const std::unordered_map<cps_api_attr_id_t,
 void nas_fc_fill_intf_attr(npu_id_t npu, port_t port, cps_api_object_t obj)
 {
     for (auto it = _get_attr_handlers.begin(); it != _get_attr_handlers.end() ; ++it) {
-        EV_LOGGING(INTERFACE, ERR ,"NAS-FCOE-MAP"," Get attribute for npu %u, port %u, attr %llu ",
+        EV_LOGGING(INTERFACE, ERR ,"NAS-FCOE-MAP"," Get attribute for npu %u, port %u, attr %lu ",
               npu, port, it->first);
         it->second(npu, port, it->first, obj);
 

@@ -24,6 +24,7 @@
 #include "cps_api_object_category.h"
 #include "cps_api_events.h"
 #include "hal_interface_defaults.h"
+#include "hal_if_mapping.h"
 #include "cps_class_map.h"
 #include "cps_api_object_key.h"
 #include "dell-base-if-phy.h"
@@ -477,9 +478,12 @@ static bool create_logical_interface(uint32_t fp_port, uint32_t subport,
                                     cps_api_qualifier_TARGET);
     cps_api_object_attr_add_u32(obj, DELL_BASE_IF_CMN_SET_INTERFACE_INPUT_OPERATION, 1);
     char name_buf[20];
+    char desc_buf[MAX_INTF_DESC_LEN];
     sprintf(name_buf, "e101-%03d-%d", fp_port, subport);
+    sprintf(desc_buf, "Interface description for %s", name_buf);
     cps_api_object_attr_add(obj, IF_INTERFACES_INTERFACE_NAME, name_buf,
                             strlen(name_buf) + 1);
+    cps_api_object_attr_add(obj, IF_INTERFACES_INTERFACE_DESCRIPTION, desc_buf, strlen(desc_buf) + 1);
     cps_api_object_attr_add_u32(obj, BASE_IF_PHY_HARDWARE_PORT_FRONT_PANEL_PORT, fp_port);
     cps_api_object_attr_add_u32(obj, BASE_IF_PHY_HARDWARE_PORT_SUBPORT_ID, subport);
     cps_api_object_attr_add_u32(obj, BASE_IF_PHY_IF_INTERFACES_INTERFACE_NPU_ID, 0);

@@ -54,6 +54,7 @@
 #include "nas_ndi_port.h"
 #include "nas_switch.h"
 #include "nas_int_com_utils.h"
+#include "cps_api_object_tools.h"
 
 #include <inttypes.h>
 #include <unordered_map>
@@ -79,16 +80,87 @@ struct _port_cache {
     uint32_t media_type;
     BASE_IF_SUPPORTED_AUTONEG_t supported_autoneg;
     BASE_IF_SPEED_t configured_speed = BASE_IF_SPEED_0MBPS;
+    BASE_CMN_FEC_TYPE_t fec_mode;
+    BASE_CMN_FILTER_TYPE_t vlan_filter_type;
 
     _port_cache() : mode( BASE_IF_MODE_MODE_NONE),
                     media_type(PLATFORM_MEDIA_TYPE_AR_POPTICS_NOTPRESENT),
-                    supported_autoneg(BASE_IF_SUPPORTED_AUTONEG_NOT_SUPPORTED){}
+                    supported_autoneg(BASE_IF_SUPPORTED_AUTONEG_NOT_SUPPORTED),
+                    fec_mode(BASE_CMN_FEC_TYPE_OFF),
+                    vlan_filter_type(BASE_CMN_FILTER_TYPE_ENABLE){}
 };
 
 using NasLogicalPortMap = std::unordered_map<_npu_port_t, _port_cache, _npu_port_hash_t>;
 static NasLogicalPortMap _logical_port_tbl;
 static std_rw_lock_t _logical_port_lock;
 
+static auto _error_string_map_table = new std::unordered_map<int, std::string>
+{
+    /* For Error ID's in PRIV object, map SAI Error code to STD Error Codes
+     * in _sai_port_attr_set_or_get () and add the corresponding Error Code &
+     * respective error string here */
+    {e_std_err_code_CFG, "Configuration Failure"},
+    {e_std_err_code_PARAM, "Invalid Input Paramter"},
+    {e_std_err_code_NOMEM, "No Memory"},
+    {e_std_err_code_NORESOURCE, "No more resource"},
+    {e_std_err_code_NOTSUPPORTED, "Operation not supported"}
+};
+
+
+static void set_cps_obj_return_attrs(cps_api_object_t obj, t_std_error rc,
+                                     cps_api_attr_id_t attr);
+
+static t_std_error _logical_port_tbl_delete(npu_id_t npu,port_t port){
+    _npu_port_t npu_port = {(uint_t)npu, (uint_t)port};
+    std_rw_lock_write_guard g(&_logical_port_lock);
+    auto it = _logical_port_tbl.find(npu_port);
+    if (it == _logical_port_tbl.end()) {
+        return STD_ERR(INTERFACE, FAIL, 0);
+    } else {
+        _logical_port_tbl.erase(it);
+    }
+    return STD_ERR_OK;
+}
+
+static t_std_error nas_port_fec_get(npu_id_t npu, port_t port, BASE_CMN_FEC_TYPE_t *fec_mode)
+{
+    _npu_port_t npu_port = {(uint_t)npu, (uint_t)port};
+    std_rw_lock_read_guard g(&_logical_port_lock);
+    auto it = _logical_port_tbl.find(npu_port);
+    if (it != _logical_port_tbl.end()) {
+        *fec_mode = (BASE_CMN_FEC_TYPE_t) it->second.fec_mode;
+        return STD_ERR_OK;
+    }
+    return STD_ERR(INTERFACE, FAIL, 0);
+}
+
+static t_std_error nas_port_fec_set(npu_id_t npu, port_t port, BASE_CMN_FEC_TYPE_t fec_mode)
+{
+    _npu_port_t npu_port  = {(uint_t)npu, (uint_t)port};
+    std_rw_lock_write_guard g(&_logical_port_lock);
+    _logical_port_tbl[npu_port].fec_mode = fec_mode;
+    return STD_ERR_OK;
+}
+
+static t_std_error nas_port_vlan_filter_get(npu_id_t npu, port_t port, BASE_CMN_FILTER_TYPE_t *filter_type)
+{
+    _npu_port_t npu_port = {(uint_t)npu, (uint_t)port};
+    std_rw_lock_read_guard g(&_logical_port_lock);
+    auto it = _logical_port_tbl.find(npu_port);
+    if (it != _logical_port_tbl.end()) {
+        *filter_type = (BASE_CMN_FILTER_TYPE_t) it->second.vlan_filter_type;
+        return STD_ERR_OK;
+    }
+    return STD_ERR(INTERFACE, FAIL, 0);
+}
+
+static t_std_error nas_port_vlan_filter_set(npu_id_t npu, port_t port, BASE_CMN_FILTER_TYPE_t filter_type)
+{
+    _npu_port_t npu_port  = {(uint_t)npu, (uint_t)port};
+    std_rw_lock_write_guard g(&_logical_port_lock);
+    _logical_port_tbl[npu_port].vlan_filter_type = filter_type;
+    return STD_ERR_OK;
+}
 
 // TODO move this into common interface utility file
 static bool if_data_from_obj(obj_intf_cat_t obj_cat, cps_api_object_t o, interface_ctrl_t& i) {
@@ -172,6 +244,14 @@ static void _if_fill_in_npu_speed_attr(npu_id_t npu, port_t port, nas_int_type_t
         if (ndi_port_speed_get_nocheck(npu,port,&speed) == STD_ERR_OK) {
             cps_api_object_attr_add_u32(obj,DELL_IF_IF_INTERFACES_STATE_INTERFACE_NPU_SPEED, speed);
         }
+    }
+}
+
+static void _if_fill_in_max_speed_attr(npu_id_t npu, port_t port, cps_api_object_t obj)
+{
+    BASE_IF_SPEED_t speed;
+    if (nas_int_get_phy_speed(npu, port, &speed) == STD_ERR_OK) {
+        cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_STATE_INTERFACE_MAX_SPEED, speed);
     }
 }
 
@@ -276,7 +356,6 @@ static void _if_fill_in_speed_duplex_attrs(npu_id_t npu, port_t port, cps_api_ob
     }
 }
 
-
 static cps_api_return_code_t _if_fill_in_npu_attrs(npu_id_t npu, port_t port,
                                     nas_int_type_t int_type, cps_api_object_t obj) {
     IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_t state;
@@ -302,7 +381,7 @@ static cps_api_return_code_t _if_fill_in_npu_attrs(npu_id_t npu, port_t port,
     }
 
     BASE_CMN_FEC_TYPE_t fec_mode;
-    if (ndi_port_fec_get(npu, port, &fec_mode) == STD_ERR_OK) {
+    if (STD_ERR_OK == nas_port_fec_get(npu, port, &fec_mode)) {
         cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_FEC, fec_mode);
     }
 
@@ -311,8 +390,12 @@ static cps_api_return_code_t _if_fill_in_npu_attrs(npu_id_t npu, port_t port,
         cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_OUI, oui);
     }
 
+    BASE_CMN_FILTER_TYPE_t filter_mode;
+    if (STD_ERR_OK == nas_port_vlan_filter_get(npu, port, &filter_mode)) {
+        cps_api_object_attr_add_u32(obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_VLAN_FILTER, filter_mode);
+    }
+
     _if_fill_in_speed_duplex_attrs(npu,port, obj);
-    _if_fill_in_supported_speeds_attrs(npu, port, int_type, obj);
     _if_fill_in_eee_attrs(npu, port, obj);
 
     return cps_api_ret_code_OK;
@@ -339,7 +422,6 @@ static cps_api_return_code_t _if_get_prev_from_cache(npu_id_t npu, port_t port,
     }
     return _if_fill_in_npu_attrs(npu,port,nas_int_type_PORT, obj);
 }
-
 
 static cps_api_return_code_t if_cpu_port_get (void * context, cps_api_get_params_t * param,
         size_t key_ix) {
@@ -438,13 +520,13 @@ static cps_api_return_code_t if_get (void * context, cps_api_get_params_t * para
                         continue;
                     }
                 }
-                cps_api_object_attr_add_u32(object,BASE_IF_PHY_IF_INTERFACES_INTERFACE_NPU_ID,_port.npu_id);
-                cps_api_object_attr_add_u32(object,BASE_IF_PHY_IF_INTERFACES_INTERFACE_PORT_ID,_port.port_id);
 
                 cps_api_object_attr_add(object,IF_INTERFACES_INTERFACE_TYPE,
                                                 (const void *)if_type, strlen(if_type)+1);
 
                 if (_port.port_mapped) {
+                    cps_api_object_attr_add_u32(object,BASE_IF_PHY_IF_INTERFACES_INTERFACE_NPU_ID,_port.npu_id);
+                    cps_api_object_attr_add_u32(object,BASE_IF_PHY_IF_INTERFACES_INTERFACE_PORT_ID,_port.port_id);
                     if (_port.int_type == nas_int_type_FC) {
                         nas_fc_fill_intf_attr(_port.npu_id, _port.port_id, object);
                     } else {
@@ -501,9 +583,20 @@ static void _if_fill_in_npu_intf_state(npu_id_t npu_id, npu_port_t port_id, nas_
         cps_api_object_attr_add_u32(obj,IF_INTERFACES_STATE_INTERFACE_OPER_STATUS,oper_state);
     }
 
-    BASE_CMN_FEC_TYPE_t fec_mode;
-    if (ndi_port_fec_get(npu_id, port_id, &fec_mode) == STD_ERR_OK) {
-        cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_STATE_INTERFACE_FEC, fec_mode);
+    BASE_CMN_FEC_TYPE_t fec_configured;
+    if (nas_port_fec_get(npu_id, port_id, &fec_configured) == STD_ERR_OK) {
+        cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_STATE_INTERFACE_CONFIGURED_FEC, fec_configured);
+    }
+
+    BASE_CMN_FEC_TYPE_t fec_observed;
+    if (ndi_port_fec_get(npu_id, port_id, &fec_observed) == STD_ERR_OK) {
+        cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_STATE_INTERFACE_FEC, fec_observed);
+    }
+
+    BASE_CMN_FILTER_TYPE_t vlan_filter_observed;
+    if (ndi_port_vlan_filter_get (npu_id, port_id, &vlan_filter_observed) == STD_ERR_OK) {
+        cps_api_object_attr_add_u32(obj, DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_VLAN_FILTER,
+                                    vlan_filter_observed);
     }
 
     uint32_t oui;
@@ -542,11 +635,13 @@ static cps_api_return_code_t if_state_get (void * context, cps_api_get_params_t 
         cps_api_object_attr_add_u32(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
                                     _port.if_index);
     }
+
+    // Taking the pointer to if type once input filt object is done with all modifications
     cps_api_object_attr_t type_attr = cps_api_object_attr_get(filt, IF_INTERFACES_STATE_INTERFACE_TYPE);
+
     char *req_if_type = NULL;
     bool have_type_filter = false;
     if (type_attr != nullptr) {
-        // Taking the pointer to if type once input filt object is done with all modifications
         req_if_type = (char *)cps_api_object_attr_data_bin(type_attr);
         have_type_filter = true;
     }
@@ -585,11 +680,14 @@ static cps_api_return_code_t if_state_get (void * context, cps_api_get_params_t 
                 }
                 cps_api_set_key_data(object,IF_INTERFACES_STATE_INTERFACE_NAME,
                                cps_api_object_ATTR_T_BIN, _port.if_name, strlen(_port.if_name)+1);
-                _if_fill_in_npu_intf_state(_port.npu_id, _port.port_id, _port.int_type, object);
-                _if_fill_in_supported_speeds_attrs(_port.npu_id,_port.port_id, _port.int_type, object);
-                _if_fill_in_eee_attrs(_port.npu_id,_port.port_id,object);
-                _if_fill_in_npu_speed_attr(_port.npu_id,_port.port_id, _port.int_type, object);
-                _if_fill_in_supported_autoneg_attr(_port.npu_id,_port.port_id, object);
+                if (_port.port_mapped) {
+                    _if_fill_in_npu_intf_state(_port.npu_id, _port.port_id, _port.int_type, object);
+                    _if_fill_in_supported_speeds_attrs(_port.npu_id,_port.port_id, _port.int_type, object);
+                    _if_fill_in_eee_attrs(_port.npu_id,_port.port_id,object);
+                    _if_fill_in_npu_speed_attr(_port.npu_id,_port.port_id, _port.int_type, object);
+                    _if_fill_in_supported_autoneg_attr(_port.npu_id,_port.port_id, object);
+                    _if_fill_in_max_speed_attr(_port.npu_id, _port.port_id, object);
+                }
                 /*  Add if index with right key */
                 cps_api_object_attr_add_u32(object,IF_INTERFACES_STATE_INTERFACE_IF_INDEX,
                                  _port.if_index);
@@ -620,6 +718,97 @@ static cps_api_return_code_t loopback_if_state_set(void * context, cps_api_trans
     return cps_api_ret_code_ERR;
 }
 
+static cps_api_return_code_t loopback_if_state_get (void * context, cps_api_get_params_t * param,
+        size_t key_ix) {
+
+    cps_api_object_t filt = cps_api_object_list_get(param->filters,key_ix);
+    cps_api_object_attr_t ifix = cps_api_object_attr_get(filt, IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
+    cps_api_object_attr_t name = cps_api_get_key_data(filt,IF_INTERFACES_STATE_INTERFACE_NAME);
+    bool if_type_added = false;
+
+    if (ifix != nullptr) {
+        /*  Call os API with interface object  */
+        cps_api_object_attr_add_u32(filt,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
+                                 cps_api_object_attr_data_u32(ifix));
+        cps_api_object_attr_delete(filt,IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
+    }
+
+    if (ifix == nullptr && name != NULL) {
+        interface_ctrl_t _port;
+        if (!if_data_from_obj(obj_INTF_STATE, filt,_port)) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-INT-GET", "Wrong interface name or interface not present %s",_port.if_name);
+            return cps_api_ret_code_ERR;
+        }
+        cps_api_object_attr_add_u32(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
+                                    _port.if_index);
+    } else if (ifix == nullptr && name == nullptr) {
+        cps_api_object_attr_add_u32(filt, BASE_IF_LINUX_IF_INTERFACES_INTERFACE_DELL_TYPE,
+                                    BASE_CMN_INTERFACE_TYPE_LOOPBACK);
+        if_type_added = true;
+    }
+
+    t_std_error rc = nas_os_get_interface(filt,param->list);
+
+    if (if_type_added) {
+        cps_api_object_attr_delete(filt, BASE_IF_LINUX_IF_INTERFACES_INTERFACE_DELL_TYPE);
+    }
+
+    if (rc != STD_ERR_OK) {
+        return cps_api_ret_code_ERR;
+    }
+
+    size_t mx = cps_api_object_list_size(param->list);
+    size_t ix = 0;
+
+    while (ix < mx) {
+        cps_api_object_t object = cps_api_object_list_get(param->list,ix);
+        cps_api_object_attr_t ifix = cps_api_object_attr_get(object, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+
+        if (ifix == nullptr) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-INT-GET", "Could not find ifindex in object %d", ix);
+            cps_api_object_list_remove(param->list, ix);
+            cps_api_object_delete(object);
+            --mx;
+            continue;
+        }
+
+        cps_api_key_from_attr_with_qual(cps_api_object_key(object), DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_OBJ,
+                cps_api_qualifier_OBSERVED);
+        interface_ctrl_t _port;
+        memset(&_port,0,sizeof(_port));
+        _port.if_index = cps_api_object_attr_data_u32(ifix);
+        _port.q_type = HAL_INTF_INFO_FROM_IF;
+
+        if(dn_hal_get_interface_info(&_port) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-INT-GET", "Failed to get registered info for ifindex %d", _port.if_index);
+            cps_api_object_list_remove(param->list, ix);
+            cps_api_object_delete(object);
+            --mx;
+            continue;
+        }
+
+        cps_api_set_key_data(object,IF_INTERFACES_STATE_INTERFACE_NAME,
+                       cps_api_object_ATTR_T_BIN, _port.if_name, strlen(_port.if_name)+1);
+        /*  Add if index with right key */
+        cps_api_object_attr_add_u32(object,IF_INTERFACES_STATE_INTERFACE_IF_INDEX,
+                         _port.if_index);
+        cps_api_object_attr_delete(object, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+        cps_api_object_attr_delete(object, IF_INTERFACES_INTERFACE_NAME);
+        cps_api_object_attr_add(object,IF_INTERFACES_STATE_INTERFACE_TYPE,
+                        (const void *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_SOFTWARELOOPBACK,
+                        strlen(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_SOFTWARELOOPBACK)+1);
+        ++ ix;
+    }
+
+    return cps_api_ret_code_OK;
+}
+
+static cps_api_return_code_t if_state_set(void * context, cps_api_transaction_params_t * param,size_t ix) {
+
+    // not supposed to be called. return error
+    return cps_api_ret_code_ERR;
+}
+
 static cps_api_return_code_t _set_attr_fail (npu_id_t npu, port_t port, cps_api_object_t obj) {
     //ignore these..
     return cps_api_ret_code_OK;
@@ -635,11 +824,13 @@ static cps_api_return_code_t _set_attr_tagging_mode (npu_id_t npu, port_t port, 
         return cps_api_ret_code_ERR;
     }
 
-    if (ndi_port_set_untagged_port_attrib(npu,port,
-            (BASE_IF_PHY_IF_INTERFACES_INTERFACE_TAGGING_MODE_t)cps_api_object_attr_data_u32(attr))==STD_ERR_OK) {
-        return cps_api_ret_code_OK;
+    t_std_error rc;
+    if ((rc = ndi_port_set_untagged_port_attrib(npu,port,
+            (BASE_IF_PHY_IF_INTERFACES_INTERFACE_TAGGING_MODE_t)cps_api_object_attr_data_u32(attr)))!=STD_ERR_OK) {
+        set_cps_obj_return_attrs(obj, rc, BASE_IF_PHY_IF_INTERFACES_INTERFACE_TAGGING_MODE);
+        return cps_api_ret_code_ERR;
     }
-    return cps_api_ret_code_ERR;
+    return cps_api_ret_code_OK;
 }
 
 static cps_api_return_code_t _set_attr_mac(npu_id_t npu, port_t port, cps_api_object_t obj) {
@@ -666,6 +857,8 @@ static cps_api_return_code_t _set_attr_mac(npu_id_t npu, port_t port, cps_api_ob
 
 static cps_api_return_code_t _set_attr_desc(npu_id_t npu, port_t port, cps_api_object_t obj) {
     cps_api_object_attr_t attr = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_DESCRIPTION);
+    interface_ctrl_t intf;
+
     if (attr == nullptr) {
         return cps_api_ret_code_ERR;
     }
@@ -673,13 +866,29 @@ static cps_api_return_code_t _set_attr_desc(npu_id_t npu, port_t port, cps_api_o
     /* TODO OS Update for interface description? */
 
     cps_api_object_attr_t _ifix = cps_api_object_attr_get(obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
-    if ((_ifix == nullptr)) {
+    if (_ifix == nullptr) {
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-SET","update intf desc failure for npu %d port %d", npu,port);
         return cps_api_ret_code_ERR;
     }
-    hal_ifindex_t if_index = cps_api_object_attr_data_u32(_ifix);
-    char *desc = (char *)cps_api_object_attr_data_bin(attr);
-    return (dn_hal_update_intf_desc(if_index, desc));
+
+    memset(&intf, 0, sizeof(intf));
+    intf.npu_id = npu;
+    intf.port_id = port;
+    intf.q_type = HAL_INTF_INFO_FROM_PORT;
+
+    if (dn_hal_get_interface_info(&intf)!=STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-IF-SET","Error getting interface control block for npu %d port %d", npu,port);
+        return cps_api_ret_code_ERR;
+    }
+
+    intf.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+    const char *desc = (const char *)cps_api_object_attr_data_bin(attr);
+    if (dn_hal_update_intf_desc(&intf, desc) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-IF-SET","Error error updating description npu %d port %d", npu,port);
+        return cps_api_ret_code_ERR;
+    }
+
+    return cps_api_ret_code_OK;
 }
 
 static cps_api_return_code_t _set_attr_mtu (npu_id_t npu, port_t port, cps_api_object_t obj) {
@@ -694,12 +903,14 @@ static cps_api_return_code_t _set_attr_mtu (npu_id_t npu, port_t port, cps_api_o
 
     /* Adjust LINK HDR size while setting MTU in the NPU */
     uint_t mtu = cps_api_object_attr_data_u32(attr);
-    if (ndi_port_mtu_set(npu,port, mtu)!=STD_ERR_OK) {
+    t_std_error rc;
+    if ((rc = ndi_port_mtu_set(npu,port, mtu)) != STD_ERR_OK) {
         if (ndi_port_mtu_get(npu,port,&mtu)==STD_ERR_OK) {
             cps_api_object_attr_delete(obj,DELL_IF_IF_INTERFACES_INTERFACE_MTU);
             cps_api_object_attr_add_u32(obj,DELL_IF_IF_INTERFACES_INTERFACE_MTU,mtu);
             nas_os_interface_set_attribute(obj,DELL_IF_IF_INTERFACES_INTERFACE_MTU);
         }
+        set_cps_obj_return_attrs(obj, rc, DELL_IF_IF_INTERFACES_INTERFACE_MTU);
         return cps_api_ret_code_ERR;
     }
 
@@ -718,8 +929,10 @@ static cps_api_return_code_t _set_attr_eee (npu_id_t npu, port_t port, cps_api_o
     /* Enable or disable the EEE (802.3az) feature */
 
     if ((state == 0) || (state == 1)) {
-        if (ndi_port_eee_set(npu, port, state) != STD_ERR_OK) {
+        t_std_error rc;
+        if ((rc = ndi_port_eee_set(npu, port, state)) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE, ERR, "NAS-EEE", "Failed to set %d:%d to state %d", npu, port, (int) state);
+            set_cps_obj_return_attrs(obj, rc, DELL_IF_IF_INTERFACES_INTERFACE_EEE);
             return cps_api_ret_code_ERR;
         }
     } else {
@@ -753,6 +966,7 @@ static cps_api_return_code_t _set_attr_up (npu_id_t npu, port_t port, cps_api_ob
         cps_api_object_attr_delete(obj,IF_INTERFACES_INTERFACE_ENABLED);
         cps_api_object_attr_add_u32(obj,IF_INTERFACES_INTERFACE_ENABLED,revert);
         nas_os_interface_set_attribute(obj,IF_INTERFACES_INTERFACE_ENABLED);
+        set_cps_obj_return_attrs(obj, rc, IF_INTERFACES_INTERFACE_ENABLED);
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","NPU update for npu %d port %d to %d failed (%d)",
                 npu,port,state,rc);
     }
@@ -804,9 +1018,11 @@ static cps_api_return_code_t _set_phy_media(npu_id_t npu, port_t port, cps_api_o
     }
     PLATFORM_MEDIA_TYPE_t media_type = (PLATFORM_MEDIA_TYPE_t)cps_api_object_attr_data_u32(_phy_media);
 
-    if (ndi_port_media_type_set(npu, port, media_type)!=STD_ERR_OK) {
+    t_std_error rc;
+    if ((rc = ndi_port_media_type_set(npu, port, media_type)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set media_type %d for "
                "npu %d port %d",media_type,npu,port);
+        set_cps_obj_return_attrs(obj, rc, BASE_IF_PHY_IF_INTERFACES_INTERFACE_PHY_MEDIA);
         return cps_api_ret_code_ERR;
     }
 
@@ -827,9 +1043,11 @@ static cps_api_return_code_t _set_hw_profile (npu_id_t npu, port_t port, cps_api
 
     uint32_t hw_profile = cps_api_object_attr_data_uint(_hw_profile);
 
-    if (ndi_port_hw_profile_set(npu, port, hw_profile)!=STD_ERR_OK) {
+    t_std_error rc;
+    if ((rc = ndi_port_hw_profile_set(npu, port, hw_profile)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set hw_profile %d for "
                "npu %d port %d", hw_profile, npu, port);
+        set_cps_obj_return_attrs(obj, rc, BASE_IF_PHY_IF_INTERFACES_INTERFACE_HW_PROFILE);
         return cps_api_ret_code_ERR;
     }
     EV_LOGGING(INTERFACE,INFO,"NAS-IF-REG"," set hw profile to %d for "
@@ -847,9 +1065,11 @@ static cps_api_return_code_t _set_identification_led (npu_id_t npu, port_t port,
 
     bool state = (bool) cps_api_object_attr_data_uint(_ident_led);
 
-    if (ndi_port_identification_led_set(npu, port, state)!=STD_ERR_OK) {
+    t_std_error rc;
+    if ((rc = ndi_port_identification_led_set(npu, port, state)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set identification led state %d for "
                "npu %d port %d", state, npu, port);
+        set_cps_obj_return_attrs(obj, rc, BASE_IF_PHY_IF_INTERFACES_INTERFACE_IDENTIFICATION_LED);
         return cps_api_ret_code_ERR;
     }
     return cps_api_ret_code_OK;
@@ -866,9 +1086,11 @@ static cps_api_return_code_t _set_speed(npu_id_t npu, port_t port, cps_api_objec
     }
     BASE_IF_SPEED_t speed = (BASE_IF_SPEED_t)cps_api_object_attr_data_u32(_speed);
 
-    if (ndi_port_speed_set(npu,port,speed)!=STD_ERR_OK) {
+    t_std_error rc;
+    if ((rc = ndi_port_speed_set(npu,port,speed)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set speed %d for "
                "npu %d port %d",speed,npu,port);
+        set_cps_obj_return_attrs(obj, rc, DELL_IF_IF_INTERFACES_INTERFACE_SPEED);
         return cps_api_ret_code_ERR;
     }
     _logical_port_tbl[npu_port].configured_speed = speed;
@@ -900,9 +1122,11 @@ static cps_api_return_code_t _set_auto_neg(npu_id_t npu, port_t port, cps_api_ob
     }
     bool enable = (bool) cps_api_object_attr_data_uint(autoneg_attr);
 
-    if (ndi_port_auto_neg_set(npu,port,enable)!=STD_ERR_OK) {
+    t_std_error rc;
+    if ((rc = ndi_port_auto_neg_set(npu,port,enable)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set auto negotiation to %d for "
                "npu %d port %d",enable,npu,port);
+        set_cps_obj_return_attrs(obj, rc, DELL_IF_IF_INTERFACES_INTERFACE_AUTO_NEGOTIATION);
         return cps_api_ret_code_ERR;
     }
     EV_LOGGING(INTERFACE,INFO,"NAS-IF-REG"," set auto negotiation to %d for "
@@ -920,9 +1144,11 @@ static cps_api_return_code_t _set_duplex_mode(npu_id_t npu, port_t port, cps_api
     BASE_CMN_DUPLEX_TYPE_t mode = (BASE_CMN_DUPLEX_TYPE_t)
                                        cps_api_object_attr_data_u32(duplex_mode);
 
-    if (ndi_port_duplex_set(npu,port,mode)!=STD_ERR_OK) {
+    t_std_error rc;
+    if ((rc = ndi_port_duplex_set(npu,port,mode)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set duplex mode to %d for "
                "npu %d port %d",mode,npu,port);
+        set_cps_obj_return_attrs(obj, rc, DELL_IF_IF_INTERFACES_INTERFACE_DUPLEX);
         return cps_api_ret_code_ERR;
     }
     return cps_api_ret_code_OK;
@@ -952,11 +1178,15 @@ static cps_api_return_code_t _set_attr_fec(npu_id_t npu, port_t port, cps_api_ob
     BASE_CMN_FEC_TYPE_t fec_mode = (BASE_CMN_FEC_TYPE_t)
                                        cps_api_object_attr_data_u32(fec_attr);
 
-    if (ndi_port_fec_set(npu, port, fec_mode) != STD_ERR_OK) {
+    t_std_error rc;
+    if ((rc = ndi_port_fec_set(npu, port, fec_mode)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-UPDATE","Failed to set FEC mode to %d for "
                "npu %d port %d", fec_mode, npu, port);
+        set_cps_obj_return_attrs(obj, rc, DELL_IF_IF_INTERFACES_INTERFACE_FEC);
         return cps_api_ret_code_ERR;
     }
+
+    nas_port_fec_set(npu, port, fec_mode);
     return cps_api_ret_code_OK;
 }
 
@@ -969,11 +1199,36 @@ static cps_api_return_code_t _set_attr_oui(npu_id_t npu, port_t port, cps_api_ob
     }
     uint32_t oui = cps_api_object_attr_data_u32(oui_attr);
 
-    if (ndi_port_oui_set(npu, port, oui) != STD_ERR_OK) {
+    t_std_error rc;
+    if ((rc = ndi_port_oui_set(npu, port, oui)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-UPDATE","Failed to set OUI to %d for "
                "npu %d port %d", oui, npu, port);
+        set_cps_obj_return_attrs(obj, rc, DELL_IF_IF_INTERFACES_INTERFACE_OUI);
         return cps_api_ret_code_ERR;
     }
+    return cps_api_ret_code_OK;
+}
+
+static cps_api_return_code_t _set_attr_vlan_filter (npu_id_t npu, port_t port, cps_api_object_t obj) {
+    cps_api_object_attr_t vlan_filter_attr = cps_api_object_attr_get(obj,
+                                        DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_VLAN_FILTER);
+    t_std_error rc;
+
+    if (vlan_filter_attr == nullptr) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-IF-UPDATE", "No VLAN Filter type attribute");
+        return cps_api_ret_code_ERR;
+    }
+    BASE_CMN_FILTER_TYPE_t filter_type = (BASE_CMN_FILTER_TYPE_t)
+                                       cps_api_object_attr_data_u32(vlan_filter_attr);
+
+    if ((rc = ndi_port_vlan_filter_set(npu, port, filter_type)) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-IF-UPDATE","Failed to set VLAN Filter type to %d for "
+               "npu %d port %d", filter_type, npu, port);
+        set_cps_obj_return_attrs(obj, rc, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_VLAN_FILTER);
+        return cps_api_ret_code_ERR;
+    }
+
+    nas_port_vlan_filter_set(npu, port, filter_type);
     return cps_api_ret_code_OK;
 }
 
@@ -998,7 +1253,8 @@ static const std::unordered_map<cps_api_attr_id_t,
         { DELL_IF_IF_INTERFACES_INTERFACE_EEE, {_set_attr_eee, "eee"} },
         { DELL_IF_IF_INTERFACES_INTERFACE_FEC, {_set_attr_fec, "fec"} },
         { DELL_IF_IF_INTERFACES_INTERFACE_OUI, {_set_attr_oui, "oui"} },
-        { IF_INTERFACES_INTERFACE_DESCRIPTION, {_set_attr_desc, "description"}}
+        { IF_INTERFACES_INTERFACE_DESCRIPTION, {_set_attr_desc, "description"}},
+        { DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_VLAN_FILTER, {_set_attr_vlan_filter, "vlan_filter"}}
 };
 
 static void remove_same_values(cps_api_object_t now, cps_api_object_t req) {
@@ -1015,15 +1271,6 @@ static void remove_same_values(cps_api_object_t now, cps_api_object_t req) {
         if (id == IF_INTERFACES_INTERFACE_ENABLED) continue; // temp fix AR3331
         if (id == IF_INTERFACES_INTERFACE_NAME) continue;
         if (id == DELL_IF_IF_INTERFACES_INTERFACE_SPEED) continue; // configuring speed when port is in negotiated mode
-        if (id == DELL_IF_IF_INTERFACES_INTERFACE_FEC) {
-            BASE_CMN_FEC_TYPE_t fec_mode = (BASE_CMN_FEC_TYPE_t)
-                                       cps_api_object_attr_data_u32(new_val);
-            if (fec_mode == BASE_CMN_FEC_TYPE_OFF) {
-                // if link is down, SAI always returns FEC off without giving actual FEC configuration
-                // so we need to actually set it to off to make link up if peer is FEC off
-                continue;
-            }
-        }
         cps_api_object_attr_delete(req,id);
     }
 }
@@ -1056,9 +1303,16 @@ static cps_api_return_code_t _if_delete(cps_api_object_t req_if, cps_api_object_
                    _port.if_name);
         return cps_api_ret_code_ERR;
     }
-    //force the state to be down at the time of interface delete since there will
-    //be no way to do this after the interface is deleted
-    ndi_port_admin_state_set(_port.npu_id,_port.port_id, false);
+
+    if (_port.port_mapped) {
+        if(_logical_port_tbl_delete(_port.npu_id,_port.port_id) != STD_ERR_OK){
+            EV_LOGGING(INTERFACE, ERR, "NAS-IF-DELETE", "Failed to delete logical cache for interface %s port %d",
+                               _port.if_name, _port.port_id);
+        }
+        //force the state to be down at the time of interface delete since there will
+        //be no way to do this after the interface is deleted
+        ndi_port_admin_state_set(_port.npu_id,_port.port_id, false);
+    }
 
     if(cps_api_db_commit_one(cps_api_oper_DELETE,req_if,nullptr,false)!= cps_api_ret_code_OK){
         EV_LOGGING(INTERFACE,ERR,"NAS-INT-SET","Failed to write physical interface object to db");
@@ -1085,6 +1339,66 @@ static void if_rollback(cps_api_object_t rollback,interface_ctrl_t _port) {
             EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to rollback Attribute %s for interface %s",
                        func->second.second, _port.if_name);
     }
+}
+
+static cps_api_return_code_t _intf_state_publish(npu_id_t npu_id, npu_port_t port_id,
+        cps_api_object_t req_if)
+{
+    cps_api_object_attr_t _ifname_attr = cps_api_object_attr_get(req_if,
+            IF_INTERFACES_INTERFACE_NAME);
+    cps_api_object_attr_t _fec_attr = cps_api_object_attr_get(req_if,
+            DELL_IF_IF_INTERFACES_INTERFACE_FEC);
+    cps_api_object_attr_t _autoneg_attr = cps_api_object_attr_get(req_if,
+            DELL_IF_IF_INTERFACES_INTERFACE_AUTO_NEGOTIATION);
+
+    if(_fec_attr == nullptr && _autoneg_attr == nullptr) {
+        return cps_api_ret_code_OK;
+    }
+
+    if(_ifname_attr != nullptr) {
+        cps_api_object_guard _intf_state_gd(cps_api_obj_tool_create(cps_api_qualifier_OBSERVED,
+                DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_OBJ, false));
+        cps_api_object_t _intf_state = _intf_state_gd.get();
+        if(_intf_state == nullptr){
+            EV_LOGGING(INTERFACE,ERR,"NAS-INT-SET","Failed to create state object");
+            return cps_api_ret_code_ERR;
+        }
+
+        const char *ifname = static_cast<const char*>(cps_api_object_attr_data_bin(_ifname_attr));
+        cps_api_set_key_data(_intf_state, IF_INTERFACES_STATE_INTERFACE_NAME,
+                cps_api_object_ATTR_T_BIN,ifname, strlen(ifname)+1);
+
+        if (_fec_attr != nullptr){
+            BASE_CMN_FEC_TYPE_t _fec_configured;
+            if (STD_ERR_OK == nas_port_fec_get(npu_id,port_id,&_fec_configured)){
+                cps_api_object_attr_add_u32(_intf_state,
+                        DELL_IF_IF_INTERFACES_STATE_INTERFACE_CONFIGURED_FEC,
+                        _fec_configured);
+            }
+        }
+
+        BASE_CMN_FEC_TYPE_t _fec_observed;
+        if (STD_ERR_OK == ndi_port_fec_get(npu_id,port_id,&_fec_observed)){
+            cps_api_object_attr_add_u32(_intf_state,
+                    DELL_IF_IF_INTERFACES_STATE_INTERFACE_FEC, _fec_observed);
+        }
+
+        BASE_CMN_FILTER_TYPE_t vlan_filter_observed;
+        if (STD_ERR_OK == ndi_port_vlan_filter_get(npu_id, port_id,
+                    &vlan_filter_observed)) {
+            cps_api_object_attr_add_u32(_intf_state,
+                    DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_VLAN_FILTER,
+                    vlan_filter_observed);
+        }
+
+        if (_autoneg_attr != nullptr){
+            uint32_t _autoneg = cps_api_object_attr_data_uint(_autoneg_attr);
+            cps_api_object_attr_add_u32(_intf_state,
+                    DELL_IF_IF_INTERFACES_STATE_INTERFACE_AUTO_NEGOTIATION, _autoneg);
+        }
+        cps_api_event_thread_publish(_intf_state);
+    }
+    return cps_api_ret_code_OK;
 }
 
 static cps_api_return_code_t _if_update(cps_api_object_t req_if, cps_api_object_t prev, bool if_set)
@@ -1244,7 +1558,7 @@ static cps_api_return_code_t _if_update(cps_api_object_t req_if, cps_api_object_
         }
     }
 
-    /*  Publish the INTF object before returning from SET request */
+    /*  Publish the INTF  and INTF_STATE object before returning from SET request */
     if (rpt_disconn_port) {
         cps_api_object_attr_delete(req_if, BASE_IF_PHY_IF_INTERFACES_INTERFACE_PORT_ID);
         cps_api_object_attr_add_u32(req_if, BASE_IF_PHY_IF_INTERFACES_INTERFACE_PORT_ID,
@@ -1253,6 +1567,16 @@ static cps_api_return_code_t _if_update(cps_api_object_t req_if, cps_api_object_
         cps_api_object_attr_add_u32(req_if, BASE_IF_PHY_IF_INTERFACES_INTERFACE_NPU_ID,
                                     disconn_npu);
     }
+
+    /* If Interface is not virtual then publishing interface state object with
+     * negotiation, configured and observed fec value*/
+    if(!nas_is_virtual_port(_port.if_index)){
+        if (_intf_state_publish(_port.npu_id,_port.port_id, req_if) != cps_api_ret_code_OK) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-IF-SET",
+                    "Error in publishing Interface State object for interface %s", _port.if_name);
+        }
+    }
+
     cps_api_key_set(cps_api_object_key(req_if),CPS_OBJ_KEY_INST_POS,cps_api_qualifier_OBSERVED);
     cps_api_event_thread_publish(req_if);
     cps_api_key_set(cps_api_object_key(req_if),CPS_OBJ_KEY_INST_POS,cps_api_qualifier_TARGET);
@@ -1262,6 +1586,44 @@ static cps_api_return_code_t _if_update(cps_api_object_t req_if, cps_api_object_
     }
 
     return cps_api_ret_code_OK;
+}
+
+static void set_cps_obj_return_attrs(cps_api_object_t obj, t_std_error rc,
+                                     cps_api_attr_id_t attr)
+{
+    t_std_error err_id = STD_ERR_EXT_ERRID(rc);
+
+    EV_LOGGING(INTERFACE, DEBUG, "NAS-IF-UPDATE",
+               "calling CPS Object Return Attribute with Attribute %lu RC %d"
+               "Error ID %d and Error Priv data %d \r\n", attr, rc,
+               STD_ERR_EXT_ERRID(rc), STD_ERR_EXT_PRIV(rc));
+
+    auto it = _error_string_map_table->find(err_id);
+
+    if (it == _error_string_map_table->end()) {
+        EV_LOGGING(INTERFACE, ERR,
+                   "NAS-IF-UPDATE", "No Matching Error ID %d Priv %d Error Code %d",
+                   STD_ERR_EXT_ERRID(rc), STD_ERR_EXT_PRIV(rc), rc);
+        return;
+    }
+
+    auto attr_it = _set_attr_handlers.find(attr);
+
+    if (attr_it == _set_attr_handlers.end()) {
+        EV_LOGGING(INTERFACE, ERR,
+                   "NAS-IF-UPDATE", "No Matching Attribute ID %lu for Error ID %d "
+                   "Priv %d Error Code %d", attr, STD_ERR_EXT_ERRID(rc),
+                   STD_ERR_EXT_PRIV(rc), rc);
+    }
+    else
+    {
+        /* Fill the error string based on the error code. If an error code is
+         * not handled in _error_string_map_table, add the Error code/Private
+         * Data and its corresponding error string */
+        cps_api_set_object_return_attrs(obj, rc, "%s set failed : %s",
+                                        attr_it->second.second,
+                                        it->second.c_str());
+    }
 }
 
 static void if_add_tracker_for_reload(cps_api_object_t cur, bool mapped, npu_id_t npu, port_t port) {
@@ -1340,7 +1702,6 @@ static cps_api_return_code_t _if_create(cps_api_object_t cur, cps_api_object_t p
     cps_api_object_attr_t _npu = cps_api_object_attr_get(cur,BASE_IF_PHY_IF_INTERFACES_INTERFACE_NPU_ID);
     cps_api_object_attr_t _port = cps_api_object_attr_get(cur,BASE_IF_PHY_IF_INTERFACES_INTERFACE_PORT_ID);
     cps_api_object_attr_t _ietf_type = cps_api_object_attr_get(cur, IF_INTERFACES_INTERFACE_TYPE);
-    cps_api_object_attr_t _ietf_desc = cps_api_object_attr_get(cur, IF_INTERFACES_INTERFACE_DESCRIPTION);
 
     if (_name == nullptr) {
         EV_LOGGING(INTERFACE,ERR,"NAS-INT-CREATE", "Interface create fail: Name not present ");
@@ -1362,11 +1723,6 @@ static cps_api_return_code_t _if_create(cps_api_object_t cur, cps_api_object_t p
     const char *name = (const char*)cps_api_object_attr_data_bin(_name);
     EV_LOGGING(INTERFACE,INFO,"NAS-INT-CREATE", "Interface create received for  %s", name);
 
-    char *desc = NULL;
-    if (_ietf_desc != nullptr) {
-        desc = (char*)cps_api_object_attr_data_bin(_ietf_desc);
-    }
-
     t_std_error rc;
     bool npu_port_present = false;
     npu_id_t npu = 0, port = 0;
@@ -1387,12 +1743,13 @@ static cps_api_return_code_t _if_create(cps_api_object_t cur, cps_api_object_t p
         return (cps_api_return_code_t)STD_ERR(INTERFACE,PARAM,0);
     }
 
-    EV_LOGGING(INTERFACE, INFO, "NAS-INT-CREATE", "Create interface %s for npu %d port %d",
+    EV_LOGGING(INTERFACE, NOTICE, "NAS-INT-CREATE", "Create %s interface %s for npu %d port %d",
+               npu_port_present ? "mapped" : "unmapped",
                name, (int)npu, (int)port);
     if (npu_port_present) {
-        rc = nas_int_port_create_mapped(npu, port, name, desc, _type);
+        rc = nas_int_port_create_mapped(npu, port, name, _type);
     } else {
-        rc = nas_int_port_create_unmapped(name, desc, _type);
+        rc = nas_int_port_create_unmapped(name, _type);
     }
     if (rc != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR, "NAS-INT-CREATE", "Failed to create interface");
@@ -1431,7 +1788,15 @@ static cps_api_return_code_t _if_create(cps_api_object_t cur, cps_api_object_t p
         }
 
         return cps_api_ret_code_OK;
+    } else {
+        if (npu_port_present) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-INT-SET", "Failed to get ifindex from NPU %d PORT %d",
+                       npu, port);
+        } else {
+            EV_LOGGING(INTERFACE, ERR, "NAS-INT-SET", "Failed to get ifindex from NAME %s", name);
+        }
     }
+
     return cps_api_ret_code_ERR;
 }
 
@@ -1559,7 +1924,7 @@ static t_std_error _nas_int_npu_port_init(void) {
         if (ndi_cpu_port_get(npu, &cpu_port)==STD_ERR_OK) {
             char buff[100]; //plenty of space for a name
             snprintf(buff,sizeof(buff),"npu-%d",npu);
-            t_std_error rc = nas_int_port_create_mapped(npu, cpu_port, buff, NULL, nas_int_type_CPU);
+            t_std_error rc = nas_int_port_create_mapped(npu, cpu_port, buff, nas_int_type_CPU);
             if (rc==STD_ERR_OK) {
                 nas_int_port_link_change(npu,cpu_port,IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP);
                 cps_api_object_guard og(cps_api_object_create());
@@ -1628,7 +1993,7 @@ static cps_api_return_code_t loopback_if_get(void* context, cps_api_get_params_t
         cps_api_object_t object = cps_api_object_list_get(param->list, ix);
         cps_api_object_attr_t ifix = cps_api_object_attr_get(object, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
         if (ifix == nullptr) {
-            EV_LOGGING(INTERFACE, ERR, "NAS-INT-GET", "Could not find ifindex in object %d", ix);
+            EV_LOGGING(INTERFACE, ERR, "NAS-INT-GET", "Could not find ifindex in object %lu", ix);
             cps_api_object_list_remove(param->list, ix);
             cps_api_object_delete(object);
             --mx;
@@ -1653,8 +2018,6 @@ static cps_api_return_code_t loopback_if_get(void* context, cps_api_get_params_t
                         strlen(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_SOFTWARELOOPBACK)+1);
 
         /** TODO implement description for loopback **/
-        cps_api_object_attr_add(object, IF_INTERFACES_INTERFACE_DESCRIPTION,
-                        (const void*)"", 1);
         ++ ix;
     }
 
@@ -1665,102 +2028,6 @@ static cps_api_return_code_t loopback_if_set(void* context, cps_api_transaction_
                                              size_t ix)
 {
     // not supposed to be called, return error.
-    return cps_api_ret_code_ERR;
-}
-
-static cps_api_return_code_t loopback_if_state_get (void * context, cps_api_get_params_t * param,
-        size_t key_ix) {
-
-    cps_api_object_t filt = cps_api_object_list_get(param->filters,key_ix);
-    cps_api_object_attr_t ifix = cps_api_object_attr_get(filt, IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
-    cps_api_object_attr_t name = cps_api_get_key_data(filt,IF_INTERFACES_STATE_INTERFACE_NAME);
-    bool if_type_added = false;
-
-    if (ifix != nullptr) {
-        /*  Call os API with interface object  */
-        cps_api_object_attr_add_u32(filt,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
-                                 cps_api_object_attr_data_u32(ifix));
-        cps_api_object_attr_delete(filt,IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
-    }
-
-    if (ifix == nullptr && name != NULL) {
-        interface_ctrl_t _port;
-        if (!if_data_from_obj(obj_INTF_STATE, filt,_port)) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-INT-GET", "Wrong interface name or interface not present %s",_port.if_name);
-            return cps_api_ret_code_ERR;
-        }
-        cps_api_object_attr_add_u32(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
-                                    _port.if_index);
-    } else if (ifix == nullptr && name == nullptr) {
-        cps_api_object_attr_add_u32(filt, BASE_IF_LINUX_IF_INTERFACES_INTERFACE_DELL_TYPE,
-                                    BASE_CMN_INTERFACE_TYPE_LOOPBACK);
-        if_type_added = true;
-    }
-
-    t_std_error rc = nas_os_get_interface(filt,param->list);
-
-    if (if_type_added) {
-        cps_api_object_attr_delete(filt, BASE_IF_LINUX_IF_INTERFACES_INTERFACE_DELL_TYPE);
-    }
-
-    if (rc != STD_ERR_OK) {
-        return cps_api_ret_code_ERR;
-    }
-
-    size_t mx = cps_api_object_list_size(param->list);
-    size_t ix = 0;
-
-    while (ix < mx) {
-        cps_api_object_t object = cps_api_object_list_get(param->list,ix);
-        cps_api_object_attr_t ifix = cps_api_object_attr_get(object, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
-
-        if (ifix == nullptr) {
-            EV_LOGGING(INTERFACE, ERR, "NAS-INT-GET", "Could not find ifindex in object %d", ix);
-            cps_api_object_list_remove(param->list, ix);
-            cps_api_object_delete(object);
-            --mx;
-            continue;
-        }
-
-        cps_api_key_from_attr_with_qual(cps_api_object_key(object), DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_OBJ,
-                cps_api_qualifier_OBSERVED);
-        interface_ctrl_t _port;
-        memset(&_port,0,sizeof(_port));
-        _port.if_index = cps_api_object_attr_data_u32(ifix);
-        _port.q_type = HAL_INTF_INFO_FROM_IF;
-
-        if(dn_hal_get_interface_info(&_port) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE, ERR, "NAS-INT-GET", "Failed to get registered info for ifindex %d", _port.if_index);
-            cps_api_object_list_remove(param->list, ix);
-            cps_api_object_delete(object);
-            --mx;
-            continue;
-        }
-
-        cps_api_set_key_data(object,IF_INTERFACES_STATE_INTERFACE_NAME,
-                       cps_api_object_ATTR_T_BIN, _port.if_name, strlen(_port.if_name)+1);
-        _if_fill_in_npu_intf_state(_port.npu_id, _port.port_id, _port.int_type, object);
-        //_if_fill_in_supported_speeds_attrs(_port.npu_id,_port.port_id, _port.int_type, object);
-        //_if_fill_in_eee_attrs(_port.npu_id,_port.port_id,object);
-        _if_fill_in_npu_speed_attr(_port.npu_id,_port.port_id, _port.int_type, object);
-        //_if_fill_in_supported_autoneg_attr(_port.npu_id,_port.port_id, object);
-        /*  Add if index with right key */
-        cps_api_object_attr_add_u32(object,IF_INTERFACES_STATE_INTERFACE_IF_INDEX,
-                         _port.if_index);
-        cps_api_object_attr_delete(object, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
-        cps_api_object_attr_delete(object, IF_INTERFACES_INTERFACE_NAME);
-        cps_api_object_attr_add(object,IF_INTERFACES_STATE_INTERFACE_TYPE,
-                        (const void *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_SOFTWARELOOPBACK,
-                        strlen(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_SOFTWARELOOPBACK)+1);
-        ++ ix;
-    }
-
-    return cps_api_ret_code_OK;
-}
-
-static cps_api_return_code_t if_state_set(void * context, cps_api_transaction_params_t * param,size_t ix) {
-
-    // not supposed to be called. return error
     return cps_api_ret_code_ERR;
 }
 
@@ -1802,13 +2069,13 @@ t_std_error nas_int_logical_init(cps_api_operation_handle_t handle)  {
         return STD_ERR(INTERFACE,FAIL,0);
     }
 
-    if (intf_obj_handler_registration(obj_INTF, nas_int_type_LPBK, loopback_if_get, loopback_if_set) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-INT-INIT", "Failed to register Loopback interface CPS handler");
+    if (intf_obj_handler_registration(obj_INTF_STATE, nas_int_type_LPBK, loopback_if_state_get, loopback_if_state_set) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-INT-INIT", "Failed to register Loopback interface state CPS handler");
         return STD_ERR(INTERFACE,FAIL,0);
     }
 
-    if (intf_obj_handler_registration(obj_INTF_STATE, nas_int_type_LPBK, loopback_if_state_get, loopback_if_state_set) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-INT-INIT", "Failed to register Loopback interface state CPS handler");
+    if (intf_obj_handler_registration(obj_INTF, nas_int_type_LPBK, loopback_if_get, loopback_if_set) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-INT-INIT", "Failed to register Loopback interface CPS handler");
         return STD_ERR(INTERFACE,FAIL,0);
     }
 

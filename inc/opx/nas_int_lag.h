@@ -24,12 +24,13 @@
 
 #include "ds_common_types.h"
 #include "nas_ndi_common.h"
+#include <limits.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define INVALID_LAG_ID -1
+#define INVALID_LAG_ID UINT_MAX
 
 /**
  * @brief Handle the lag interface create request

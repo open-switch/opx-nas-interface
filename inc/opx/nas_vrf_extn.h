@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 Dell Inc.
+ * Copyright (c) 2018 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -14,18 +14,31 @@
  * permissions and limitations under the License.
  */
 
-/*
- * nas_vlan_lag.h
- *
+/*!
+ * \file   nas_vrf_extn.h
  */
 
+#ifndef __NAS_VRF_EXTN_H
+#define __NAS_VRF_EXTN_H
 
-#ifndef NAS_VLAN_LAG_CMN_H_
-#define NAS_VLAN_LAG_CMN_H_
+#include "std_error_codes.h"
 
-#include "cps_api_object.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-bool nas_vlan_lag_event_func_cb(const cps_api_object_t obj);
+/*!
+ *  \fn      int nas_vrf_init (void)
+ *  \brief   Init function for VRF
+ *  \warning none
+ *  \param   void
+ *  \return  success 0/failure -1
+ *  \sa
+ */
+t_std_error nas_vrf_init(void);
 
+#ifdef __cplusplus
+}
+#endif
 
-#endif /* NAS_VLAN_LAG_H_ */
+#endif

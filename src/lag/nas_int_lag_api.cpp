@@ -73,7 +73,7 @@ std_mutex_type_t *nas_lag_mutex_lock()
 t_std_error nas_add_slave_node(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex,
         ndi_obj_id_t ndi_lag_member_id){
 
-    EV_LOGGING(INTERFACE, INFO, "NAS-LAG","LagID %d Ifindex %d, lag mem id %lld",
+    EV_LOGGING(INTERFACE, INFO, "NAS-LAG","LagID %d Ifindex %d, lag mem id %lu",
                lag_master_id, ifindex, ndi_lag_member_id);
 
     nas_lag_slave_table->insert({ifindex ,{ ifindex, lag_master_id ,ndi_lag_member_id}});
@@ -285,7 +285,7 @@ t_std_error nas_lag_member_delete(hal_ifindex_t lag_master_id,hal_ifindex_t ifin
     nas_lag_ndi_port.npu_id = intf_ctrl.npu_id;
     nas_lag_ndi_port.npu_port= intf_ctrl.port_id;
 
-    EV_LOGGING(INTERFACE, INFO, "NAS-Lag", "Deleting LAG MEM ID %lld",
+    EV_LOGGING(INTERFACE, INFO, "NAS-Lag", "Deleting LAG MEM ID %lu",
                nas_slave_entry->ndi_lag_member_id);
     if(nas_del_port_from_lag(nas_lag_ndi_port.npu_id,
                 nas_slave_entry->ndi_lag_member_id) != STD_ERR_OK){
@@ -310,7 +310,7 @@ t_std_error nas_register_lag_intf(nas_lag_master_info_t *nas_lag_entry, hal_intf
     details.if_index = nas_lag_entry->ifindex;
     details.lag_id = nas_lag_entry->ndi_lag_id;
     details.int_type = nas_int_type_LAG;
-    details.desc = NULL;
+    details.desc = nullptr;
     strncpy(details.if_name, nas_lag_entry->name, sizeof(details.if_name)-1);
 
     if (dn_hal_if_register(op, &details)!=STD_ERR_OK) {
@@ -413,6 +413,7 @@ t_std_error nas_lag_master_delete(hal_ifindex_t ifindex)
 
 t_std_error nas_lag_set_desc(hal_ifindex_t index, const char *desc) {
     nas_lag_master_info_t *nas_lag_entry = NULL;
+    interface_ctrl_t intf;
 
     EV_LOGGING(INTERFACE, INFO, "NAS-LAG", "Lag intf %d for set_desc", index);
 
@@ -424,8 +425,16 @@ t_std_error nas_lag_set_desc(hal_ifindex_t index, const char *desc) {
         return STD_ERR(INTERFACE,FAIL, 0);
     }
 
-    if (dn_hal_update_intf_desc(index, desc) != STD_ERR_OK)  {
-        EV_LOGGING(INTERFACE, ERR ,"NAS-LAG", "Failure saving LAG %d desc in intf block", index);
+    memset(&intf, 0, sizeof(intf));
+
+    if (!nas_lag_intf_to_port(nas_lag_entry->ifindex, &intf)) {
+        EV_LOGGING(INTERFACE, ERR ,"NAS-LAG", "Error getting port info for LAG %d", nas_lag_entry->ifindex);
+        return cps_api_ret_code_ERR;
+    }
+
+    intf.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+    if (dn_hal_update_intf_desc(&intf, desc) != STD_ERR_OK)  {
+        EV_LOGGING(INTERFACE, ERR ,"NAS-LAG", "Failure saving LAG %d desc in intf block", nas_lag_entry->ifindex);
         return cps_api_ret_code_ERR;
     }
 

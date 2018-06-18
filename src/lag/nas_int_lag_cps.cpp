@@ -39,7 +39,6 @@
 #include "hal_interface_common.h"
 #include "nas_ndi_port.h"
 #include "nas_linux_l2.h"
-#include "nas_vlan_lag_cmn.h"
 #include "iana-if-type.h"
 #include "nas_if_utils.h"
 #include "nas_int_com_utils.h"
@@ -93,29 +92,31 @@ static inline bool nas_get_lag_id_from_str(const char * str, nas_lag_id_t * id){
     if (pos != std::string::npos) {
         std::string id_str = full_str.substr(pos);
         *id = std::stoi(id_str);
+        if (*id == INVALID_LAG_ID) {
+            EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "%u is reserved as an invalid lag id", INVALID_LAG_ID);
+        }
     } else {
         *id = INVALID_LAG_ID;
     }
     return true;
 }
 
-static cps_api_return_code_t nas_cps_set_desc(cps_api_object_t obj,hal_ifindex_t lag_index)
+static cps_api_return_code_t nas_cps_set_desc(const cps_api_object_attr_t &desc_attr, const hal_ifindex_t lag_index)
 {
-    cps_api_object_attr_t attr = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_DESCRIPTION);
-    if (attr==NULL) return cps_api_ret_code_ERR;
-
-    cps_api_set_key_data(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,cps_api_object_ATTR_T_U32,
-            &lag_index,sizeof(lag_index));
-
     /** TODO set LAG description to OS **/
-    const char *desc = (const char *) cps_api_object_attr_data_bin(attr);
+    if (!desc_attr) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "Interface description attribute is null.");
+        return cps_api_ret_code_ERR;
+    }
+
+    const char *desc = (const char *) cps_api_object_attr_data_bin(desc_attr);
 
     if ((strlen(desc) > MAX_INTF_DESC_LEN))  {
         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "lag desc length exceed maximum (%d)", MAX_INTF_DESC_LEN);
         return cps_api_ret_code_ERR;
     }
 
-    if(nas_lag_set_desc(lag_index,desc) != STD_ERR_OK)
+    if(nas_lag_set_desc(lag_index, desc) != STD_ERR_OK)
     {
         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "lag desc failure in NAS");
         return cps_api_ret_code_ERR;
@@ -130,7 +131,7 @@ static cps_api_return_code_t nas_cps_create_lag(cps_api_object_t obj)
     cps_api_return_code_t rc =cps_api_ret_code_OK;
     nas_lag_id_t lag_id=0;
     cps_api_object_attr_t lag_id_attr = cps_api_get_key_data(obj, IF_INTERFACES_INTERFACE_NAME);
-    cps_api_object_attr_t lag_desc_attr = cps_api_get_key_data(obj, IF_INTERFACES_INTERFACE_DESCRIPTION);
+    cps_api_object_attr_t lag_desc_attr = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_DESCRIPTION);
 
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "Create Lag using CPS");
 
@@ -187,7 +188,7 @@ static cps_api_return_code_t nas_cps_create_lag(cps_api_object_t obj)
         return cps_api_ret_code_ERR;
     }
 
-    if(lag_desc_attr != nullptr && (nas_cps_set_desc(obj, lag_index) != cps_api_ret_code_OK)) {
+    if(lag_desc_attr && nas_cps_set_desc(lag_desc_attr, lag_index) != cps_api_ret_code_OK) {
         EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
                    "Failure in NAS-CPS-LAG Set description for LAG index %d",
                    lag_index);
@@ -231,6 +232,12 @@ static cps_api_return_code_t nas_cps_delete_lag(cps_api_object_t obj)
     }
 
     for (auto it : nas_lag_entry->port_list) {
+        if (nas_intf_handle_intf_mode_change(it, BASE_IF_MODE_MODE_NONE) == false) {
+            EV_LOGGING(INTERFACE, DEBUG, "NAS-CPS-LAG",
+                    "Error setting interface mode to NONE on intf(%d)", lag_index);
+            return cps_api_ret_code_ERR;
+        }
+
         if (nas_cps_delete_port_from_lag(nas_lag_entry, it) !=  cps_api_ret_code_OK) {
             EV_LOGGING(INTERFACE, INFO,"NAS-CPS-LAG",
                         "Error clearing port %d from member port list", it);
@@ -580,7 +587,6 @@ static void nas_pack_lag_port_list(cps_api_object_t obj,nas_lag_master_info_t *n
         cps_api_object_attr_add_u32(obj_pub,IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS,(nas_lag_entry->admin_status ?
                 IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_UP : IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_DOWN) );
     }
-    nas_vlan_lag_event_func_cb(obj_pub);
     if (cps_api_event_thread_publish(obj_pub)!=STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR, "NAS-INTF-EVENT",
                    "Failed to send event. Service issue");
@@ -812,7 +818,7 @@ static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj)
                 }
                 break;
             case IF_INTERFACES_INTERFACE_DESCRIPTION:
-                rc = nas_cps_set_desc(obj, lag_index);
+                rc = nas_cps_set_desc(it.attr, lag_index);
                 break;
             default:
                 EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
@@ -822,18 +828,18 @@ static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj)
     }
 
     if(unblock_port_list.size()) {
-        rc |= nas_process_lag_block_ports(nas_lag_entry, unblock_port_list,false);
+        rc |= nas_process_lag_block_ports(nas_lag_entry, unblock_port_list, false);
     }
 
     if(block_port_list.size()) {
-        rc |= nas_process_lag_block_ports(nas_lag_entry, block_port_list,true);
+        rc |= nas_process_lag_block_ports(nas_lag_entry, block_port_list, true);
     }
 
     rc = (rc == cps_api_ret_code_OK) ? cps_api_ret_code_OK : cps_api_ret_code_ERR;
 
     if(port_list_attr) {
         EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
-                "Received %d valid ports ", port_list.size());
+                "Received %lu valid ports ", port_list.size());
         cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
         bool create = (op == cps_api_oper_CREATE )? true : false;
         if(cps_lag_update_ports(nas_lag_entry, port_list,create) !=STD_ERR_OK)
@@ -920,8 +926,6 @@ static void nas_pack_lag_if_state(cps_api_object_t obj, nas_lag_master_info_t *n
     cps_api_set_key_data(obj,IF_INTERFACES_STATE_INTERFACE_NAME,
                 cps_api_object_ATTR_T_BIN,
                 nas_lag_entry->name, strlen(nas_lag_entry->name)+1);
-
-    //cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,nas_lag_entry->ifindex);
 
     if (nas_lag_entry->lag_id != INVALID_LAG_ID)
         cps_api_object_attr_add_u32(obj, BASE_IF_LAG_IF_INTERFACES_INTERFACE_ID, nas_lag_entry->lag_id);
@@ -1048,7 +1052,7 @@ t_std_error nas_lag_ndi_it_to_obj_fill(nas_obj_id_t ndi_lag_id,cps_api_object_li
         }
 
         EV_LOGGING(INTERFACE, INFO, "NAS-LAG-CPS",
-                   "Lg id %lld and appid %lld",
+                   "Lg id %lu and appid %lu",
                    nas_lag_entry->ndi_lag_id, ndi_lag_id);
 
         if(nas_lag_entry->ndi_lag_id == ndi_lag_id){
@@ -1086,7 +1090,7 @@ static cps_api_return_code_t nas_process_cps_lag_get(void * context, cps_api_get
 
     if(ndi_lag_id_attr != nullptr){
         EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
-                   "LAG OPAQUE DATA FOUND %lld!!!",
+                   "LAG OPAQUE DATA FOUND %lu!!!",
                    cps_api_object_attr_data_u64(ndi_lag_id_attr));
         ndi_lag_id = cps_api_object_attr_data_u64(ndi_lag_id_attr);
         opaque_attr_data=true;
@@ -1254,8 +1258,8 @@ static bool nas_lag_process_port_association(hal_ifindex_t ifindex, npu_id_t npu
                 nas_lag_master_info_t *nas_lag_entry = nas_get_lag_node(it.m_if_idx);
 
                 if(nas_lag_entry == NULL){
-                    EV_LOGGING(INTERFACE,ERR,"NAS-LAG-MAP","No LAG entry for ifindex %d exist"
-                            "it.m_if_idx");
+                    EV_LOGGING(INTERFACE,ERR,"NAS-LAG-MAP","No LAG entry for ifindex %d exist",
+                            it.m_if_idx);
                     continue;
                 }
 

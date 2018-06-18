@@ -27,11 +27,36 @@
 #include "event_log_types.h"
 #include "nas_int_base_if.h"
 #include "nas_int_utils.h"
+#include "std_utils.h"
 #include "dell-base-routing.h"
 #include "cps_api_operation.h"
 #include "cps_api_object_key.h"
 #include "cps_class_map.h"
 #include "l2-multicast.h"
+
+t_std_error nas_get_if_type_from_name_or_ifindex (const char *if_name, hal_ifindex_t *ifindex, nas_int_type_t *type) {
+    interface_ctrl_t if_info;
+    memset(&if_info,0,sizeof(if_info));
+
+    if( if_name != nullptr) {
+        safestrncpy(if_info.if_name,if_name,sizeof(if_info.if_name));
+        if_info.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+    }
+    else if( ifindex != nullptr) {
+        if_info.if_index = *ifindex;
+        if_info.q_type = HAL_INTF_INFO_FROM_IF;
+
+    }
+
+    if (dn_hal_get_interface_info(&if_info) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR,"INTF-C","Failed to get if_info");
+        return STD_ERR(INTERFACE,FAIL, 0);
+    }
+    *ifindex = if_info.if_index;
+    *type = if_info.int_type;
+    return STD_ERR_OK;
+};
+
 
 bool nas_intf_handle_intf_mode_change (const char * if_name, BASE_IF_MODE_t mode)
 {

@@ -17,7 +17,6 @@
 import cps
 import cps_object
 import cps_utils
-import event_log as ev
 import nas_os_if_utils as nas_if
 
 _yang_breakout_4x1 = 2
@@ -25,6 +24,7 @@ _yang_breakout_2x1 = 3
 _yang_breakout_1x1 = 4
 _yang_breakout_4x4 = 7
 _yang_breakout_2x4 = 8
+_yang_breakout_disabled = 1
 
 # list of all phy port object indexed by phy port and hwport
 g_port_list = {}
@@ -144,6 +144,7 @@ breakout_to_hwp_count = {_yang_breakout_1x1:4,
                          _yang_breakout_4x1:1,
                          _yang_breakout_4x4:1,
                          _yang_breakout_2x4:2,
+                         _yang_breakout_disabled:0,
                          }
 
 # Create npu ports (physical ports ) based on the breakout mode and port speed and returns newly created npu ports
@@ -155,7 +156,7 @@ def create_nas_ports(npu, hwports, br_mode,speed, phy_mode, fr_port, created_phy
     hwp_count = breakout_to_hwp_count[br_mode]
     hwports.reverse()
 
-    while len(hwports) != 0:
+    while len(hwports) != 0 and hwp_count != 0:
         i =0
         hw_list = []
         if len(hwports) < hwp_count:

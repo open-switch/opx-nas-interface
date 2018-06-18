@@ -51,6 +51,7 @@ typedef struct nas_bridge_s{
     nas_list_t tagged_list; //tagged vlan ports in this bridge
     nas_list_t untagged_lag; //Untagged LAG index to handle
     nas_list_t tagged_lag; //tagged LAG index to handle
+    BASE_IF_MODE_t mode;
     uint32_t mtu;
 }nas_bridge_t;
 

@@ -27,6 +27,7 @@ import nas_if_config_obj as if_config
 import nas_phy_port_utils as port_utils
 import nas_fp_port_utils as fp_utils
 import nas_port_group_utils as pg_utils
+import nas_hybrid_group as hg_utils
 import nas_common_header as nas_comm
 
 import logging
@@ -51,6 +52,9 @@ media_type_attr_name = 'base-if-phy/if/interfaces/interface/phy-media'
 vlan_id_attr_name = 'base-if-vlan/if/interfaces/interface/id'
 fec_mode_attr_name = 'dell-if/if/interfaces/interface/fec'
 op_attr_name = 'dell-base-if-cmn/set-interface/input/operation'
+def_vlan_mode_attr_name = 'dell-if/if/interfaces/vlan-globals/scaled-vlan'
+retcode_attr_name = 'cps/object-group/return-code'
+retstr_attr_name = 'cps/object-group/return-string'
 
 _yang_auto_speed = 8  # default value for auto speed
 _yang_40g_speed = 6  # default value for auto speed
@@ -144,10 +148,6 @@ def _add_default_duplex(media_type, cps_obj):
     cps_obj.add_attr(duplex_attr_name, duplex)
     nas_if.log_info("default Duplex is " + str(duplex))
 
-def _add_default_fec_mode(media_type, cps_obj):
-    # TODO: will add implementation code later
-    pass
-
 # Interface Speed is pushed down to hardware based on media connected and if it is configured AUTO(default).
 # Based on the port capability (QSFP+ or QSFP28) and mode configured(ethernet or FC), connected physical media
 # may not be supported and media based default speed will not be pushed down to the NPU/Hardware.
@@ -203,16 +203,22 @@ def _set_duplex(duplex, config, obj):
         obj.add_attr(duplex_attr_name, duplex)
     return
 
-def _get_default_fec_mode(if_speed):
+def _get_default_fec_mode(media_type,if_speed):
     """
     Auto option will configure default FEC. Default FEC for 100G is CL91
-    for all types of media. Default option for 25G/50G is OFF for all types
-    of media.
+    for all types of media. Default option for 25G/50G for 25/50G CR is CL108
+     and other 25/50g is OFF for all types of media.
     """
+    fec_mode = None
+    media_str = media.get_media_str(media_type)
     if if_speed == nas_comm.get_value(nas_comm.yang_speed, '100G'):
         fec_mode = nas_comm.get_value(nas_comm.yang_fec_mode, 'CL91-RS')
-    else:
-        fec_mode = nas_comm.get_value(nas_comm.yang_fec_mode, 'OFF')
+    elif (if_speed == nas_comm.get_value(nas_comm.yang_speed, '25G') or
+             if_speed == nas_comm.get_value(nas_comm.yang_speed, '50G')):
+        if(media_str in media.fec_25g_cl108_support):
+            fec_mode = nas_comm.get_value(nas_comm.yang_fec_mode, 'CL108-RS')
+        else:
+            fec_mode = nas_comm.get_value(nas_comm.yang_fec_mode, 'OFF')
 
     return fec_mode
 
@@ -237,7 +243,8 @@ def _set_fec_mode(fec_mode, config, obj, op):
     nas_if.log_info('set FEC mode %d' % fec_mode)
     config.set_fec_mode(fec_mode)
     if fec_mode == nas_comm.get_value(nas_comm.yang_fec_mode, 'AUTO'):
-        fec_mode = _get_default_fec_mode(if_cfg_speed)
+        media_type = config.get_media_type()
+        fec_mode = _get_default_fec_mode(media_type,if_cfg_speed)
     obj.add_attr(fec_mode_attr_name, fec_mode)
     return True
 
@@ -316,7 +323,10 @@ def if_handle_set_media_type(op, obj):
     if config.get_duplex() == _yang_auto_dup:
         _add_default_duplex(media_type, obj)
     if config.get_fec_mode() == nas_comm.get_value(nas_comm.yang_fec_mode, 'AUTO'):
-        _add_default_fec_mode(media_type, obj)
+        cfg_speed = config.get_cfg_speed()
+        fec_cfg = _get_default_fec_mode(media_type, cfg_speed)
+        if(fec_cfg is not None):
+            obj.add_attr(fec_mode_attr_name,fec_cfg)
 
     _set_hw_profile(config, obj)
 
@@ -636,11 +646,33 @@ def _handle_macvlan_intf(cps_obj, params):
     if op == 'delete':
         return if_macvlan.delete_macvlan_interface(cps_obj)
 
+def _handle_global_vlan_config(obj):
+    nas_if.log_err('Updating global default vlan mode')
+    in_obj = copy.deepcopy(obj)
+    in_obj.set_key(cps.key_from_name('target', 'dell-base-if-cmn/if/interfaces'))
+    in_obj.root_path = 'dell-base-if-cmn/if/interfaces' + '/'
+    obj = in_obj.get()
+    print obj
+    if op_attr_name in obj['data']:
+        del obj['data'][op_attr_name]
+    upd = ('set', obj)
+    _ret = cps_utils.CPSTransaction([upd]).commit()
+    if not _ret:
+        nas_if.log_err('Failed to update global default vlan mode')
+        return False
+    return True
+
 def set_intf_rpc_cb(methods, params):
     if params['operation'] != 'rpc':
         nas_if.log_err('Operation '+str(params['operation'])+' not supported')
         return False
     cps_obj = cps_object.CPSObject(obj = params['change'])
+
+    try:
+        if def_vlan_mode_attr_name in params['change']['data']:
+            return _handle_global_vlan_config(cps_obj)
+    except:
+        pass
 
     if_type = if_config.get_intf_type(cps_obj)
     if if_type == 'loopback':
@@ -746,9 +778,22 @@ def set_intf_rpc_cb(methods, params):
     if op_attr_name in obj['data']:
         del obj['data'][op_attr_name]
     upd = (op, obj)
-    ret_data = cps_utils.CPSTransaction([upd]).commit()
+    trans = cps_utils.CPSTransaction([upd])
+    ret_data = trans.commit()
     if ret_data == False:
         nas_if.log_err('Failed to commit request')
+        ret_data = trans.get_objects()
+        if len(ret_data) > 0 and 'change' in ret_data[0]:
+            ret_obj = cps_object.CPSObject(obj = ret_data[0]['change'])
+            try:
+                ret_code = ret_obj.get_attr_data(retcode_attr_name)
+                ret_str = ret_obj.get_attr_data(retstr_attr_name)
+            except ValueError:
+                nas_if.log_info('Return code and string not found from returned object')
+                return False
+            cps_obj.add_attr(retcode_attr_name, ret_code)
+            cps_obj.add_attr(retstr_attr_name, ret_str)
+            params['change'] = cps_obj.get()
         return False
     if op == 'delete':
         try:
@@ -838,6 +883,9 @@ if __name__ == '__main__':
 
     # Register for Port Group handler
     pg_utils.nas_pg_cps_register(handle)
+
+    # Register for Hybrid Group handler
+    hg_utils.nas_hg_cps_register(handle)
 
     # Register Logical Interface handler
     d = {}

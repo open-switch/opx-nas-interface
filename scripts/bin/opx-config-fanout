@@ -17,7 +17,6 @@ import cps
 import cps_object
 import sys
 import nas_os_if_utils as nas_if
-import nas_front_panel_map as fp
 import cps_utils
 import time
 import base_qos_init

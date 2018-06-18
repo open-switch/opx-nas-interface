@@ -447,6 +447,36 @@ TEST(std_vlan_set_admin, set_vlan_admin)
 
 }
 
+TEST(std_vlan_set_desc, set_vlan_desc)
+{
+
+    cps_api_object_t obj = cps_api_object_create();
+
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
+                         DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_OBJ, cps_api_qualifier_TARGET);
+
+    cps_api_object_attr_add(obj,IF_INTERFACES_INTERFACE_TYPE,
+           (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN,
+           sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN));
+
+    const char *br_name = "br100";
+
+
+    cps_api_set_key_data(obj, IF_INTERFACES_INTERFACE_NAME, cps_api_object_ATTR_T_BIN,
+                             br_name, strlen(br_name) + 1 );
+
+    const char *desc = "br100 interface description";
+    cps_api_object_attr_add(obj, IF_INTERFACES_INTERFACE_DESCRIPTION, desc, strlen(desc) + 1);
+
+    cps_api_transaction_params_t tr;
+    ASSERT_TRUE(cps_api_transaction_init(&tr)==cps_api_ret_code_OK);
+    cps_api_set(&tr,obj);
+    ASSERT_TRUE(cps_api_commit(&tr)==cps_api_ret_code_OK);
+
+    cps_api_transaction_close(&tr);
+
+}
+
 TEST(std_vlan_test, get_all_vlan)
 {
     cps_api_get_params_t gp;

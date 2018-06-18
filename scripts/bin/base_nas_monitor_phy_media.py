@@ -156,8 +156,7 @@ def monitor_interface_event():
             if_obj_list = nas_if.nas_os_if_list(d={'if-index':if_index})
             if if_obj_list is None:
                 nas_if.log_err('Failed to get Interface attributes by ifindex from NAS interface')
-                continue 
-
+                continue
             admin_state = _get_obj_attr_value(obj, 'if/interfaces-state/interface/admin-status')
             if admin_state != None:
                 # This is admin state change event

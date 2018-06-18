@@ -35,8 +35,8 @@ static inline IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t ndi_to_cps_oper_type(n
 #ifdef __cplusplus
 extern "C" {
 #endif
-t_std_error nas_int_port_create_mapped(npu_id_t npu, port_t port, const char *name, const char *desc, nas_int_type_t type);
-t_std_error nas_int_port_create_unmapped(const char *name, const char *desc, nas_int_type_t type);
+t_std_error nas_int_port_create_mapped(npu_id_t npu, port_t port, const char *name, nas_int_type_t type);
+t_std_error nas_int_port_create_unmapped(const char *name, nas_int_type_t type);
 t_std_error nas_int_port_delete(const char *name);
 
 void nas_int_port_link_change(npu_id_t npu, port_t port,

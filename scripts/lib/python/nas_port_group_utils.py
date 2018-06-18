@@ -61,7 +61,7 @@ def base_pg_state_attr(t):
 def get_hwp_speed(breakout, phy_speed, phy_mode):
     hwp_count =  breakout_to_hwp_count[breakout]
     _phy_speed_mbps = nas_if.from_yang_speed(phy_speed)
-    if _phy_speed_mbps == None or hwp_count == None:
+    if _phy_speed_mbps is None or hwp_count is None or hwp_count == 0:
         return None
     _hwp_speed_mbps = _phy_speed_mbps/hwp_count
     if phy_mode  == yang_phy_mode_fc:

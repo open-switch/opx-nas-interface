@@ -27,7 +27,6 @@
 #include "cps_api_operation.h"
 #include "nas_int_bridge.h"
 #include "nas_int_com_utils.h"
-#include "std_mutex_lock.h"
 #include <stdbool.h>
 
 #define MIN_VLAN_ID 1
@@ -136,7 +135,8 @@ t_std_error nas_add_or_del_port_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id,
                                         bool add_port);
 
 t_std_error nas_cps_add_port_to_os(hal_ifindex_t br_index, hal_vlan_id_t vlan_id,
-                                   nas_port_mode_t port_mode, hal_ifindex_t port_idx,uint32_t mtu);
+                                   nas_port_mode_t port_mode, hal_ifindex_t port_idx,uint32_t mtu,
+                                   BASE_IF_MODE_t mode);
 
 t_std_error nas_lag_add_del_vlan_update(hal_ifindex_t lag_index, hal_vlan_id_t,
                                         nas_port_mode_t port_mode, bool add_flag);
@@ -147,17 +147,16 @@ t_std_error  nas_handle_lag_del_from_vlan(nas_bridge_t *p_bridge, hal_ifindex_t 
                 nas_port_mode_t port_mode, bool cps_del ,vlan_roll_bk_t *roll_bk);
 
 t_std_error nas_cps_del_port_from_os(hal_vlan_id_t vlan_id, hal_ifindex_t port_index,
-                                     nas_port_mode_t port_mode);
+                                     nas_port_mode_t port_mode, BASE_IF_MODE_t vlan_mode);
 
-t_std_error nas_base_handle_lag_del(hal_ifindex_t br_index, hal_ifindex_t lag_index,
-                                    hal_vlan_id_t vlan_id);
 t_std_error nas_del_tagged_lag_intf(hal_ifindex_t lag_index, hal_vlan_id_t vlan_id);
 cps_api_return_code_t nas_publish_vlan_port_list(nas_bridge_t *p_bridge_node, nas_port_list_t &port_list,
                                                  nas_port_mode_t port_mode, cps_api_operation_types_t op);
 void nas_handle_bridge_mac(nas_bridge_t *pnode);
-void nas_handle_del_vlan_lag(hal_vlan_id_t vlan_id);
-std_mutex_type_t *vlan_lag_mutex_lock();
 t_std_error nas_default_vlan_cache_init(void);
 bool nas_set_vlan_member_port_mtu(hal_ifindex_t ifindex, uint32_t mtu, hal_vlan_id_t vlan_id);
-void nas_vlan_set_tagged_lag_mtu(hal_vlan_id_t vlan_id,uint32_t mtu) ;
+t_std_error nas_handle_lag_index_in_cps_set(nas_bridge_t *p_bridge, nas_port_list_t &port_index_list,
+                                            nas_port_mode_t port_mode, vlan_roll_bk_t *roll_bk);
+t_std_error nas_add_or_del_lag_in_vlan(hal_ifindex_t lag_index, hal_vlan_id_t vlan_id,
+                                              nas_port_mode_t port_mode, bool add_flag, bool roll_bk);
 #endif /* NAS_INTF_VLAN_H_ */

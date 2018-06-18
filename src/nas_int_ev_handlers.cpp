@@ -41,6 +41,7 @@
 #include "ietf-interfaces.h"
 #include "dell-base-common.h"
 #include "nas_if_utils.h"
+#include "vrf-mgmt.h"
 
 #include "cps_api_object_key.h"
 #include "cps_api_operation.h"
@@ -186,6 +187,7 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                      " Member port %s is virtual no need to do anything", mem_name);
              return;
         }
+            /* TODO Add function to set intf description on netlink message */
     }
 
     std_mutex_simple_lock_guard lock_t(nas_lag_mutex_lock());
@@ -396,6 +398,7 @@ static void send_lpbk_intf_oper_event(cps_api_object_t obj)
     hal_interface_send_event(obj);
 
 }
+
 static void nas_loopback_ev_handler(cps_api_object_t obj)
 {
     interface_ctrl_t details;
@@ -466,6 +469,26 @@ static void nas_macvlan_ev_handler(cps_api_object_t obj) {
     }
 
     const char *name =  (const char*)cps_api_object_attr_data_bin(if_name_attr);
+    if (op == cps_api_oper_DELETE) {
+        interface_ctrl_t info;
+        memset(&info, 0, sizeof(info));
+        safestrncpy(info.if_name, name, strlen(info.if_name)+1);
+        info.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+        if (dn_hal_get_interface_info(&info) == STD_ERR_OK) {
+            if (info.vrf_id != NAS_DEFAULT_VRF_ID) {
+                /* Since we're moving the MAC-VLAN interface from default to non-default VRF,
+                 * it is possible that MAC-VLAN delete from default VRF could delete
+                 * the already exising MAC_VLAN interface with different vrf-id,
+                 * if there is a VRF-id difference, ignore the update.
+                 * @@TODO Enhance NAS-Common intf-name to intf-info map
+                 * to include vrf-id also as the key */
+                EV_LOGGING(INTERFACE,INFO,"NAS-INT", "Intf:%s delete ignored since "
+                           "the interface is associated with VRF:%d", name, info.vrf_id);
+                return;
+            }
+        }
+    }
+
     safestrncpy(details.if_name,name,sizeof(details.if_name));
     details.if_index = cps_api_object_attr_data_u32(if_attr);
     details.int_type = nas_int_type_MACVLAN;
@@ -522,7 +545,9 @@ void nas_int_ev_handler(cps_api_object_t obj) {
             if (current_state != state) {
                 if (ndi_port_admin_state_set(ndi_port.npu_id, ndi_port.npu_port,
                             (state == IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_UP) ? true: false) != STD_ERR_OK) {
-                    EV_LOGGING(INTERFACE,ERR,"INTF-NPU","Error Setting Admin State in NPU");
+                    EV_LOGGING(INTERFACE,ERR,"INTF-NPU","Error Setting Admin State to %s for %d:%d ifindex %d",
+                               state == IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_UP ? "UP" : "DOWN",
+                               ndi_port.npu_id, ndi_port.npu_port, if_index);
                 } else {
                     EV_LOGGING(INTERFACE,INFO,"INTF-NPU","Admin state change on %d:%d to %d",
                         ndi_port.npu_id, ndi_port.npu_port,state);
@@ -547,7 +572,8 @@ void nas_int_ev_handler(cps_api_object_t obj) {
         if (ndi_port_mtu_set(npu,port, mtu)!=STD_ERR_OK) {
             /* If unable to set new port MTU (based on received MTU) in NPU
                then revert back the MTU in kernel and MTU in NPU to old values */
-            EV_LOGGING(INTERFACE,ERR,"INTF-NPU","Error setting MTU %d in NPU\n", mtu);
+            EV_LOGGING(INTERFACE,ERR,"INTF-NPU","Error setting MTU %d for NPU %d PORT %d ifindex %d",
+                       mtu, npu, port, if_index);
             if (ndi_port_mtu_get(npu,port,&mtu)==STD_ERR_OK) {
                 cps_api_set_key_data(obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, cps_api_object_ATTR_T_U32,
                              &if_index, sizeof(if_index));
@@ -579,6 +605,11 @@ bool nas_int_ev_handler_cb(cps_api_object_t obj, void *param) {
     }
     EV_LOGGING(INTERFACE,INFO,"INTF-EV","OS event received for interface state change.");
     BASE_CMN_INTERFACE_TYPE_t if_type = (BASE_CMN_INTERFACE_TYPE_t) cps_api_object_attr_data_u32(_type);
+    cps_api_object_attr_t _vrf_attr = cps_api_object_attr_get(obj, VRF_MGMT_NI_IF_INTERFACES_INTERFACE_VRF_ID);
+    if (_vrf_attr && (cps_api_object_attr_data_u32(_vrf_attr) != NAS_DEFAULT_VRF_ID)) {
+        /* Ignore all interface events interface from non-default VRF */
+        return true;
+    }
     auto func = _int_ev_handlers->find(if_type);
     if (func != _int_ev_handlers->end()) {
         func->second(obj);

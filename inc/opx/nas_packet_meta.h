@@ -49,6 +49,8 @@ typedef enum {
     NAS_PKT_META_SAMPLE_COUNT, /* value type - uint64_t */
 
     NAS_PKT_META_PKT_LEN, /* value type - uint32_t */
+
+    NAS_PKT_META_TRAP_ID, /* value type - uint64_t */
 } nas_pkt_meta_attr_type_t;
 
 /**

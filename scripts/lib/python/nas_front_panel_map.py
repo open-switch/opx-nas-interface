@@ -54,12 +54,18 @@ def get_fc_speed_frm_npu_speed(_yang_speed):
     return get_value(eth_to_fc_speed, _yang_speed)
 
 def get_phy_npu_port_speed(breakout, fp_speed):
-    if not is_key_valid(breakout_to_phy_fp_port_count, breakout):
-        print 'invalid breakout mode %d' % breakout
-        return 0 # error case
-    pp_count,fp_count = get_value(breakout_to_phy_fp_port_count, breakout)
-    speed = (fp_speed * fp_count) / pp_count
-    return (get_value(mbps_to_yang_speed, speed))
+    if breakout is yang_breakout['disabled'] and fp_speed is 0:
+        return 0
+    elif breakout is not yang_breakout['disabled'] and fp_speed is not 0:
+        if not is_key_valid(breakout_to_phy_fp_port_count, breakout):
+            print 'invalid breakout mode %d' % breakout
+            return 0 # error case
+        pp_count,fp_count = get_value(breakout_to_phy_fp_port_count, breakout)
+        speed = 0
+        if pp_count is not 0:
+            speed = ((fp_speed * fp_count) / pp_count)
+        return (get_value(mbps_to_yang_speed, speed))
+    return None
 
 def get_phy_port_speed(breakout, phy_mode, fp_speed):
     npu_port_speed = get_phy_npu_port_speed(breakout, fp_speed)
@@ -78,7 +84,7 @@ def get_phy_port_speed(breakout, phy_mode, fp_speed):
 # it belongs to.
 
 class PortProfile(object):
-    def __init__(self, profile=None, supported_autoneg=None, name=None, breakout_caps=None, speed_caps=None, phy_mode_caps=None, def_speed=None, def_br=None, def_phy=None):
+    def __init__(self, profile=None, supported_autoneg=None, name=None, breakout_caps=None, speed_caps=None, phy_mode_caps=None, def_speed=None, def_br=None, def_phy=None, description="None"):
         if profile != None and isinstance(profile, PortProfile):
             self.copy(profile)
         else:
@@ -107,6 +113,10 @@ class PortProfile(object):
             self.phy_port_speed =  None
             self.def_phy_port_speed = None
             self.fc_caps = []
+            self.hybrid_group_profile_mode = None
+            self.hybrid_group_default_profile_mode = None
+            self.supported_hybrid_group_profile_modes = []
+            self.description = description
 
     def copy(self,profile):
         self.profile_name = profile.profile_name
@@ -124,6 +134,19 @@ class PortProfile(object):
         self.def_phy_port_speed = None
         self.fc_caps = profile.fc_caps[:]
 
+    def apply(self,profile):
+        self.profile_name = profile.profile_name
+        self.supported_autoneg = profile.supported_autoneg
+        self.breakout_caps = profile.breakout_caps[:]
+        self.hwport_speed_caps = profile.hwport_speed_caps[:]
+        self.phy_mode_caps = profile.phy_mode_caps[:]
+        self.def_hwport_speed = profile.def_hwport_speed
+        self.def_breakout = profile.def_breakout
+        self.def_phy_mode = profile.def_phy_mode
+        self.hwp_speed = profile.def_hwport_speed
+        self.phy_mode = yang_phy_mode_ether
+        self.def_phy_port_speed = None
+        self.fc_caps = profile.fc_caps[:]
 
     def get_profile_type(self):
         return self.profile_name
@@ -191,6 +214,24 @@ class PortProfile(object):
     def get_default_phy_port_speed(self):
         return self.def_phy_port_speed
 
+    def get_supported_hybrid_group_profile_modes(self):
+        return self.supported_hybrid_group_profile_modes
+
+    def set_supported_hybrid_group_profile_modes(self, supported_hybrid_group_profile_modes):
+        self.supported_hybrid_group_profile_modes = supported_hybrid_group_profile_modes
+
+    def get_hybrid_group_profile_mode(self):
+        return self.hybrid_group_profile_mode
+
+    def set_hybrid_group_profile_mode(self, hybrid_group_profile_mode):
+        self.hybrid_group_profile_mode = hybrid_group_profile_mode
+
+    def get_hybrid_group_default_profile_mode(self):
+        return self.hybrid_group_default_profile_mode
+
+    def set_hybrid_group_default_profile_mode(self, hybrid_group_default_profile_mode):
+        self.hybrid_group_default_profile_mode = hybrid_group_default_profile_mode
+
     def show(self):
         print('Profile name %s' % self.profile_name)
         print('Phy modes   %s, ' % str((self.phy_mode_caps)))
@@ -246,6 +287,8 @@ def process_portProfile_cfg(root):
     _g_fc = g_default.get('fc_enabled')
     def_profile = g_default.get('default_profile')
     for profile in g_default:
+        if profile.tag == 'hybrid_profile':
+            continue
         if profile.tag == 'npu-supported-speeds':
             for speed in profile.findall('Supported_speed'):
                 _yang_speed = get_value(mbps_to_yang_speed, int(speed.get('value')))
@@ -271,7 +314,11 @@ def process_portProfile_cfg(root):
         def_breakout = get_value(yang_breakout, profile.get('default_breakout'))
         br_cap = []
         hwp_speed_cap = []
+        ds = "None"
 
+        # Read profile description
+        for dscr in profile.findall('profile_description'):
+            ds = dscr.get('value')
         # Read breakout capabilities
         for br in profile.findall('breakout_cap'):
             _br_str = br.get('value')
@@ -286,7 +333,7 @@ def process_portProfile_cfg(root):
             fc_caps = process_Profile_fc_cap_cfg(_fc_cap_node)
 
         portProfile_list[name] = PortProfile(None, supported_autoneg, name, br_cap, hwp_speed_cap,phy_mode_caps,
-                                             def_hwport_speed,def_breakout)
+                                             def_hwport_speed,def_breakout, description=ds)
         portProfile_list[name].set_fc_caps(fc_caps)
         fc_caps = []
     if def_profile != None and portProfile_list[def_profile] != None:
@@ -304,10 +351,15 @@ def get_port_profile(p_name):
             return portProfile_list[p_name]
     return get_default_port_profile()
 
+def get_hybrid_profile(hybrid_profile_name):
+    if hybrid_profile_name != None:
+        if hybrid_profile_name in hybrid_profile_list:
+            return hybrid_profile_list[hybrid_profile_name]
+    return None
 
 class Port(PortProfile):
 
-    def __init__(self, npu, name, port, media_id, mac_offset, port_profile):
+    def __init__(self, npu, name, port, media_id, mac_offset, port_profile, hybrid_profile=None):
         super(Port, self).__init__(port_profile)
         self.npu = npu
         self.name = name
@@ -315,7 +367,10 @@ class Port(PortProfile):
         self.media_id = media_id
         self.mac_offset = mac_offset
         self.port_group_id = None
+        self.hybrid_group_id = None
         self.hwports = []
+        self.hybrid_profile = hybrid_profile
+    
     def get_hwports(self):
         if self.hwports is None:
             return None
@@ -335,6 +390,18 @@ class Port(PortProfile):
 
     def set_port_group_id(self, pg_id):
         self.port_group_id = pg_id
+
+    def get_hybrid_group_id(self):
+        return self.hybrid_group_id
+
+    def set_hybrid_group_id(self, hg_id):
+        self.hybrid_group_id = hg_id
+
+    def get_hybrid_profile(self):
+        return self.hybrid_profile
+
+    def set_hybrid_profile(self, hybrid_profile):
+        self.hybrid_profile = hybrid_profile
 
     def is_pg_member(self):
         if self.port_group_id is None:
@@ -359,6 +426,11 @@ class Port(PortProfile):
         self.def_phy_port_speed = get_phy_port_speed(self.def_breakout, self.def_phy_mode,
                                     self.def_hwport_speed * len(self.hwports))
 
+    def apply_port_profile(self, port_profile):
+        self.apply(port_profile)
+        self.set_default_phy_port_speed()
+        return True
+
     def show(self):
         print "Name: " + self.name
         print "ID:   " + str(self.id)
@@ -368,7 +440,6 @@ class Port(PortProfile):
         print "Ctrl Port: " + str(self.control_port())
         print " Profile Info :--"
         super(Port, self).show()
-
 
 class Npu:
 
@@ -381,7 +452,7 @@ class Npu:
             return None
         return self.ports[port]
 
-    def create_port(self, name, port, media_id, mac_offset, port_profile):
+    def create_port(self, name, port, media_id, mac_offset, port_profile, hybrid_profile=None):
         if port not in self.ports:
             self.ports[port] = Port(
                 self.id,
@@ -389,7 +460,8 @@ class Npu:
                 port,
                 media_id,
                 mac_offset,
-                port_profile)
+                port_profile,
+                hybrid_profile)
         return self.ports[port]
 
     def port_count(self):
@@ -495,26 +567,45 @@ def find_mac_offset_by_name_lane(name, lane):
 
 def is_qsfp28_cap_supported(fp_port_id):
     fp_details = find_front_panel_port(fp_port_id)
-    profile_type = fp_details.get_profile_type()
-    if profile_type == 'ethernet_qsfp28' or profile_type == 'unified_qsfp28':
+    def_phy_speed = fp_details.get_default_phy_port_speed()
+    if def_phy_speed == (get_value(yang_speed,'100G')):
         return True
     return False
+
+def set_fp_hybrid_group_id(port, hg_id):
+    port_detail = find_front_panel_port(port)
+    if port_detail != None:
+        port_detail.set_hybrid_group_id(hg_id)
 
 def set_fp_port_group_id(port, pg_id):
     port_detail = find_front_panel_port(port)
     if port_detail != None:
         port_detail.set_port_group_id(pg_id)
 
+class HybridProfile(object):
+    def __init__(self, name, profile_modes):
+        self.name = name
+        self.profile_modes = profile_modes
+
+    def get_port_profile(self, profile_mode):
+        if profile_mode in self.profile_modes:
+            return self.profile_modes[profile_mode][0]
+        return None
+
 # Port Group details is read from the platform specific config file.
 # Properties in the port group is common to all front panel ports in a
 # port group.
 class PortGroup(PortProfile):
-    def __init__(self, name, port_profile, fp_ports, hw_ports):
+    def __init__(self, name, port_profile, fp_ports, hw_ports, is_hybrid=False, hybrid_group_default_profile_mode=None, supported_hybrid_group_profile_modes=[]):
         super(PortGroup, self).__init__(port_profile)
         self.name = name
         self.fp_ports = fp_ports[:]
         self.hw_ports = hw_ports[:]
         self.set_phy_port_speed()
+        self.is_hybrid = is_hybrid
+        self.set_hybrid_group_default_profile_mode(hybrid_group_default_profile_mode)
+        self.set_hybrid_group_profile_mode(hybrid_group_default_profile_mode)
+        self.set_supported_hybrid_group_profile_modes(supported_hybrid_group_profile_modes)
 
     def set_phy_port_speed(self):
         self.phy_port_speed = get_phy_port_speed(self.breakout, self.phy_mode,
@@ -523,11 +614,16 @@ class PortGroup(PortProfile):
     def set_default_phy_port_speed(self):
         self.def_phy_port_speed = get_phy_port_speed(self.def_breakout, self.def_phy_mode,
                                     self.def_hwport_speed * len(self.hw_ports))
-    
+   
     def get_fp_ports(self):
         return self.fp_ports[:]
     def get_hw_ports(self):
         return self.hw_ports[:]
+
+    def apply_port_profile(self, port_profile):
+        self.apply(port_profile)
+        self.set_default_phy_port_speed()
+        return True
 
     def show(self):
         print "Name: " + self.name
@@ -549,6 +645,7 @@ def process_frontPanelPort_cfg(root):
         _mac_offset = int(i.get('mac_offset'))
         _profile_name = i.get('profile_type')
         port_profile = get_port_profile(_profile_name)
+        
         if npu is None:
             npu = get_npu(_npu)
 
@@ -593,11 +690,76 @@ def process_portGroup_cfg(root):
         port_group_list[name].set_phy_port_speed()
         port_group_list[name].set_default_phy_port_speed()
 
+hybrid_group_list = {}
+
+def get_hybrid_group_list():
+    return hybrid_group_list
+
+def process_hybridGroup_cfg(root):
+    global hybrid_group_list
+    # Read all hybrid group configuration
+    _hybrid_group = root.find('hybrid-group')
+    if _hybrid_group is None:
+        # the platform does not have hybrid groups
+        return
+    for hg in _hybrid_group.findall('hg'):
+        _profile_name = hg.get('profile_type')
+        port_profile = get_port_profile(_profile_name)
+        profile_mode = hg.get('profile_mode')
+        name = hg.get('name')
+        fp_ports = []
+        hw_ports = []
+        supported_profile_modes = []
+        for e in hg:
+            if e.get('fpport') != None:
+                fp_port = int(e.get('fpport'))
+                set_fp_hybrid_group_id(fp_port, name)
+                fp_ports.append(fp_port)
+            if e.get('hwport') != None:
+                hw_ports.append(int(e.get('hwport')))
+            if e.get('supported_profiles') != None:
+                supported_profile_modes.append(e.get('supported_profiles'))
+            if e.get('hybrid_profile_type') != None:
+                port = find_front_panel_port(fp_port)
+                port.set_hybrid_profile(get_hybrid_profile(e.get('hybrid_profile_type')))
+        hybrid_group_list[name] = PortGroup(name, port_profile, fp_ports, hw_ports, True, profile_mode, supported_profile_modes)
+        hybrid_group_list[name].set_phy_port_speed()
+        hybrid_group_list[name].set_default_phy_port_speed()
+
+hybrid_profile_list = {}
+
+def get_hybrid_profile_list():
+    return hybrid_profile_list
+
+def process_hybridProfile_cfg(root):
+    global hybrid_profile_list
+    # Read all hybrid group configuration
+    _global = root.find('global')
+    if _global is None:
+        return
+    for hybrid_profile in _global.findall('hybrid_profile'):
+        hybrid_profile_name = hybrid_profile.get('name')
+        hybrid_profile_profile_modes = {}
+        
+        for e in hybrid_profile.findall('profile_mode'):
+            profile_mode = e.get('name')
+            hybrid_profile_profile_modes[profile_mode] = []
+            if profile_mode != None:
+                
+                for f in e.findall('port_profile'):
+                    port_profile = f.get('name')
+                    hybrid_profile_profile_modes[profile_mode].append(port_profile)
+        
+        hybrid_profile_list[hybrid_profile_name] = HybridProfile(hybrid_profile_name, hybrid_profile_profile_modes)
+
 
 def process_file(root):
     process_portProfile_cfg(root)
     process_frontPanelPort_cfg(root)
+    process_hybridProfile_cfg(root)
     process_portGroup_cfg(root)
+    process_hybridGroup_cfg(root)
+
 
 def init(filename):
     cfg = ET.parse(filename)

@@ -21,6 +21,7 @@ import nas_ut_framework as nas_ut
 import nas_os_utils
 import cps_object
 import nas_os_if_utils as nas_if
+import nas_common_utils as nas_common
 
 
 intf_rpc_key_id = 'dell-base-if-cmn/set-interface'
@@ -38,7 +39,7 @@ def nas_vlan_op(op, data_dict):
             return False
         obj = cps_object.CPSObject( intf_rpc_key_id, data=data_dict)
         op = 'rpc'
-    nas_ut.get_cb_method(op)(obj)
+    nas_common.get_cb_method(op)(obj)
 
 # All the function definition
 
@@ -173,8 +174,8 @@ def main(argv):
 
         vlan_obj = cps_object.CPSObject(vlan_obj_id)
         vlan_obj.add_attr(name_attr_id, if_name)
-        cps.get([vlan_obj.get()], vlan_attr_list) 
-        
+        cps.get([vlan_obj.get()], vlan_attr_list)
+
         if port_type in vlan_attr_list[0]['data']:
             if_curr_list = vlan_attr_list[0]['data'][port_type]
             ifname_list = ifname_list + if_curr_list
@@ -184,20 +185,20 @@ def main(argv):
         if_curr_list = []
         if_target_list = []
         ifname_list = _port_name_list(ports)
-        
+
         vlan_obj = cps_object.CPSObject(vlan_obj_id)
         vlan_obj.add_attr(name_attr_id, if_name)
-        cps.get([vlan_obj.get()], vlan_attr_list) 
-        
-        if port_type in vlan_attr_list[0]['data']:
-            if_curr_list = vlan_attr_list[0]['data'][port_type] 
+        cps.get([vlan_obj.get()], vlan_attr_list)
 
-        for curr in if_curr_list:  
-            # Strip the port name from CPS to have the same name format 
-            port_name = str(curr).rstrip('\0')     
+        if port_type in vlan_attr_list[0]['data']:
+            if_curr_list = vlan_attr_list[0]['data'][port_type]
+
+        for curr in if_curr_list:
+            # Strip the port name from CPS to have the same name format
+            port_name = str(curr).rstrip('\0')
             if port_name not in ifname_list:
                 if_target_list.append(port_name)
-        
+
         nas_vlan_op("set", {name_attr_id: if_name, port_type: if_target_list})
 
     elif choice == 'mac' and if_name != '' and mac_id != '':

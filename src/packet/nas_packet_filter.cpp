@@ -43,7 +43,7 @@ nas_obj_id_t pf_table::pf_t_create_rule(pf_direction dir, pf_match_t& mat, pf_ac
                                         bool stop) {
 
     nas_obj_id_t id = pf_t_alloc_tid();
-    EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","New id generated %d", id);
+    EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","New id generated %lu", id);
 
     pf_rule rule (id, mat, act);
     rule.pf_r_set_stop(stop);
@@ -62,12 +62,12 @@ nas_obj_id_t pf_table::pf_t_add_rule(pf_direction dir, pf_rule& rule) {
 
     if( dir == BASE_PACKET_PACKET_DIRECTION_TYPE_DIR_IN) {
         ++ingress_rules;
-        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Ingress rule %d added - Total count %d",
+        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Ingress rule %lu added - Total count %d",
                                    rule.pf_r_get_id(),ingress_rules);
         pf_ingress_table.emplace_back(rule);
     } else {
         ++egress_rules;
-        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Egress rule %d added - Total count %d",
+        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Egress rule %lu added - Total count %d",
                                    rule.pf_r_get_id(), egress_rules);
         pf_egress_table.emplace_back(rule);
     }
@@ -114,13 +114,13 @@ bool pf_table::pf_t_del_rule(nas_obj_id_t id) {
 
     if((del = pf_gen_erase_id(pf_ingress_table, id))) {
         --ingress_rules;
-        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Ingress rule %d deleted, rem %d", id, ingress_rules);
+        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Ingress rule %lu deleted, rem %d", id, ingress_rules);
     } else if((del = pf_gen_erase_id(pf_egress_table, id))) {
         --egress_rules;
-        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Egress rule %d deleted, rem %d", id, egress_rules);
+        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Egress rule %lu deleted, rem %d", id, egress_rules);
     }
 
-    if(!del) EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Rule not found id %d", id);
+    if(!del) EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Rule not found id %lu", id);
     else pf_t_release_tid(id);
 
     return del;
@@ -137,7 +137,7 @@ bool pf_table::pf_t_in_pkt_hndlr(uint8_t *pkt, uint32_t pkt_len, pf_pkt_attr *p_
     std::lock_guard<std::mutex> pf_tlock {pf_mtx};
 
     for (auto pfr : pf_ingress_table) {
-        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Scanning rule id %d", pfr.pf_r_get_id());
+        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Scanning rule id %lu", pfr.pf_r_get_id());
         bool match = true, action = true;
 
         //Consider using std::invoke
@@ -165,7 +165,7 @@ bool pf_table::pf_t_out_pkt_hndlr(uint8_t *pkt, uint32_t pkt_len, pf_pkt_attr *p
     std::lock_guard<std::mutex> pf_tlock {pf_mtx};
 
     for (auto pfr : pf_egress_table) {
-        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Scanning rule id %d", pfr.pf_r_get_id());
+        EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","Scanning rule id %lu", pfr.pf_r_get_id());
         bool match = true, action = true;
 
         //Consider using std::invoke
@@ -200,6 +200,7 @@ void pf_match::pf_m_init_fptr() {
 
 bool pf_match::pf_m_usr_trap_id(uint8_t *pkt, uint32_t len, pf_pkt_attr *p_attr,
                                 pf_match_t& m_tv) const {
+    EV_LOGGING(INTERFACE,DEBUG,"PKT-FIL","PKT TrapID: %d, FILTER TRAPID: %lu", p_attr->trap_id, m_tv.m_val.u64);
     if(m_tv.m_val.u64 == p_attr->trap_id) return true;
     return false;
 }
@@ -270,6 +271,7 @@ bool pf_action::pf_a_redirect_sock(uint8_t *pkt, uint32_t pkt_len, pf_pkt_attr *
     nas_pkt_meta_buf_init (meta_buf, sizeof(meta_buf), &it);
     nas_pkt_meta_add_u32 (&it, NAS_PKT_META_RX_PORT, rx_ifindex);
     nas_pkt_meta_add_u32 (&it, NAS_PKT_META_PKT_LEN, pkt_len);
+    nas_pkt_meta_add_u64 (&it, NAS_PKT_META_TRAP_ID, p_attr->trap_id);
 
     size_t meta_len = sizeof(meta_buf) - it.len;
     struct iovec sock_data[] = {{(char*)meta_buf, meta_len}, {pkt, pkt_len} };
@@ -408,7 +410,7 @@ static void nas_pf_match_list (const cps_api_object_t obj, const cps_api_object_
         /*
          * @TODO - to be extended to support rest of the match type
          */
-        EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "list indx %d type %d", l_idx, _type);
+        EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "list indx %lu type %d", l_idx, _type);
 
         switch (_type) {
         case BASE_PACKET_PACKET_MATCH_TYPE_DST_MAC:
@@ -435,7 +437,7 @@ static void nas_pf_match_list (const cps_api_object_t obj, const cps_api_object_
             }
             _value = cps_api_object_attr_data_u32 (attr_match_val);
             m_tv.m_val.u64 = _value;
-            EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "Match_type %d value %d", _type, _value);
+            EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "Match_type %d value %lu", _type, _value);
             break;
 
         default:
@@ -488,16 +490,27 @@ static void nas_pf_action_list (const cps_api_object_t obj, const cps_api_object
         pf_action_t a_tv;
         a_tv.m_type = _type;
         cps_api_object_attr_t attr_val;
+        cps_api_object_attr_t socket_attr;
+        cps_api_object_it_t socket_iter;
 
         /*
          * Handle all the action type here
          */
-        EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "list index %d, type %d", l_idx, _type);
+        EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "list index %lu, type %d", l_idx, _type);
 
         switch (_type) {
         case BASE_PACKET_PACKET_ACTION_TYPE_REDIRECT_SOCK:
         case BASE_PACKET_PACKET_ACTION_TYPE_COPY_TO_SOCK:
-            attr_val = cps_api_object_it_find (&_attr, BASE_PACKET_RULE_ACTION_SOCKET_ADDRESS_IP);
+
+            socket_attr = cps_api_object_it_find (&_attr, BASE_PACKET_RULE_ACTION_SOCKET_ADDRESS);
+
+            if (socket_attr == NULL)
+                throw nas::base_exception {std_err, __FUNCTION__, "Missing (socket) attribute"};
+
+            cps_api_object_it_from_attr(socket_attr, &socket_iter);
+            cps_api_object_it_inside (&socket_iter);
+            attr_val = cps_api_object_it_find (&socket_iter, BASE_PACKET_RULE_ACTION_SOCKET_ADDRESS_IP);
+
             if (attr_val == NULL)
                 throw nas::base_exception {std_err, __FUNCTION__, "Missing (IP) attribute"};
 
@@ -506,7 +519,7 @@ static void nas_pf_action_list (const cps_api_object_t obj, const cps_api_object
 
             ip = *(dn_ipv4_addr_t*)cps_api_object_attr_data_bin(attr_val);
 
-            attr_val = cps_api_object_it_find (&_attr, BASE_PACKET_RULE_ACTION_SOCKET_ADDRESS_UDP_PORT);
+            attr_val = cps_api_object_it_find (&socket_iter, BASE_PACKET_RULE_ACTION_SOCKET_ADDRESS_UDP_PORT);
             if (attr_val == NULL)
                 throw nas::base_exception {std_err, __FUNCTION__, "Missing (Port) attribute"};
 
@@ -514,7 +527,7 @@ static void nas_pf_action_list (const cps_api_object_t obj, const cps_api_object
 
             nas_pf_util_fill_act_val(a_tv, ip, (int)_value);
 
-            EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "Port %d, ip 0x%x", _value, htonl(ip.s_addr));
+            EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "Port %lu, ip 0x%x", _value, htonl(ip.s_addr));
             break;
 
         case BASE_PACKET_PACKET_ACTION_TYPE_REDIRECT_IF:
@@ -525,7 +538,7 @@ static void nas_pf_action_list (const cps_api_object_t obj, const cps_api_object
             _value = cps_api_object_attr_data_u32 (attr_val);
             a_tv.m_val.u32 = _value;
 
-            EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "Action IF - ifidx %d", _value);
+            EV_LOGGING (INTERFACE, DEBUG, "PKT-FIL", "Action IF - ifidx %lu", _value);
             break;
 
         default:
@@ -603,7 +616,7 @@ static t_std_error nas_pf_cps_create(cps_api_object_t obj)
                 break;
 
             default:
-                EV_LOGGING (INTERFACE, ERR, "PKT-FIL","Unknown attribute %d", attr_id);
+                EV_LOGGING (INTERFACE, ERR, "PKT-FIL","Unknown attribute %lu", attr_id);
                 break;
         }
     }

@@ -28,6 +28,7 @@
 #include "hal_interface_defaults.h"
 #include "nas_ndi_port.h"
 #include "nas_int_logical.h"
+#include "nas_int_utils.h"
 
 #include "cps_class_map.h"
 #include "cps_api_object_key.h"
@@ -131,6 +132,24 @@ static _port_cache* get_phy_port_cache(npu_id_t npu, uint_t port)
     }
 
     return &_phy_port[hwport];
+}
+
+t_std_error nas_int_get_phy_speed(npu_id_t npu, port_t port, BASE_IF_SPEED_t* speed)
+{
+    if (speed == nullptr) {
+        return STD_ERR(INTERFACE, PARAM, 0);
+    }
+
+    _port_cache* port_info = get_phy_port_cache(npu, port);
+    if (port_info == nullptr) {
+        EV_LOGGING(INTERFACE, ERR,
+                   "NAS-PHY", "Failed to get physical port info from cache for npu %d port %d",
+                   npu, port);
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+
+    *speed = port_info->speed;
+    return STD_ERR_OK;
 }
 
 static void make_phy_port_details(npu_id_t npu, port_t port, cps_api_object_t obj) {

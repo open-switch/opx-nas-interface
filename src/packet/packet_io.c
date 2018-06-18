@@ -115,7 +115,7 @@ static void _sflow_sock_init ()
     t_std_error rc = std_socket_create (e_std_sock_INET4, e_std_sock_type_DGRAM,
                                         0, NULL, &sflow_sock_fd);
     if (rc != STD_ERR_OK) {
-        EV_LOG_ERR(ev_log_t_INTERFACE, ev_log_s_CRITICAL, "PKT-IO", "SFlow socket Error %ld", rc);
+        EV_LOG_ERR(ev_log_t_INTERFACE, ev_log_s_CRITICAL, "PKT-IO", "SFlow socket Error %d", rc);
     }
     /* Set the SFlow pkt dest addr from default values. Will be made configurable in future */
 #define SFLOW_PKT_DEF_IP    "127.0.0.1"
@@ -123,7 +123,7 @@ static void _sflow_sock_init ()
     rc = std_sock_addr_from_ip_str (e_std_sock_INET4, SFLOW_PKT_DEF_IP,
                                     SFLOW_PKT_DEF_PORT, &sflow_sock_dest);
     if (rc != STD_ERR_OK) {
-        EV_LOG_ERR(ev_log_t_INTERFACE, ev_log_s_CRITICAL, "PKT-IO", "SFlow socket address creation error %ld", rc);
+        EV_LOG_ERR(ev_log_t_INTERFACE, ev_log_s_CRITICAL, "PKT-IO", "SFlow socket address creation error %d", rc);
     }
 }
 
@@ -146,7 +146,7 @@ static t_std_error _sflow_pkt_hdl (uint8_t *pkt, uint32_t pkt_len,
     }
 
     EV_LOGGING(INTERFACE,DEBUG,"PKT-IO","[RX] SFLOW Pkt received - length %d npu %d rx_ifindex %d"
-              " tx_ifindex %d sample count %d\r\n",
+              " tx_ifindex %d sample count %lu\r\n",
               pkt_len, p_attr->npu_id, rx_ifindex,tx_ifindex,sample_count);
 
 #define META_BUF_SIZE  1024
@@ -308,7 +308,7 @@ static cps_api_return_code_t _cps_api_write_int (void                         *c
                 break;
             default:
                 EV_LOG (ERR, INTERFACE, ev_log_s_MINOR, "PKT-IO",
-                        "Unknown attribute ignored %d", attr_id);
+                        "Unknown attribute ignored %ld", attr_id);
                 break;
         }
     }

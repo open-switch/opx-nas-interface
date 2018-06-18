@@ -111,6 +111,17 @@ yang_breakout = {
     '4x4' :  7,
     '2x4' :  8,
     '4x2' :  9,
+    'disabled': 1
+}
+
+# Mapping between breakout mode and port speed
+yang_breakout_port_speed = {
+    '100gx1' : (yang_breakout['1x1'],yang_speed['100G']),
+    '50gx2'  : (yang_breakout['2x1'],yang_speed['50G']),
+    '40gx1'  : (yang_breakout['1x1'],yang_speed['40G']),
+    '25gx4'  : (yang_breakout['4x1'],yang_speed['25G']),
+    '10gx4'  : (yang_breakout['4x1'],yang_speed['10G']),
+    'disabled':(yang_breakout['disabled'],yang_speed['0'])
 }
 
 # Mapping between breakout mode and number of allocated hw ports for each physical port.
@@ -119,7 +130,8 @@ breakout_to_hwp_count = {
         yang_breakout['2x1']:2,
         yang_breakout['4x1']:1,
         yang_breakout['4x4']:1,
-        yang_breakout['2x4']:2
+        yang_breakout['2x4']:2,
+        yang_breakout['disabled']:0
         }
 
 # Mapping between breakout mode and physical ports count per front panel port, or
@@ -133,6 +145,7 @@ breakout_to_phy_fp_port_count = {
         yang_breakout['2x2']:(2,2),
         yang_breakout['4x2']:(4,2),
         yang_breakout['8x2']:(8,2),
+        yang_breakout['disabled']:(0,0),
         }
 
 # mapping between breakout mode to the number of ports skipped to get the next physical port
@@ -145,6 +158,7 @@ breakout_to_skip_port = {
         yang_breakout['2x2']:3,
         yang_breakout['4x2']:1,
         yang_breakout['8x2']:0,
+        yang_breakout['disabled']:4,
         }
 
 # mapping between breakout mode to subport to lane id mapping
@@ -299,3 +313,8 @@ def is_key_valid(dict, key):
 
 def get_value(dict, key):
     return dict[key]
+
+def get_key(dict, value):
+    for key, v in dict.items():
+        if value == v:
+            return key

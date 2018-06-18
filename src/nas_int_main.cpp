@@ -54,6 +54,7 @@
 #include "nas_int_utils.h"
 #include "std_utils.h"
 #include "nas_vrf.h"
+#include "nas_vrf_utils.h"
 
 #include "nas_ndi_port.h"
 #include <string.h>
@@ -186,7 +187,7 @@ bool mgmt_intf_event_handler (cps_api_object_t obj, void * context)
     intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF_NAME;
     safestrncpy(intf_ctrl.if_name, (const char *)details.if_name, sizeof(intf_ctrl.if_name));
     if (vrf_name_attr) {
-        char  vrf_name[NAS_VRF_NAME_STR_SZ+1];
+        char  vrf_name[NAS_VRF_NAME_SZ+1];
 
         memset (vrf_name,0,sizeof(vrf_name));
         safestrncpy(vrf_name, (const char *)cps_api_object_attr_data_bin(vrf_name_attr),
@@ -393,15 +394,6 @@ t_std_error hal_interface_init(void) {
         return rc;
     }
 
-    if ( (rc=nas_vrf_object_vrf_init(nas_if_handle))!=STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-VRF", "Failed to initialize VRF handler");
-        return rc;
-    }
-
-    if ( (rc=nas_vrf_object_vrf_intf_init(nas_if_handle))!=STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-VRF-INTF", "Failed to initialize VRF and Intf bind handler");
-        return rc;
-    }
     nas_default_vlan_cache_init();
     nas_shell_command_init();
     return (rc);

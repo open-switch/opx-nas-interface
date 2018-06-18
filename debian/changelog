@@ -1,3 +1,24 @@
+opx-nas-interface (5.17.0) unstable; urgency=medium
+
+  * Update: VLAN filtering support
+  * Update: Publishing interface state object to display configured value
+            during no oper event
+  * Update: Support for interface statistics
+  * Feature: Multi-VRF support
+  * Feature: Support for IP MIB interface stats table
+  * Feature: Routing VRF
+  * Feature: Stats for ether-like interface
+  * Feature: Integrate PAS media QSA
+  * Bugfix: No VLAN ID error
+  * Bugfix: Add support to set packet drop when untagged port is removed
+            from VLAN
+  * Bugfix: FEC is not shown on 100g and 25g interface
+  * Bugfix: WFB negotiation is turned off by default
+  * Bugfix: Set NPU port correctly for a member in a bridge for 
+            mapped/unmapped events/
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Thu, 26 Apr 2018 17:17:56 -0800
+ 
 opx-nas-interface (5.10.1+opx15) unstable; urgency=medium
 
   * Bugfix: Fix error when configuring block and unblock LAG memberports in

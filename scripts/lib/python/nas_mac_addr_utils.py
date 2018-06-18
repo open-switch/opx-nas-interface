@@ -78,10 +78,18 @@ def if_get_mac_addr(if_type, fp_mac_offset = None, vlan_id = None, lag_id = None
     mac_offset = 0
     get_mac_offset = lambda boff, brange, val: boff + val % brange
     if if_type == 'front-panel':
-        if fp_mac_offset == None or fp_mac_offset > addr_range:
-            nas_if.log_err('Invalid or no mac offset input for front panel port')
+        if fp_mac_offset is None:
+            nas_if.log_err('No mac offset input for front panel port')
             return None
-        mac_offset = fp_mac_offset
+        if fp_mac_offset > 0:
+            # MAC offset is decremented because it is always 1 based
+            # in platform config file
+            fp_mac_offset -= 1
+        if fp_mac_offset > addr_range:
+            nas_if.log_err('Input mac offset for front panel port %d is bigger than range %d' %
+                           (fp_mac_offset, addr_range))
+            return None
+        mac_offset = fp_mac_offset + base_offset
     elif if_type == 'vlan':
         if vlan_id == None:
             nas_if.log_err('No VLAN id for VLAN port')

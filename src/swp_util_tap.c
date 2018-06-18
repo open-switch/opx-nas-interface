@@ -290,4 +290,12 @@ int swp_util_tap_fd_locate_from_set(register swp_util_tap_descr p, register fd_s
     return SWP_UTIL_INV_FD;
 }
 
-
+bool swp_util_tap_is_fd_in_tap_fd_set(register swp_util_tap_descr p, int fd)
+{
+    register int ix = 0;
+    register int mx = p->queues;
+    for ( ; ix < mx ; ++ix ) {
+        if (p->fds[ix]== fd) return true;
+    }
+    return false;
+}
