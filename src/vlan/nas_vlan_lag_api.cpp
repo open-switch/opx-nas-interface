@@ -61,6 +61,12 @@ t_std_error nas_add_or_del_lag_in_vlan(hal_ifindex_t lag_index, hal_vlan_id_t vl
     ndi_obj_id_t ndi_lag_id;
     t_std_error ret = STD_ERR_OK;
     size_t tag_cnt =0, untag_cnt=0;
+    nas_bridge_t *vlan_entry = nas_get_bridge_node_from_vid(vlan_id);
+    nas_lag_master_info_t *nas_lag_entry = nas_get_lag_node(lag_index);
+
+    if (!vlan_entry || !nas_lag_entry) {
+        return (STD_ERR(INTERFACE,FAIL, 0));
+    }
 
     (port_mode == NAS_PORT_TAGGED) ?  (tagged_lag = &ndi_lag_id, tag_cnt=1) :
                                       (untagged_lag = &ndi_lag_id,untag_cnt=1);
@@ -70,9 +76,9 @@ t_std_error nas_add_or_del_lag_in_vlan(hal_ifindex_t lag_index, hal_vlan_id_t vl
             lag_index, add_flag, vlan_id);
 
     if ((ret = nas_lag_get_ndi_lag_id (lag_index, &ndi_lag_id)) != STD_ERR_OK) {
-    EV_LOGGING(INTERFACE, INFO, "NAS-VLAN", "Error finding NDI LAG ID %d  %d %d",
-                         lag_index, vlan_id, add_flag);
-    return ret;
+        EV_LOGGING(INTERFACE, INFO, "NAS-VLAN", "Error finding NDI LAG ID %d  %d %d",
+                             lag_index, vlan_id, add_flag);
+        return ret;
     }
 
     if (add_flag) {
@@ -80,8 +86,25 @@ t_std_error nas_add_or_del_lag_in_vlan(hal_ifindex_t lag_index, hal_vlan_id_t vl
         if (port_mode == NAS_PORT_UNTAGGED) {
             ndi_set_lag_pvid(0, ndi_lag_id, vlan_id);
         }
+
+        if (nas_lag_entry->oper_status) {
+           (vlan_entry->oper_list)[lag_index] = true;
+           vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP;
+        } else {
+           (vlan_entry->oper_list)[lag_index] = true;
+        }
+        nas_update_port_to_vlans_map(lag_index, vlan_entry->ifindex, true);
     } else {
         ret = ndi_del_lag_from_vlan(0, vlan_id, tagged_lag, tag_cnt, untagged_lag, untag_cnt);
+        (vlan_entry->oper_list).erase(lag_index);
+        vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN;
+        for (auto oper_status: vlan_entry->oper_list) {
+            if (oper_status.second) {
+                vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP;
+                break;
+            }
+        }
+        nas_update_port_to_vlans_map(lag_index, vlan_entry->ifindex, false);
     }
     /* TODO rollback case */
 

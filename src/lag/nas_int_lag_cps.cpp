@@ -1223,6 +1223,10 @@ void nas_lag_port_oper_state_cb(npu_id_t npu, npu_port_t port, IF_INTERFACES_STA
          (status == IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP) ) {
 
          block_status = false;
+         if (!nas_lag_entry->oper_status) {
+            nas_lag_update_master_oper_state(nas_lag_entry, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP);
+            nas_lag_entry->oper_status = true;
+         }
     }
 
     if (nas_lag_block_port(nas_lag_entry, slave_index, block_status) != STD_ERR_OK){
@@ -1241,6 +1245,8 @@ void nas_lag_port_oper_state_cb(npu_id_t npu, npu_port_t port, IF_INTERFACES_STA
         }
 
         if(publish_oper_down){
+            nas_lag_entry->oper_status = false;
+            nas_lag_update_master_oper_state(nas_lag_entry, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN);
             lag_state_object_publish(nas_lag_entry,false);
         }
     }

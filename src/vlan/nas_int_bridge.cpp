@@ -35,6 +35,8 @@
 #include <string.h>
 
 static auto bridge_list = new bridge_list_t;
+static std::unordered_map<hal_ifindex_t,std::unordered_set<hal_ifindex_t>> nas_port_to_vlans;
+
 typedef std::unordered_map <hal_vlan_id_t, hal_ifindex_t>  vlanid_to_bridge_t;
 vlanid_to_bridge_t vid_to_bridge;
 
@@ -101,6 +103,95 @@ void nas_bridge_unlock(void)
     std_mutex_unlock (&br_lock);
 }
 
+void nas_update_port_to_vlans_map(const hal_ifindex_t port_idx, const hal_ifindex_t vlan_idx, bool add) {
+    if (add) {
+        nas_port_to_vlans[port_idx].insert(vlan_idx);
+    } else {
+        if (nas_port_to_vlans.find(port_idx) != nas_port_to_vlans.end()) {
+            if (nas_port_to_vlans[port_idx].size() == 1) {
+                nas_port_to_vlans.erase(port_idx);
+            } else {
+                nas_port_to_vlans[port_idx].erase(vlan_idx);
+            }
+        }
+    }
+
+    return;
+}
+
+void nas_lag_update_vlan_oper_state_cb(hal_ifindex_t lagif_idx,
+                        IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t oper_status) {
+    nas_bridge_t *vlan_entry;
+
+    if (nas_port_to_vlans.find(lagif_idx) != nas_port_to_vlans.end()) {
+        for (auto vlan_index : nas_port_to_vlans[lagif_idx]) {
+            //nas_bridge_lock();
+            if ((vlan_entry = nas_get_bridge_node(vlan_index)) == NULL) {
+                return;
+            }
+
+            if (oper_status == IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP) {
+                vlan_entry->oper_list[lagif_idx] = true;
+                vlan_entry->oper_status = oper_status;
+            } else {
+                vlan_entry->oper_list[lagif_idx] = false;
+                vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN;
+                for (auto oper_status : vlan_entry->oper_list) {
+                    if (oper_status.second) {
+                        vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP;
+                        break;
+                    }
+                }
+            }
+            //nas_bridge_unlock();
+        }
+    }
+
+    return;
+}
+
+void nas_port_update_vlan_oper_state_cb(npu_id_t npu, npu_port_t port,
+                        IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t oper_status) {
+    hal_ifindex_t port_index;
+    nas_bridge_t *vlan_entry;
+    ndi_port_t ndi_port;
+    ndi_port.npu_id = npu;
+    ndi_port.npu_port = port;
+
+    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
+                      "LAG member port oper status processing");
+
+    if (nas_int_get_if_index_from_npu_port(&port_index, &ndi_port) != STD_ERR_OK) {
+        return;
+    }
+
+    if (nas_port_to_vlans.find(port_index) != nas_port_to_vlans.end()) {
+        for (auto vlan_index : nas_port_to_vlans[port_index]) {
+            //nas_bridge_lock();
+            if ((vlan_entry = nas_get_bridge_node(vlan_index)) == NULL) {
+                return;
+            }
+
+            if (oper_status == IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP) {
+                vlan_entry->oper_list[port_index] = true;
+                vlan_entry->oper_status = oper_status;
+            } else {
+                vlan_entry->oper_list[port_index] = false;
+                vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN;
+                for (auto oper_status : vlan_entry->oper_list) {
+                    if (oper_status.second) {
+                        vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP;
+                        break;
+                    }
+                }
+            }
+            //nas_bridge_unlock();
+        }
+    }
+
+    return;
+}
+
 nas_bridge_t *nas_get_bridge_node(hal_ifindex_t index)
 {
 
@@ -146,6 +237,8 @@ nas_bridge_t* nas_create_insert_bridge_node(hal_ifindex_t index, const char *nam
         EV_LOGGING(INTERFACE, INFO, "NAS-Br",
                     "Bridge intf %d created", index);
         node.ifindex = index;
+        node.oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN;
+        node.oper_list = nas_vlan_port_oper_status_t();
         safestrncpy(node.name, name, sizeof(node.name));
 
         bridge_list->insert({index,node});

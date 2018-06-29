@@ -22,6 +22,7 @@
 #include "nas_ndi_vlan.h"
 #include "nas_int_bridge.h"
 #include "nas_int_vlan.h"
+#include "nas_int_port.h"
 #include "event_log.h"
 #include "event_log_types.h"
 #include "nas_int_utils.h"
@@ -164,6 +165,11 @@ t_std_error nas_add_or_del_port_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id,
     ndi_port_list.port_count = 1;
     ndi_port_list.port_list =p_ndi_port;
     t_std_error rc = STD_ERR_OK;
+    nas_bridge_t *vlan_entry = nas_get_bridge_node_from_vid(vlan_id);
+
+    if (!vlan_entry) {
+        return (STD_ERR(INTERFACE,FAIL, 0));
+    }
 
     if (port_mode == NAS_PORT_TAGGED) {
         tag_list = &ndi_port_list;
@@ -171,6 +177,7 @@ t_std_error nas_add_or_del_port_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id,
     else {
         untag_list = &ndi_port_list;
     }
+
     EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
                 "Updating VLAN member: %s %s port <%d %d> %s VLAN %d", (add_port ? "add" : "delete"),
                 p_ndi_port->npu_id, p_ndi_port->npu_port, (add_port ? "from" : "to"),
@@ -201,6 +208,43 @@ t_std_error nas_add_or_del_port_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id,
                        "Error setting untagged drop for port <%d %d>",
                        npu_id, p_ndi_port->npu_port);
         }
+    }
+
+    ndi_intf_link_state_t link_state;
+    IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t oper_state;
+    rc = ndi_port_link_state_get(p_ndi_port->npu_id, p_ndi_port->npu_port, &link_state);
+    hal_ifindex_t port_idx;
+
+    if (nas_int_get_if_index_from_npu_port(&port_idx, p_ndi_port) != STD_ERR_OK) {
+        return (STD_ERR(INTERFACE,FAIL, 0));
+    }
+
+    if (rc != STD_ERR_OK) {
+        return (STD_ERR(INTERFACE,FAIL, 0));
+    }
+
+    if (add_port) {
+        /* action for adding a port */
+        oper_state = ndi_to_cps_oper_type(link_state.oper_status);
+        if (oper_state == IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP) {
+            (vlan_entry->oper_list)[port_idx] = true;
+            vlan_entry->oper_status = oper_state;
+        } else {
+            (vlan_entry->oper_list)[port_idx] = false;
+        }
+        nas_update_port_to_vlans_map(port_idx, vlan_entry->ifindex, true);
+
+    } else {
+        /* action for deleting port */
+        (vlan_entry->oper_list).erase(port_idx);
+        vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN;
+        for (auto oper_status: vlan_entry->oper_list) {
+            if (oper_status.second) {
+                vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP;
+                break;
+            }
+        }
+        nas_update_port_to_vlans_map(port_idx, vlan_entry->ifindex, false);
     }
 
     return STD_ERR_OK;
@@ -826,7 +870,7 @@ void nas_pack_vlan_if(cps_api_object_t obj, nas_bridge_t *p_bridge)
 }
 
 
-t_std_error nas_get_vlan_intf(const char *if_name, hal_ifindex_t ifindex, cps_api_object_list_t list)
+t_std_error nas_get_vlan_intf(const char *if_name, hal_ifindex_t ifindex, cps_api_object_list_t list, bool get_state)
 {
     nas_bridge_t *p_bridge = NULL;
 
@@ -849,10 +893,15 @@ t_std_error nas_get_vlan_intf(const char *if_name, hal_ifindex_t ifindex, cps_ap
         return(STD_ERR(INTERFACE, FAIL, 0));
     }
     nas_pack_vlan_if(object, p_bridge);
+    if (get_state) {
+        cps_api_object_attr_add_u32(object, IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS, p_bridge->admin_status);
+        cps_api_object_attr_add_u32(object, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS, p_bridge->oper_status);
+    }
+
     return STD_ERR_OK;
 }
 
-t_std_error nas_get_vlan_intf_from_vid(hal_vlan_id_t vid, cps_api_object_list_t list)
+t_std_error nas_get_vlan_intf_from_vid(hal_vlan_id_t vid, cps_api_object_list_t list, bool get_state)
 {
     nas_bridge_t *p_bridge = NULL;
 
@@ -871,6 +920,10 @@ t_std_error nas_get_vlan_intf_from_vid(hal_vlan_id_t vid, cps_api_object_list_t 
         return(STD_ERR(INTERFACE, FAIL, 0));
     }
     nas_pack_vlan_if(object, p_bridge);
+    if (get_state) {
+        cps_api_object_attr_add_u32(object, IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS, p_bridge->admin_status);
+        cps_api_object_attr_add_u32(object, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS, p_bridge->oper_status);
+    }
     return STD_ERR_OK;
 }
 

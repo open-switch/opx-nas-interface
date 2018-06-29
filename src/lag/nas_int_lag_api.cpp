@@ -31,6 +31,7 @@
 #include "dell-base-if.h"
 #include "dell-interface.h"
 #include "nas_ndi_port.h"
+#include <set>
 
 
 
@@ -68,6 +69,21 @@ static std_mutex_lock_create_static_init_rec(lag_lock);
 std_mutex_type_t *nas_lag_mutex_lock()
 {
     return &lag_lock;
+}
+
+auto lag_oper_state_handlers = new std::set <lag_oper_state_handler_t>;
+
+void nas_lag_oper_state_register_cb(lag_oper_state_handler_t oper_state_cb) {
+    if (oper_state_cb != NULL) {
+        lag_oper_state_handlers->insert(oper_state_cb);
+    }
+}
+
+void nas_lag_update_master_oper_state(nas_lag_master_info_t *nas_lag_entry, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t oper_state) {
+    /* use callbacks to update the operation-state of the interface this lag is a member of (ie: vlan) */
+    for (auto cb_func : *lag_oper_state_handlers) {
+        cb_func(nas_lag_entry->ifindex, oper_state);
+    }
 }
 
 t_std_error nas_add_slave_node(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex,
@@ -246,6 +262,10 @@ t_std_error nas_lag_member_add(hal_ifindex_t lag_master_id,hal_ifindex_t ifindex
     if ((ndi_port_link_state_get(intf_ctrl.npu_id,intf_ctrl.port_id, &state))
                                    == STD_ERR_OK) {
         nas_lag_entry->port_oper_list[ifindex]= (state.oper_status ==ndi_port_OPER_UP) ? true : false;
+        if (!nas_lag_entry->oper_status && nas_lag_entry->port_oper_list[ifindex]) {
+            nas_lag_entry->oper_status = true;
+            nas_lag_update_master_oper_state(nas_lag_entry, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP);
+        }
     }
 
     return ret;
@@ -476,7 +496,7 @@ t_std_error nas_lag_set_admin_status(hal_ifindex_t index, bool enable)
 
     if(nas_lag_entry == NULL){
         EV_LOGGING(INTERFACE, ERR, "NAS-LAG",
-                   "Lag intf %d Err in set_admin_statue", index);
+                   "Lag intf %d Err in %s", index, __FUNCTION__);
         return STD_ERR(INTERFACE,FAIL, 0);
     }
 
@@ -488,6 +508,44 @@ t_std_error nas_lag_set_admin_status(hal_ifindex_t index, bool enable)
                    "Lag events publish failure");
         return STD_ERR(INTERFACE, FAIL, 0);
     }
+    return STD_ERR_OK;
+}
+
+t_std_error nas_lag_get_admin_status(hal_ifindex_t index, bool &admin_status)
+{
+    nas_lag_master_info_t *nas_lag_entry = NULL;
+
+    EV_LOGGING(INTERFACE, INFO, "NAS-LAG", "Lag intf %d for set_admin_status",
+               index);
+
+    nas_lag_entry = nas_get_lag_node(index);
+
+    if(nas_lag_entry == NULL){
+        EV_LOGGING(INTERFACE, ERR, "NAS-LAG",
+                   "Lag intf %d Err in %s", index, __FUNCTION__);
+        return STD_ERR(INTERFACE,FAIL, 0);
+    }
+
+    admin_status = nas_lag_entry->admin_status;
+    return STD_ERR_OK;
+}
+
+t_std_error nas_lag_get_oper_status(hal_ifindex_t index, bool &oper_status)
+{
+    nas_lag_master_info_t *nas_lag_entry = NULL;
+
+    EV_LOGGING(INTERFACE, INFO, "NAS-LAG", "Lag intf %d for set_admin_status",
+               index);
+
+    nas_lag_entry = nas_get_lag_node(index);
+
+    if(nas_lag_entry == NULL){
+        EV_LOGGING(INTERFACE, ERR, "NAS-LAG",
+                   "Lag intf %d Err in %s", index, __FUNCTION__);
+        return STD_ERR(INTERFACE,FAIL, 0);
+    }
+
+    oper_status = nas_lag_entry->oper_status;
     return STD_ERR_OK;
 }
 

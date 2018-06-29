@@ -164,6 +164,8 @@ t_std_error nas_lag_set_mac(hal_ifindex_t index,const char *lag_mac);
 t_std_error nas_lag_set_admin_status(hal_ifindex_t index, bool enable);
 t_std_error nas_lag_block_port(nas_lag_master_info_t  *p_lag_info ,hal_ifindex_t slave_ifindex,bool block_state);
 t_std_error nas_lag_get_port_mode(hal_ifindex_t slave_ifindex,bool& block_state);
+t_std_error nas_lag_get_admin_status(hal_ifindex_t index, bool enable);
+t_std_error nas_lag_get_oper_status(hal_ifindex_t index, bool enable);
 hal_ifindex_t nas_get_master_idx(hal_ifindex_t ifindex);
 void nas_cps_handle_mac_set (const char *lag_name, hal_ifindex_t lag_index);
 
@@ -172,6 +174,11 @@ cps_api_return_code_t lag_object_publish(nas_lag_master_info_t *nas_lag_entry,ha
 
 t_std_error nas_lag_get_ndi_lag_id(hal_ifindex_t lag_index, ndi_obj_id_t *ndi_lag_id);
 
+
+typedef void (*lag_oper_state_handler_t) (hal_ifindex_t if_idx, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t oper_state);
+
+void nas_lag_oper_state_register_cb(lag_oper_state_handler_t oper_state_cb);
+void nas_lag_update_master_oper_state(nas_lag_master_info_t *nas_lag_entry, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t oper_state);
 
 #endif /* NAS_INTF_LAG_API_H__ */
 

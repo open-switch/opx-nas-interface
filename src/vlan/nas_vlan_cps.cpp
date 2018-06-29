@@ -41,6 +41,7 @@
 #include "hal_interface_common.h"
 #include "nas_int_com_utils.h"
 #include "nas_if_utils.h"
+#include "nas_int_lag_api.h"
 #include "std_config_node.h"
 #include "std_mutex_lock.h"
 #include "cps_api_object_tools.h"
@@ -65,25 +66,40 @@ static t_std_error nas_cps_del_port_from_vlan(nas_bridge_t *p_bridge, nas_list_n
 t_std_error nas_cps_cleanup_vlan_lists(hal_vlan_id_t vlan_id, nas_list_t *p_link_node_list);
 static t_std_error nas_cps_add_port_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_t port_idx, nas_port_mode_t port_mode);
 
+static inline cps_api_return_code_t nas_vlan_get_oper_status(cps_api_object_t obj, nas_bridge_t *p_bridge)
+{
+     cps_api_object_attr_add_u32(obj, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS, p_bridge->oper_status);
+     return cps_api_ret_code_OK;
+}
 
 static inline cps_api_return_code_t nas_vlan_get_admin_status(cps_api_object_t obj, nas_bridge_t *p_bridge)
 {
+     cps_api_object_attr_add_u32(obj, IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS, p_bridge->admin_status);
+     return cps_api_ret_code_OK;
+}
+
+static inline cps_api_return_code_t nas_vlan_get_intf_status(cps_api_object_t obj, nas_bridge_t *p_bridge)
+{
+    /* Interface enabled/disabled is same as admin-status up/down */
      cps_api_object_attr_add_u32(obj, IF_INTERFACES_INTERFACE_ENABLED,
                  (p_bridge->admin_status == IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_UP) ? true: false);
      return cps_api_ret_code_OK;
 }
+
 static inline cps_api_return_code_t nas_vlan_get_learning_mode(cps_api_object_t obj, nas_bridge_t *p_bridge)
 {
      cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE,
                                         p_bridge->learning_disable);
      return cps_api_ret_code_OK;
 }
+
 static inline cps_api_return_code_t nas_vlan_get_mac(cps_api_object_t obj, nas_bridge_t *p_bridge)
 {
      cps_api_object_attr_add(obj, DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS,
                                         p_bridge->mac_addr, sizeof(p_bridge->mac_addr));
      return cps_api_ret_code_OK;
 }
+
 static inline cps_api_return_code_t nas_vlan_get_mtu(cps_api_object_t obj, nas_bridge_t *p_bridge)
 {
     if(p_bridge->mtu){
@@ -148,7 +164,6 @@ static bool nas_vlan_process_port_association(hal_ifindex_t ifindex, npu_id_t np
     return true;
 }
 
-
 static bool nas_vlan_if_set_handler(cps_api_object_t obj, void *context)
 {
     EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN-MAP","Got Interface event");
@@ -182,8 +197,9 @@ static bool nas_vlan_if_set_handler(cps_api_object_t obj, void *context)
 }
 
 
-static cps_api_return_code_t nas_vlan_set_admin_status(cps_api_object_t obj, nas_bridge_t *p_bridge)
+static cps_api_return_code_t nas_vlan_set_intf_status(cps_api_object_t obj, nas_bridge_t *p_bridge)
 {
+    /* Interface enabled/disabled is same as admin-status up/down */
 
     cps_api_object_attr_t attr = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_ENABLED);
 
@@ -340,7 +356,7 @@ cps_api_return_code_t nas_cps_set_vlan_mtu(cps_api_object_t obj, nas_bridge_t *p
 static auto set_vlan_attr = new std::unordered_map<cps_api_attr_id_t,
     cps_api_return_code_t (*)(cps_api_object_t, nas_bridge_t *)>
 {
-    { IF_INTERFACES_INTERFACE_ENABLED, nas_vlan_set_admin_status },
+    { IF_INTERFACES_INTERFACE_ENABLED, nas_vlan_set_intf_status },
     { DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, nas_cps_set_vlan_learning_mode },
     { DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, nas_cps_set_vlan_mac},
     { DELL_IF_IF_INTERFACES_INTERFACE_MTU, nas_cps_set_vlan_mtu}
@@ -349,7 +365,7 @@ static auto set_vlan_attr = new std::unordered_map<cps_api_attr_id_t,
 static auto get_vlan_attr = new  std::unordered_map<cps_api_attr_id_t,
     cps_api_return_code_t (*)(cps_api_object_t, nas_bridge_t *)>
 {
-    { IF_INTERFACES_INTERFACE_ENABLED, nas_vlan_get_admin_status },
+    { IF_INTERFACES_INTERFACE_ENABLED, nas_vlan_get_intf_status },
     { DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, nas_vlan_get_learning_mode },
     { DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, nas_vlan_get_mac},
     { DELL_IF_IF_INTERFACES_INTERFACE_MTU, nas_vlan_get_mtu}
@@ -1004,13 +1020,13 @@ static cps_api_return_code_t nas_process_cps_vlan_get(void * context,
               hal_ifindex_t index = 0;
               if(name_attr) if_name = (char *)cps_api_object_attr_data_bin(name_attr);
               if(if_index_attr) index = cps_api_object_attr_data_u32(if_index_attr);
-              if (nas_get_vlan_intf(if_name, index, param->list) != STD_ERR_OK) {
+              if (nas_get_vlan_intf(if_name, index, param->list, false) != STD_ERR_OK) {
                   nas_bridge_unlock();
                   return cps_api_ret_code_ERR;
               }
           } else if (vlan_id_attr != NULL) {
               hal_vlan_id_t vid = cps_api_object_attr_data_u32(vlan_id_attr);
-              if (nas_get_vlan_intf_from_vid(vid, param->list) != STD_ERR_OK) {
+              if (nas_get_vlan_intf_from_vid(vid, param->list, false) != STD_ERR_OK) {
                   nas_bridge_unlock();
                   return cps_api_ret_code_ERR;
               }
@@ -1025,6 +1041,58 @@ static cps_api_return_code_t nas_process_cps_vlan_get(void * context,
     nas_bridge_unlock();
     return cps_api_ret_code_OK;
 }
+
+static cps_api_return_code_t nas_process_cps_vlan_state_set(void *context, cps_api_transaction_params_t *param, size_t ix)
+{
+    return cps_api_ret_code_ERR;
+}
+
+static cps_api_return_code_t nas_process_cps_vlan_state_get(void * context,
+                                                      cps_api_get_params_t *param,
+                                                      size_t ix)
+{
+    size_t iix = 0;
+    size_t mx = cps_api_object_list_size(param->list);
+
+    EV_LOGGING(INTERFACE, DEBUG, "NAS-Vlan",
+            "nas_process_cps_vlan_get");
+    nas_bridge_lock();
+    do {
+         cps_api_object_t filter = cps_api_object_list_get(param->filters, ix);
+         cps_api_object_attr_t name_attr = cps_api_get_key_data(filter,
+                                            IF_INTERFACES_STATE_INTERFACE_NAME);
+         cps_api_object_attr_t if_index_attr = cps_api_get_key_data(filter,
+                                            DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+         cps_api_object_attr_t vlan_id_attr = cps_api_object_attr_get(filter,
+                                    BASE_IF_VLAN_IF_INTERFACES_INTERFACE_ID);
+
+         if (name_attr != NULL || if_index_attr != NULL) {
+              const char *if_name = NULL;
+              hal_ifindex_t index = 0;
+              if(name_attr) if_name = (char *)cps_api_object_attr_data_bin(name_attr);
+              if(if_index_attr) index = cps_api_object_attr_data_u32(if_index_attr);
+              if (nas_get_vlan_intf(if_name, index, param->list, true) != STD_ERR_OK) {
+                  nas_bridge_unlock();
+                  return cps_api_ret_code_ERR;
+              }
+          } else if (vlan_id_attr != NULL) {
+              hal_vlan_id_t vid = cps_api_object_attr_data_u32(vlan_id_attr);
+              if (nas_get_vlan_intf_from_vid(vid, param->list, true) != STD_ERR_OK) {
+                  nas_bridge_unlock();
+                  return cps_api_ret_code_ERR;
+              }
+          }
+          else {
+              nas_vlan_get_all_info(param->list);
+          }
+
+         ++iix;
+    }while (iix < mx);
+
+    nas_bridge_unlock();
+    return cps_api_ret_code_OK;
+}
+
 
 static cps_api_return_code_t nas_if_handle_global_set (void * context,
                                                        cps_api_transaction_params_t *param,
@@ -1079,6 +1147,15 @@ t_std_error nas_cps_vlan_init(cps_api_operation_handle_t handle) {
         EV_LOGGING(INTERFACE, ERR, "NAS-VLAN-INIT", "Failed to register VLAN interface CPS handler");
         return STD_ERR(INTERFACE,FAIL,0);
     }
+
+    if (intf_obj_handler_registration(obj_INTF_STATE, nas_int_type_VLAN,
+                nas_process_cps_vlan_state_get, nas_process_cps_vlan_state_set) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-VLAN-INIT", "Failed to register VLAN interface state CPS handler");
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
+
+    nas_int_oper_state_register_cb(nas_port_update_vlan_oper_state_cb);
+    nas_lag_oper_state_register_cb(nas_lag_update_vlan_oper_state_cb);
 
     cps_api_event_reg_t reg;
     cps_api_key_t key;
@@ -1291,7 +1368,6 @@ static t_std_error nas_cps_del_port_from_vlan(nas_bridge_t *p_bridge, nas_list_n
             }
         }
     }
-
 
     if(!nas_intf_cleanup_l2mc_config(p_link_node->ifindex,  p_bridge->vlan_id)) {
         EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
