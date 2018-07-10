@@ -343,22 +343,31 @@ static cps_api_return_code_t nas_cps_set_admin_status(cps_api_object_t obj,hal_i
 static cps_api_return_code_t nas_cps_add_port_to_lag(nas_lag_master_info_t *nas_lag_entry, hal_ifindex_t port_idx)
 {
     cps_api_return_code_t rc = cps_api_ret_code_OK;
-    char buff[MAX_CPS_MSG_BUFF];
-    if_master_info_t master_info = { nas_int_type_LAG, NAS_PORT_NONE, nas_lag_entry->ifindex};
     BASE_IF_MODE_t intf_mode = nas_intf_get_mode(port_idx);
+    /* Add to kernel only if port is not part of block list
+     * since for blocked port we don't want to add the port to lag in kernel to
+     * prevent hashing on that port in kernel
+     */
 
-    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "Add Ports to Lag");
+    bool block_port = true;
+    if(nas_lag_entry->block_port_list.find(port_idx) == nas_lag_entry->block_port_list.end()) {
+        block_port = false;
+        char buff[MAX_CPS_MSG_BUFF];
+        EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "Add Ports to Lag");
 
-    cps_api_object_t name_obj = cps_api_object_init(buff, sizeof(buff));
-    cps_api_object_attr_add_u32(name_obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, nas_lag_entry->ifindex);
-    cps_api_object_attr_add_u32(name_obj,DELL_IF_IF_INTERFACES_INTERFACE_MEMBER_PORTS, port_idx);
+        cps_api_object_t name_obj = cps_api_object_init(buff, sizeof(buff));
+        cps_api_object_attr_add_u32(name_obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, nas_lag_entry->ifindex);
+        cps_api_object_attr_add_u32(name_obj,DELL_IF_IF_INTERFACES_INTERFACE_MEMBER_PORTS, port_idx);
 
-    if(nas_os_add_port_to_lag(name_obj) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
-                   "Error adding port %d to lag  %d in the Kernel",
-                   port_idx,nas_lag_entry->ifindex);
-        return cps_api_ret_code_ERR;
+        if(nas_os_add_port_to_lag(name_obj) != STD_ERR_OK) {
+             EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
+                        "Error adding port %d to lag  %d in the Kernel",
+                        port_idx,nas_lag_entry->ifindex);
+             return cps_api_ret_code_ERR;
+        }
     }
+
+    if_master_info_t master_info = { nas_int_type_LAG, NAS_PORT_NONE, nas_lag_entry->ifindex};
 
     if(!nas_intf_add_master(port_idx, master_info)){
         EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG-MASTER","Failed to add master for lag memeber port");
@@ -381,9 +390,14 @@ static cps_api_return_code_t nas_cps_add_port_to_lag(nas_lag_master_info_t *nas_
                     "Error inserting index %d in list", port_idx);
             return cps_api_ret_code_ERR;
         }
+
+        if (block_port && nas_lag_block_port(nas_lag_entry, port_idx, block_port) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "Error Block/unblock Port %d",port_idx);
+            return cps_api_ret_code_ERR;
+        }
     }
-    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
-               "Add Ports to Lag Exit");
+
+    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG","Add Ports to Lag Exit");
     return rc;
 }
 
@@ -423,10 +437,16 @@ static cps_api_return_code_t nas_cps_delete_port_from_lag(nas_lag_master_info_t 
     }
 
     //NPU delete done, now delete from Kernel
-    if(nas_os_delete_port_from_lag(obj) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
-                    "Error deleting interface %d from OS", ifindex);
-        return cps_api_ret_code_ERR;
+
+    /*
+     * Check if the port is in block port list then it won't be added in the kernel
+     * in that case no need of deleting it from kernel
+     */
+    if(nas_lag_entry->block_port_list.find(ifindex) == nas_lag_entry->block_port_list.end()){
+        if(nas_os_delete_port_from_lag(obj) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG","Error deleting interface %d from OS", ifindex);
+            return cps_api_ret_code_ERR;
+        }
     }
 
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
@@ -461,16 +481,47 @@ static bool nas_lag_get_intf_ctrl_info(const char * name, interface_ctrl_t & i){
 }
 
 static cps_api_return_code_t cps_lag_update_ports(nas_lag_master_info_t  *nas_lag_entry,
-        nas_port_list_t &port_index_list,bool add_ports)
+        nas_port_list_t &port_index_list, cps_api_operation_types_t op)
 {
 
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "cps_lag_update_ports %d",
-               add_ports);
+               op);
+
+    /* If it's a SET operation we need to remove the ports that are not part of the new port list first */
+    if (op == cps_api_oper_SET) {
+        hal_ifindex_t port;
+        for(auto it = nas_lag_entry->port_list.begin(); it != nas_lag_entry->port_list.end();) {
+            if (port_index_list.find(*it) == port_index_list.end()) {
+                port = *it;
+                it++;
+                EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
+                           "Removing unneeded memberport %d", port);
+
+                if(nas_cps_delete_port_from_lag(nas_lag_entry, port) != cps_api_ret_code_OK) {
+                    EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
+                               "Error deleting unneeded memberport %d from  OS/NPU", port);
+                    return cps_api_ret_code_ERR;
+                }
+                nas_lag_entry->port_list.erase(port);
+                nas_lag_entry->port_oper_list.erase(port);
+
+                /* When LAG member port deleted, remove port from block list also */
+                if(nas_lag_entry->block_port_list.find(port) != nas_lag_entry->block_port_list.end()) {
+
+                    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
+                                                "Delete uneeded memberport %d from Block list", port);
+                    nas_lag_entry->block_port_list.erase(port);
+                }
+            } else {
+                it++;
+            }
+        }
+    }
 
     for(auto it = port_index_list.begin() ; it != port_index_list.end() ; ++it){
 
-        if((nas_lag_entry->port_list.find(*it) == nas_lag_entry->port_list.end())
-                && (add_ports == true)) {
+        if(((op == cps_api_oper_CREATE) || (op == cps_api_oper_SET)) &&
+            (nas_lag_entry->port_list.find(*it) == nas_lag_entry->port_list.end())) {
 
             EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
                     "Received new port add %d", *it);
@@ -489,10 +540,8 @@ static cps_api_return_code_t cps_lag_update_ports(nas_lag_master_info_t  *nas_la
                 return cps_api_ret_code_ERR;
             }
 
-        }
-
-        if((nas_lag_entry->port_list.find(*it) != nas_lag_entry->port_list.end())
-                && (add_ports == false)) {
+        } else if((op == cps_api_oper_DELETE) &&
+            (nas_lag_entry->port_list.find(*it) != nas_lag_entry->port_list.end())) {
 
             EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
                        "Received new port delete %d", *it);
@@ -514,8 +563,9 @@ static cps_api_return_code_t cps_lag_update_ports(nas_lag_master_info_t  *nas_la
             }
 
         }
+
         EV_LOGGING(INTERFACE, NOTICE, "NAS-CPS-LAG", "CPS %s Port index %d to LAG %s operation successful",
-                        (add_ports) ? "Add" : "Remove", *it, nas_lag_entry->name);
+                        (op != cps_api_oper_DELETE) ? "Add" : "Remove", *it, nas_lag_entry->name);
     }
 
     return cps_api_ret_code_OK;
@@ -647,6 +697,44 @@ static cps_api_return_code_t nas_process_lag_block_ports(nas_lag_master_info_t  
             EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
                        "Error Block/unblock Port %d",*it);
             return cps_api_ret_code_ERR;
+        }
+
+        /*
+         * If blocked port is not in member port_list,
+         * it won't be added to kernel in the first place
+         */
+
+        if(nas_lag_entry->port_list.find(*it) == nas_lag_entry->port_list.end()){
+            continue;
+        }
+
+
+        cps_api_object_t lag_obj = cps_api_object_create();
+        if(!lag_obj){
+            EV_LOGGING(INTERFACE,ERR,"NAS-LAG","Failed to allocate memory to create obj to add/delete"
+                    "port to/from LAG");
+            return cps_api_ret_code_ERR;
+        }
+        cps_api_object_guard og(lag_obj);
+        cps_api_object_attr_add_u32(lag_obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
+                                    nas_lag_entry->ifindex);
+        cps_api_object_attr_add_u32(lag_obj,DELL_IF_IF_INTERFACES_INTERFACE_MEMBER_PORTS,*it);
+
+        EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "Update block/unblock port %d,lag %d to kernel",
+                  *it,nas_lag_entry->ifindex);
+
+        if(port_state) {
+            if(nas_os_delete_port_from_lag(lag_obj) != STD_ERR_OK) {
+                EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "OS:Error deleting intf %d, mem idx %d",
+                                            nas_lag_entry->ifindex, *it);
+                return cps_api_ret_code_ERR;
+            }
+        } else {
+            if(nas_os_add_port_to_lag(lag_obj) != STD_ERR_OK) {
+                EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "OS:Error adding intf %d, mem idx %d",
+                                            nas_lag_entry->ifindex, *it);
+                return cps_api_ret_code_ERR;
+            }
         }
     }
 
@@ -792,7 +880,7 @@ static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj)
                 rc = nas_cps_set_admin_status(obj,lag_index,nas_lag_entry);
                 break;
             case DELL_IF_IF_INTERFACES_INTERFACE_MEMBER_PORTS:
-                port_list_attr =true;
+                port_list_attr = true;
                 if (cps_api_object_attr_len(it.attr) != 0) {
                    if(!nas_lag_process_member_ports(obj,port_list,it)){
                        return cps_api_ret_code_ERR;
@@ -828,21 +916,31 @@ static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj)
     }
 
     if(unblock_port_list.size()) {
-        rc |= nas_process_lag_block_ports(nas_lag_entry, unblock_port_list, false);
+        rc = nas_process_lag_block_ports(nas_lag_entry, unblock_port_list, false);
+        if(rc == cps_api_ret_code_ERR){
+            EV_LOGGING(INTERFACE,ERR,"NAS-CPS-LAG", "Failed to process unblocked lag ports");
+            return rc;
+        }
     }
 
     if(block_port_list.size()) {
-        rc |= nas_process_lag_block_ports(nas_lag_entry, block_port_list, true);
+        rc = nas_process_lag_block_ports(nas_lag_entry, block_port_list, true);
+        if(rc == cps_api_ret_code_ERR){
+            EV_LOGGING(INTERFACE,ERR,"NAS-CPS-LAG", "Failed to process blocked lag ports");
+            return rc;
+        }
     }
 
-    rc = (rc == cps_api_ret_code_OK) ? cps_api_ret_code_OK : cps_api_ret_code_ERR;
 
     if(port_list_attr) {
         EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
                 "Received %lu valid ports ", port_list.size());
         cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
-        bool create = (op == cps_api_oper_CREATE )? true : false;
-        if(cps_lag_update_ports(nas_lag_entry, port_list,create) !=STD_ERR_OK)
+        /* If a CPS 'set' operation is used on an existing LAG and a port_list is provided, we will just
+         * insert the ports into the member port like, the same way it's performed in a CPS 'create'
+         * operation.
+         */
+        if(cps_lag_update_ports(nas_lag_entry, port_list,op) !=STD_ERR_OK)
         {
             EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
                        "nas_process_cps_ports failure");
@@ -861,6 +959,7 @@ static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj)
 
     return rc;
 }
+
 
 static void nas_pack_lag_if(cps_api_object_t obj, nas_lag_master_info_t *nas_lag_entry)
 {

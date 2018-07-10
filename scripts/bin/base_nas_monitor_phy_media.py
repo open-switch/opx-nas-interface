@@ -58,7 +58,12 @@ def set_media_transceiver(interface_obj):
     #
     for hwport in hwport_list:
         fp_details = fp.find_port_by_hwport(npu, hwport)
-        _lane = fp_details.lane
+        if fp_details.port_group_id is None:
+            _lane = fp_details.lane
+        else:
+            pg_list = fp.get_port_group_list()
+            pg_obj = pg_list[fp_details.port_group_id]
+            _lane = pg_obj.get_lane(hwport)
         media.media_transceiver_set(1, fp_details.media_id, _lane, enable)
 
 def set_interface_media_speed(interface_obj, speed=None):

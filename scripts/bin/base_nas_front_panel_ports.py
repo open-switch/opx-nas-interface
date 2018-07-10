@@ -162,7 +162,7 @@ def _set_speed(speed, config, obj):
             return False
     config.set_speed(speed)
     if speed == _yang_auto_speed:
-        if intf_phy_mode == nas_comm.get_value(nas_comm.yang_phy_mode, 'fc') or breakout_mode == _yang_breakout_1x1 or breakout_mode == _yang_breakout_4x4:
+        if intf_phy_mode == nas_comm.get_value(nas_comm.yang_phy_mode, 'fc') or breakout_mode == _yang_breakout_1x1 or breakout_mode == _yang_breakout_4x4 or media.is_sfp_media_type(config.get_media_type()):
             # TODO default speed in breakout mode is not supported  yet
             # TODO it may cause issue in port group ports. Verify the usecases.
             _add_default_speed(config, obj)

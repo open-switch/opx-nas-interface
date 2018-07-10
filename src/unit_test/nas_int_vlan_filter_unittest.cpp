@@ -59,7 +59,7 @@ static uint32_t get_vlan_filter_value (void)
 
     if (cps_api_get(&gp)==cps_api_ret_code_OK) {
         cps_api_object_t obj = cps_api_object_list_get(gp.list, 0);
-        cps_api_object_attr_t filter_attr = cps_api_get_key_data(obj, 
+        cps_api_object_attr_t filter_attr = cps_api_get_key_data(obj,
                 DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_VLAN_FILTER);
         if (filter_attr == nullptr)
         {

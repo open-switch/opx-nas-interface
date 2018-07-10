@@ -168,6 +168,26 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                 }
             }
         } else if (op == cps_api_oper_DELETE) {
+             nas_lag_master_info_t * lag_entry =NULL;
+             /*  delete the member from the lag */
+             lag_entry = nas_get_lag_node(bond_idx);
+             if(lag_entry == nullptr){
+                 EV_LOGGING(INTERFACE,INFO,"NAS-LAG","Failed to find lag entry with %d"
+                              "ifindex for delete operation",bond_idx);
+                 return;
+             }
+
+            /*
+             * For kernel notification to delete the member port, check if present in block list
+             * if it is in blocking list then we would have removed the port from kernel to prevent
+             * hashing to blocked port in kernel. In that case just continue and don't trigger
+             * mode change
+             */
+
+            if(lag_entry->block_port_list.find(mem_idx) != lag_entry->block_port_list.end()){
+                return;
+            }
+
             if(!nas_intf_del_master(mem_idx, master_info)){
                  EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG",
                          "Failed to delete master for lag memeber port");
@@ -279,6 +299,17 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                         "ifindex for delete operation",bond_idx);
                 return;
             }
+
+            /*
+             * For kernel notification to delete the member port, check if present in block list
+             * if it is in blocking list then we would have removed the port from kernel to prevent
+             * hashing to blocked port in kernel. In that case just continue and let the port be
+             * still there in npu as part of lag
+             */
+            if(nas_lag_entry->block_port_list.find(mem_idx) != nas_lag_entry->block_port_list.end()){
+                return;
+            }
+
             if(nas_lag_member_delete(bond_idx, mem_idx) != STD_ERR_OK) {
                 EV_LOGGING(INTERFACE,INFO,"NAS-LAG",
                         "Failed to Delete member %s to the Lag %d", mem_name, bond_idx);

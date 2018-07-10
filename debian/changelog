@@ -1,3 +1,15 @@
+opx-nas-interface (5.18.0+opx1) unstable; urgency=medium
+  * Bugfix: Sending sequential hwport offset value from port group object to PAS
+            for setting media transciever
+  * Bugfix: Handle the mode change for lag blocked port in netlink handler
+  * Bugfix: Get the port mode before adding port to LAG in kernel
+  * Bugfix: Remove the publish of oper state just after connecting interface to NPU port
+  * Bugfix: Using steady clock for providing independent timestamps
+  * Bugfix: Fix MAC address change when adding memberport to LAG
+  * Feature: Add interface name and ifindex to the output list when querying for stats
+  * Feature: Adding QSA support for 1G SFP media
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Thu, 05 Jul 2018 17:17:56 -0800
+
 opx-nas-interface (5.18.0) unstable; urgency=medium
   
   * Update: VLAN interface-state get-handler
@@ -30,7 +42,7 @@ opx-nas-interface (5.10.1+opx15) unstable; urgency=medium
   * Bugfix: Fix error when configuring block and unblock LAG memberports in
             the same command.
 
- -- Dell EMC <ops-dev@lists.openswitch.net>  Thu, 26 Apr 2018 17:17:56 -0800
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 18 Jun 2018 17:17:56 -0800
 
 opx-nas-interface (5.10.1+opx14) unstable; urgency=medium
 

@@ -203,6 +203,12 @@ void nas_intf_container::nas_intf_dump_container(hal_ifindex_t ifx) noexcept {
 
 bool nas_intf_obj::nas_intf_obj_master_add(if_master_info_t m_info) {
 
+    for(auto itr = m_list.begin(); itr != m_list.end(); ++itr) {
+        if(itr->m_if_idx == m_info.m_if_idx) {
+            return false;
+        }
+    }
+
     //If LAG master, insert at front
     if(m_info.type == nas_int_type_LAG){
         m_list.push_front(m_info);

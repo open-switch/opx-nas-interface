@@ -132,7 +132,7 @@ cps_api_return_code_t nas_publish_vlan_object(nas_bridge_t *p_bridge_node, cps_a
 
 t_std_error nas_add_or_del_port_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id,
                                         ndi_port_t *p_ndi_port, nas_port_mode_t port_mode,
-                                        bool add_port);
+                                        bool add_port, hal_ifindex_t ifindex);
 
 t_std_error nas_cps_add_port_to_os(hal_ifindex_t br_index, hal_vlan_id_t vlan_id,
                                    nas_port_mode_t port_mode, hal_ifindex_t port_idx,uint32_t mtu,

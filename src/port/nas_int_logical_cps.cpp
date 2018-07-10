@@ -1396,6 +1396,18 @@ static cps_api_return_code_t _intf_state_publish(npu_id_t npu_id, npu_port_t por
             cps_api_object_attr_add_u32(_intf_state,
                     DELL_IF_IF_INTERFACES_STATE_INTERFACE_AUTO_NEGOTIATION, _autoneg);
         }
+
+        ndi_intf_link_state_t link_state;
+        if (ndi_port_link_state_get(npu_id, port_id, &link_state) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE, ERR, "INT-UPDATE", "Failed to get link state for port %d",
+                       port_id);
+            return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t state =
+                        ndi_to_cps_oper_type(link_state.oper_status);
+        /*  Send event for oper status */
+        EV_LOGGING(INTERFACE, NOTICE, "INT-UPDATE", "publishing oper state for %s", ifname);
+        cps_api_object_attr_add_u32(_intf_state,IF_INTERFACES_STATE_INTERFACE_OPER_STATUS, state);
         cps_api_event_thread_publish(_intf_state);
     }
     return cps_api_ret_code_OK;
@@ -1531,11 +1543,18 @@ static cps_api_return_code_t _if_update(cps_api_object_t req_if, cps_api_object_
                        func->second.second, id, _port.if_name);
             ret = func->second.first(_port.npu_id,_port.port_id,req_if);
             if (ret!=cps_api_ret_code_OK) {
-                EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set Attribute %s (%" PRId64 ") for interface  %s",
-                           func->second.second, id, _port.if_name);
-                if_rollback(rollback,_port);
-                cps_api_object_delete(rollback);
-                return ret;
+                if (!(if_set) && (id == DELL_IF_IF_INTERFACES_INTERFACE_SPEED ||
+                        id == DELL_IF_IF_INTERFACES_INTERFACE_FEC ||
+                        id == DELL_IF_IF_INTERFACES_INTERFACE_DUPLEX)){
+                    EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set Attribute %s (%" PRId64 ") for interface  %s",
+                            func->second.second, id, _port.if_name);
+                } else {
+                    EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set Attribute %s (%" PRId64 ") for interface  %s",
+                            func->second.second, id, _port.if_name);
+                    if_rollback(rollback,_port);
+                    cps_api_object_delete(rollback);
+                    return ret;
+                }
             } else {
                 const void *data = cps_api_object_get_data(prev, id);
                 if (NULL == data)

@@ -528,6 +528,7 @@ def find_port_by_hwport(npu, hwport):
     pd.port = p.id
     pd.hwport = hwport
     pd.media_id = p.media_id
+    pd.port_group_id = p.port_group_id
     return pd
 
 
@@ -619,6 +620,8 @@ class PortGroup(PortProfile):
         return self.fp_ports[:]
     def get_hw_ports(self):
         return self.hw_ports[:]
+    def get_lane(self,hwport):
+        return self.hw_ports.index(hwport)
 
     def apply_port_profile(self, port_profile):
         self.apply(port_profile)

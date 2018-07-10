@@ -41,6 +41,7 @@
 #include "ietf-interfaces.h"
 
 #include <time.h>
+#include <chrono>
 #include <vector>
 #include <unordered_map>
 #include <stdint.h>
@@ -158,6 +159,13 @@ static t_std_error populate_if_stat_ids(){
     return STD_ERR_OK;
 }
 
+static auto get_current_time() -> std::size_t{
+
+    auto time_stamp = std::chrono::steady_clock::now();
+    auto time_dur =  time_stamp.time_since_epoch();
+    auto time_now = time_dur.count() * std::chrono::system_clock::period::num / std::chrono::system_clock::period::den;
+    return time_now;
+}
 
 static bool get_stats(hal_ifindex_t ifindex, cps_api_object_list_t list){
 
@@ -195,7 +203,11 @@ static bool get_stats(hal_ifindex_t ifindex, cps_api_object_list_t list){
         cps_api_object_attr_add_u64(obj, if_stat_ids->at(ix), stat_values[ix]);
     }
 
-    cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,time(NULL));
+    auto time_now = get_current_time();
+    cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,time_now);
+    cps_api_object_attr_add_u32(obj,IF_INTERFACES_STATE_INTERFACE_IF_INDEX, ifindex);
+    if (strlen(intf_ctrl.if_name) != 0)
+        cps_api_object_attr_add(obj, IF_INTERFACES_STATE_INTERFACE_NAME, intf_ctrl.if_name, strlen(intf_ctrl.if_name) + 1);
 
     return true;
 }
@@ -219,8 +231,9 @@ static bool fill_cps_stats (cps_api_object_t obj, char *ptr, const char *name) {
     for(unsigned int ix = 0 ; ix < ARRAY_SIZE(stats_map) ; ++ix ){
        cps_api_object_attr_add_u64(obj, stats_map[ix].oid, stats_arr[stats_map[ix].index]);
     }
-    cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,
-      time(NULL));
+
+    auto time_now =  get_current_time();
+    cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,time_now);
     return ret;
 }
 

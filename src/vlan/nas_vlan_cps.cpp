@@ -133,7 +133,7 @@ static bool nas_vlan_process_port_association(hal_ifindex_t ifindex, npu_id_t np
                 return false;
             }
 
-            if((nas_add_or_del_port_to_vlan(npu,br_m->vlan_id,&ndi_port, it.mode,add)) != STD_ERR_OK){
+            if((nas_add_or_del_port_to_vlan(npu,br_m->vlan_id,&ndi_port, it.mode, add, ifindex)) != STD_ERR_OK){
                 EV_LOGGING(INTERFACE, ERR, "NAS-VLAN-MAP","Error adding port <%d %d> to NPU",
                         ndi_port.npu_id, ndi_port.npu_port);
                 nas_bridge_unlock();
@@ -1281,7 +1281,7 @@ static t_std_error nas_cps_add_port_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_
 
     if ((p_link_node != NULL) && (!nas_is_non_npu_phy_port(port_idx))) {
         if((rc = nas_add_or_del_port_to_vlan(p_link_node->ndi_port.npu_id, vlan_id,
-                                      &(p_link_node->ndi_port), port_mode, true)) != STD_ERR_OK) {
+                                      &(p_link_node->ndi_port), port_mode, true, port_idx)) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                    "Error adding port <%d %d> to NPU",
                    p_link_node->ndi_port.npu_id, p_link_node->ndi_port.npu_port);
@@ -1376,7 +1376,8 @@ static t_std_error nas_cps_del_port_from_vlan(nas_bridge_t *p_bridge, nas_list_n
     if (!nas_is_non_npu_phy_port(p_link_node->ifindex)) {
     //delete the port from NPU if it is a NPU port
         if (nas_add_or_del_port_to_vlan(p_link_node->ndi_port.npu_id, p_bridge->vlan_id,
-                                    &(p_link_node->ndi_port), port_mode, false) != STD_ERR_OK) {
+                                    &(p_link_node->ndi_port), port_mode, false, p_link_node->ifindex)
+                != STD_ERR_OK) {
             EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                   "Error deleting port %d with mode %d from vlan %d", p_link_node->ifindex,
                    port_mode, p_bridge->vlan_id);

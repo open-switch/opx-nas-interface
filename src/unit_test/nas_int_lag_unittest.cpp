@@ -338,6 +338,36 @@ TEST(std_lag_add_port_test, add_ports_to_lag)
     cps_api_transaction_close(&tr);
 }
 
+TEST(std_lag_add_port_test, add_ports_check_mac)
+{
+    cps_api_get_params_t gp;
+    cps_api_get_request_init(&gp);
+
+    cps_api_object_t obj = cps_api_object_list_create_obj_and_append(gp.filters);
+    ASSERT_TRUE(obj != nullptr);
+
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
+            DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_OBJ, cps_api_qualifier_TARGET);
+
+    cps_api_object_attr_add(obj,IF_INTERFACES_INTERFACE_TYPE,
+        (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_IEEE8023ADLAG,
+        sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_IEEE8023ADLAG));
+
+    const char *lag_ifname = "bond1";
+    const char *test_mac_addr = "12:34:56:78:12:34";
+
+    cps_api_object_attr_add(obj,IF_INTERFACES_INTERFACE_NAME,lag_ifname,strlen(lag_ifname)+1);
+
+    if (cps_api_get(&gp)==cps_api_ret_code_OK) {
+        cps_api_object_t obj = cps_api_object_list_get(gp.list, 0);
+        cps_api_object_attr_t mac_attr = cps_api_get_key_data(obj, DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS);
+        const char *mac = (const char*) cps_api_object_attr_data_bin(mac_attr);
+        ASSERT_TRUE(strlen(mac) == strlen(test_mac_addr));
+        ASSERT_TRUE(strncmp(mac, test_mac_addr, strlen(test_mac_addr)) == 0);
+    }
+
+    cps_api_get_request_close(&gp);
+}
 
 TEST(std_lag_block_ports, block_ports_to_lag)
 {
