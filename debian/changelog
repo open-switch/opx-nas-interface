@@ -1,4 +1,13 @@
+opx-nas-interface (5.18.0+opx2) unstable; urgency=medium
+
+  * Bugfix: Properly update/publish LAG operation-state information
+  * Bugfix: Minor speed improvements
+  * Bugfix: cps_config_lag.py script to add memberports properly
+ 
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 09 Jul 2018 17:17:56 -0800
+ 
 opx-nas-interface (5.18.0+opx1) unstable; urgency=medium
+
   * Bugfix: Sending sequential hwport offset value from port group object to PAS
             for setting media transciever
   * Bugfix: Handle the mode change for lag blocked port in netlink handler
@@ -8,6 +17,7 @@ opx-nas-interface (5.18.0+opx1) unstable; urgency=medium
   * Bugfix: Fix MAC address change when adding memberport to LAG
   * Feature: Add interface name and ifindex to the output list when querying for stats
   * Feature: Adding QSA support for 1G SFP media
+
  -- Dell EMC <ops-dev@lists.openswitch.net>  Thu, 05 Jul 2018 17:17:56 -0800
 
 opx-nas-interface (5.18.0) unstable; urgency=medium

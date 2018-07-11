@@ -124,7 +124,7 @@ void nas_lag_update_vlan_oper_state_cb(hal_ifindex_t lagif_idx,
     nas_bridge_t *vlan_entry;
 
     if (nas_port_to_vlans.find(lagif_idx) != nas_port_to_vlans.end()) {
-        for (auto vlan_index : nas_port_to_vlans[lagif_idx]) {
+        for (const auto &vlan_index : nas_port_to_vlans[lagif_idx]) {
             //nas_bridge_lock();
             if ((vlan_entry = nas_get_bridge_node(vlan_index)) == NULL) {
                 return;
@@ -136,7 +136,7 @@ void nas_lag_update_vlan_oper_state_cb(hal_ifindex_t lagif_idx,
             } else {
                 vlan_entry->oper_list[lagif_idx] = false;
                 vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN;
-                for (auto oper_status : vlan_entry->oper_list) {
+                for (const auto &oper_status : vlan_entry->oper_list) {
                     if (oper_status.second) {
                         vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP;
                         break;
@@ -166,7 +166,7 @@ void nas_port_update_vlan_oper_state_cb(npu_id_t npu, npu_port_t port,
     }
 
     if (nas_port_to_vlans.find(port_index) != nas_port_to_vlans.end()) {
-        for (auto vlan_index : nas_port_to_vlans[port_index]) {
+        for (const auto &vlan_index : nas_port_to_vlans[port_index]) {
             //nas_bridge_lock();
             if ((vlan_entry = nas_get_bridge_node(vlan_index)) == NULL) {
                 return;
@@ -178,7 +178,7 @@ void nas_port_update_vlan_oper_state_cb(npu_id_t npu, npu_port_t port,
             } else {
                 vlan_entry->oper_list[port_index] = false;
                 vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN;
-                for (auto oper_status : vlan_entry->oper_list) {
+                for (const auto &oper_status : vlan_entry->oper_list) {
                     if (oper_status.second) {
                         vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP;
                         break;

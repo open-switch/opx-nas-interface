@@ -98,7 +98,7 @@ t_std_error nas_add_or_del_lag_in_vlan(hal_ifindex_t lag_index, hal_vlan_id_t vl
         ret = ndi_del_lag_from_vlan(0, vlan_id, tagged_lag, tag_cnt, untagged_lag, untag_cnt);
         (vlan_entry->oper_list).erase(lag_index);
         vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN;
-        for (auto oper_status: vlan_entry->oper_list) {
+        for (const auto &oper_status : vlan_entry->oper_list) {
             if (oper_status.second) {
                 vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP;
                 break;

@@ -15,6 +15,7 @@
 
 import sys
 import getopt
+import cps
 import cps_object
 import cps_utils
 import nas_ut_framework as nas_ut
@@ -64,10 +65,11 @@ def usage():
     print '\n Example'
     print '\t\t cps_config_lag.py --create --lanme bond1'
     print '\t\t cps_config_lag.py --delete --lname bond1'
-    print '\t\t cps_config_lag.py --add --lname bond1 --port e00-5,e00-6 '
-    print '\t\t cps_config_lag.py --remove --lname bond1 --port e00-5,e00-6 '
-    print '\t\t cps_config_lag.py --set --lname bond1 --port e00-5,e00-6 --frwd yes/no'
-    print '\t\t cps_config_lag.py --set --lname bond1 --mac 12:34:56:78:12:35'
+    print '\t\t cps_config_lag.py --add --lname bond1 --port e101-001-0,e101-002-0 '
+    print '\t\t cps_config_lag.py --set --lname bond1 --port e101-003-0,e101-004-0 '
+    print '\t\t cps_config_lag.py --remove --lname bond1 --port e101-001-0,e101-002-0 '
+    print '\t\t cps_config_lag.py --set --lname bond1 --port e101-001-0,e101-002-0 --frwd yes/no'
+    print '\t\t cps_config_lag.py --set --lname bond1 --mac ae:6e:2e:b4:40:ff'
     print '\t\t cps_config_lag.py --set --lname bond1 --admn up'
     print '\t\t cps_config_lag.py --get --lname bond1'
     print '\t\t cps_config_lag.py --lname bond1 --mac-learn drop  '
@@ -181,11 +183,24 @@ def main(argv):
                            if (frwd_enable == 'yes') else
                            "base-if-lag/if/interfaces/interface/block-port-list": port_list})
 
-    elif (choice == 'add' or choice == 'remove') and port != '' and lag_name != '':
-        op = "set" if (choice == "add") else "delete"
+    elif (choice == 'add' or choice == 'remove' or choice == 'set') and port != '' and lag_name != '':
+        op = "set" if (choice == "add" or choice == "set") else "delete"
+        attr_data = {"if/interfaces/interface/name": lag_name}
         (obj, op) = nas_lag_op(op,
-                   {"if/interfaces/interface/name": lag_name},False)
-        port_list = port.split(",")
+                   attr_data, False)
+        cur_mem_ports = []
+
+        if choice == "add":
+            obj_list = []
+            r_obj = cps_object.CPSObject(module = intf_lag_key, data = attr_data)
+            if cps.get([r_obj.get()], obj_list):
+                if len(obj_list) == 1:
+                    cps_obj = cps_object.CPSObject(obj=obj_list[0])
+                    member_ports_obj = cps_obj.get_attr_data('dell-if/if/interfaces/interface/member-ports')
+                    for key in member_ports_obj:
+                        cur_mem_ports.append(member_ports_obj[key]['name'])
+
+        port_list = sorted(port.split(",") + cur_mem_ports)
         l = ["dell-if/if/interfaces/interface/member-ports","0","name"]
         index = 0
         for i in port_list:

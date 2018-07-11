@@ -278,7 +278,7 @@ t_std_error nas_add_or_del_port_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id,
         /* action for deleting port */
         (vlan_entry->oper_list).erase(port_idx);
         vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN;
-        for (auto oper_status: vlan_entry->oper_list) {
+        for (const auto &oper_status: vlan_entry->oper_list) {
             if (oper_status.second) {
                 vlan_entry->oper_status = IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP;
                 break;

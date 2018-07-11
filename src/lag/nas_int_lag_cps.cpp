@@ -56,6 +56,7 @@ const static int MAX_CPS_MSG_BUFF=4096;
 typedef std::unordered_set <hal_ifindex_t> nas_port_list_t;
 static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj);
 static cps_api_return_code_t nas_cps_delete_port_from_lag(nas_lag_master_info_t *nas_lag_entry, hal_ifindex_t ifindex);
+static void nas_cps_update_oper_state(nas_lag_master_info_t *nas_lag_entry);
 
 static bool nas_lag_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index){
     cps_api_object_attr_t lag_name_attr = cps_api_get_key_data(obj, IF_INTERFACES_INTERFACE_NAME);
@@ -540,6 +541,7 @@ static cps_api_return_code_t cps_lag_update_ports(nas_lag_master_info_t  *nas_la
                 return cps_api_ret_code_ERR;
             }
 
+
         } else if((op == cps_api_oper_DELETE) &&
             (nas_lag_entry->port_list.find(*it) != nas_lag_entry->port_list.end())) {
 
@@ -567,6 +569,8 @@ static cps_api_return_code_t cps_lag_update_ports(nas_lag_master_info_t  *nas_la
         EV_LOGGING(INTERFACE, NOTICE, "NAS-CPS-LAG", "CPS %s Port index %d to LAG %s operation successful",
                         (op != cps_api_oper_DELETE) ? "Add" : "Remove", *it, nas_lag_entry->name);
     }
+
+    nas_cps_update_oper_state(nas_lag_entry);
 
     return cps_api_ret_code_OK;
 }
@@ -668,7 +672,23 @@ cps_api_return_code_t lag_state_object_publish(nas_lag_master_info_t *nas_lag_en
     return cps_api_ret_code_OK;
  }
 
+static void nas_cps_update_oper_state(nas_lag_master_info_t *nas_lag_entry) {
+    bool prev_oper_status = nas_lag_entry->oper_status;
+    nas_lag_entry->oper_status = false;
 
+    for (const auto &it : nas_lag_entry->port_oper_list) {
+        if (it.second) {
+            nas_lag_entry->oper_status = true;
+            break;
+        }
+    }
+
+    if (nas_lag_entry->oper_status != prev_oper_status) {
+        lag_state_object_publish(nas_lag_entry, nas_lag_entry->oper_status);
+    }
+
+    return;
+}
 
 static cps_api_return_code_t nas_process_lag_block_ports(nas_lag_master_info_t  *nas_lag_entry,
         nas_port_list_t &port_index_list,bool port_state)
@@ -1325,6 +1345,7 @@ void nas_lag_port_oper_state_cb(npu_id_t npu, npu_port_t port, IF_INTERFACES_STA
          if (!nas_lag_entry->oper_status) {
             nas_lag_update_master_oper_state(nas_lag_entry, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP);
             nas_lag_entry->oper_status = true;
+            lag_state_object_publish(nas_lag_entry,true);
          }
     }
 
@@ -1336,7 +1357,7 @@ void nas_lag_port_oper_state_cb(npu_id_t npu, npu_port_t port, IF_INTERFACES_STA
 
     if(status == IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN){
         bool publish_oper_down = true;
-        for(auto it : nas_lag_entry->port_oper_list){
+        for(const auto &it : nas_lag_entry->port_oper_list){
             if(it.second == true){
                 publish_oper_down = false;
                 break;
