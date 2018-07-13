@@ -1,3 +1,4 @@
 #!/bin/sh
 
-service networking restart
+# Restart all interfaces except for eth0
+ifup -a -X eth0
