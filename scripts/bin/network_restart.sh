@@ -1,4 +1,5 @@
 #!/bin/sh
 
-# Restart all interfaces except for eth0
-ifup -a -X eth0
+# Restart networking service without shuting down
+# interfaces that are already up
+service networking start

@@ -1,9 +1,15 @@
-opx-nas-interface (5.18.0+opx2) unstable; urgency=medium
+opx-nas-interface (5.18.0+opx4) unstable; urgency=medium
+
+  * Bugfix: Correct service startup dependencies and timings
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Wed, 18 Jul 2018 17:17:56 -0800
+
+opx-nas-interface (5.18.0+opx3) unstable; urgency=medium
 
   * Bugfix: SSH connection lost during package installation
   * Bugfix: Installation hangs due to service start-up order 
 
- -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 09 Jul 2018 17:17:56 -0800
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Fri, 13 Jul 2018 17:17:56 -0800
 
 opx-nas-interface (5.18.0+opx2) unstable; urgency=medium
 

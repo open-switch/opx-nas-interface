@@ -1,13 +1,14 @@
 [Unit]
 Description=Physical media configuration function provider
-After=opx-cps.service
-Wants=opx-cps.service
+After=opx-cps.service opx-create-interface.service
+Requires=opx-cps.service opx-create-interface.service
 OnFailure=service_onfailure@%n.service
 
 [Service]
 Type=notify
 EnvironmentFile=/etc/opx/opx-environment
 ExecStart=/usr/bin/python -u /usr/bin/base_nas_phy_media_config.py
+TimeoutStartSec=90
 
 [Install]
 WantedBy=multi-user.target

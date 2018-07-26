@@ -1,13 +1,14 @@
 [Unit]
 Description=Front panel port object access handler
 After=opx-cps.service opx-nas.service
-Wants=opx-cps.service opx-nas.service
+Requires=opx-cps.service opx-nas.service
 OnFailure=service_onfailure@%n.service
 
 [Service]
 Type=notify
 EnvironmentFile=/etc/opx/opx-environment
 ExecStart=/usr/bin/python -u /usr/bin/base_nas_front_panel_ports.py
+TimeoutStartSec=90
 
 [Install]
 WantedBy=multi-user.target
