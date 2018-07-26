@@ -42,7 +42,9 @@ typedef struct _if_master_info {
 }if_master_info_t;
 
 bool nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info);
+bool nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info, BASE_IF_MODE_t *new_mode, bool *mode_change);
 bool nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info);
+bool nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info, BASE_IF_MODE_t *new_mode, bool *mode_change);
 void nas_intf_master_callback(hal_ifindex_t ifx, std::function< void (if_master_info_t)> fn);
 std::list<if_master_info_t> nas_intf_get_master(hal_ifindex_t ifx);
 BASE_IF_MODE_t nas_intf_get_mode(hal_ifindex_t ifx);

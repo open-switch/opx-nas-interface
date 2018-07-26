@@ -39,7 +39,7 @@ extern "C" {
 
 #include "nas_int_list.h"
 #define SYSTEM_DEFAULT_VLAN 1
-typedef struct nas_bridge_s{
+typedef struct nas_bridge_S{
     hal_ifindex_t ifindex;      //Kernel ifindex of the bridge
     hal_vlan_id_t vlan_id;      //One bridge maps to one Vlan ID in the NPU
     char mac_addr[MAC_STRING_SZ];  //MAC address of this bridge // TODO to be Deprecated
@@ -53,6 +53,7 @@ typedef struct nas_bridge_s{
     nas_list_t tagged_lag; //tagged LAG index to handle
     BASE_IF_MODE_t mode;
     uint32_t mtu;
+    std::string parent_bridge;
 }nas_bridge_t;
 
 /* For roll back of vlan/bridge */

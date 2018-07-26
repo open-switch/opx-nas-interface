@@ -25,8 +25,20 @@ libopx_nas_interface_la_SOURCES=src/swp_util_tap.c src/nas_int_main.cpp \
          src/port/nas_int_port.cpp src/port/nas_fc_intf.cpp src/port/nas_int_physical_cps.cpp \
          src/stats/nas_stats_if_cps.cpp src/stats/nas_stats_vlan_cps.cpp \
          src/stats/nas_stats_fc_if_cps.cpp src/stats/nas_stats_eee_cps.cpp \
+         src/stats/nas_stats_bridge.cpp src/stats/nas_stats_tunnel.cpp \
+         src/stats/nas_stats_vlan_subintf.cpp src/stats/nas_stats_vxlan.cpp \
          src/nas_int_com_utils.cpp src/stats/nas_stats_utils.c \
-         src/vrf/nas_vrf_api.cpp src/vrf/nas_vrf_cps.cpp
+         src/vrf/nas_vrf_api.cpp src/vrf/nas_vrf_cps.cpp \
+         src/bridge/nas_interface_1d_bridge.cpp src/bridge/nas_interface_bridge.cpp \
+         src/bridge/nas_interface_bridge_update_vlan.cpp \
+         src/bridge/nas_interface_1q_bridge.cpp   src/bridge/nas_interface_bridge_cps.cpp \
+         src/bridge/nas_interface_bridge_utils.cpp \
+         src/bridge/nas_interface_bridge_com.cpp  src/bridge/nas_interface_bridge_map.cpp  \
+         src/bridge/nas_vlan_bridge_cps.cpp \
+         src/interface/nas_interface.cpp src/interface/nas_interface_map.cpp \
+         src/interface/nas_interface_vlan.cpp \
+         src/interface/nas_interface_cps.cpp  src/interface/nas_interface_utils.cpp  \
+         src/interface/nas_interface_vxlan.cpp
 
 libopx_nas_interface_la_LIBADD=-lopx_common -lopx_nas_common -lopx_nas_ndi -lopx_cps_api_common -lopx_logging -lopx_nas_linux -lpthread -levent
 

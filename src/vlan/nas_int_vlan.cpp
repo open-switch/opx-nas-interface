@@ -40,6 +40,7 @@
 #include "hal_interface_common.h"
 #include "iana-if-type.h"
 #include "nas_if_utils.h"
+#include "nas_int_base_if.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -153,9 +154,40 @@ void nas_handle_bridge_mac(nas_bridge_t *b_node)
     nas_cps_set_vlan_mac(name_obj, b_node);
 }
 
+static std::pair<bool, bool> nas_get_intf_packet_drop(hal_ifindex_t ifindex)
+{
+    int untagged_cnt = 0, tagged_cnt = 0;
+    auto master_cb = [&untagged_cnt, &tagged_cnt](if_master_info_t m_info) {
+        if (m_info.type != nas_int_type_VLAN) {
+            return;
+        }
+        if (m_info.mode == NAS_PORT_UNTAGGED || m_info.mode == NAS_PORT_HYBRID) {
+            untagged_cnt ++;
+        }
+        if (m_info.mode == NAS_PORT_TAGGED || m_info.mode == NAS_PORT_HYBRID) {
+            tagged_cnt ++;
+        }
+    };
+    nas_intf_master_callback(ifindex, master_cb);
+    EV_LOGGING(INTERFACE, INFO, "NAS-Vlan", "Interface with ifindex %d is untagged member of %d bridges and \
+tagged member of %d bridges",
+               ifindex, untagged_cnt, tagged_cnt);
+    bool drop_untag = true, drop_tag = true;
+    if (untagged_cnt > 0) {
+        drop_untag = false;
+    }
+    if (tagged_cnt > 0) {
+        drop_tag = false;
+    }
+    if (untagged_cnt == 0 && tagged_cnt == 0) {
+        drop_untag = drop_tag = false;
+    }
+    return std::make_pair(drop_untag, drop_tag);
+}
+
 t_std_error nas_add_or_del_port_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id,
                                         ndi_port_t *p_ndi_port, nas_port_mode_t port_mode,
-                                        bool add_port)
+                                        bool add_port, hal_ifindex_t ifindex)
 {
     ndi_port_list_t ndi_port_list;
     ndi_port_list_t *untag_list = NULL;
@@ -190,17 +222,25 @@ t_std_error nas_add_or_del_port_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id,
                         npu_id, p_ndi_port->npu_port);
             }
         }
+    }
 
-        EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
-                   "Updating packet drop: %s port <%d %d> discard untagged packet",
-                   (!add_port ? "enable" : "disable"),
-                   p_ndi_port->npu_id, p_ndi_port->npu_port);
-        if ((rc = ndi_port_set_packet_drop(npu_id, p_ndi_port->npu_port,
-                                           NDI_PORT_DROP_UNTAGGED, !add_port)) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE, ERR, "NAS-Port",
-                       "Error setting untagged drop for port <%d %d>",
-                       npu_id, p_ndi_port->npu_port);
-        }
+    auto pkt_drop = nas_get_intf_packet_drop(ifindex);
+    EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
+               "Updating packet drop for port <%d %d>: untagged - %s; tagged - %s",
+               p_ndi_port->npu_id, p_ndi_port->npu_port,
+               pkt_drop.first ? "drop" : "not drop",
+               pkt_drop.second ? "drop" : "not drop");
+    if ((rc = ndi_port_set_packet_drop(npu_id, p_ndi_port->npu_port,
+                                       NDI_PORT_DROP_UNTAGGED, pkt_drop.first)) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-Port",
+                   "Error setting untagged drop for port <%d %d>",
+                   npu_id, p_ndi_port->npu_port);
+    }
+    if ((rc = ndi_port_set_packet_drop(npu_id, p_ndi_port->npu_port,
+                                       NDI_PORT_DROP_TAGGED, pkt_drop.second)) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-Port",
+                   "Error setting tagged drop for port <%d %d>",
+                   npu_id, p_ndi_port->npu_port);
     }
 
     return STD_ERR_OK;
@@ -213,21 +253,45 @@ t_std_error nas_vlan_delete(npu_id_t npu_id, hal_vlan_id_t vlan_id)
 }
 
 static t_std_error nas_add_port_list_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id,
-                                               ndi_port_list_t *p_ndi_port_list,
-                                               bool tagged_port_list)
+                                const std::vector<std::pair<ndi_port_t, hal_ifindex_t>>& port_list,
+                                bool tagged_port_list)
 {
     t_std_error rc = STD_ERR_OK;
+    std::vector<ndi_port_t> tmp_port_list{};
+    for (auto& port_info: port_list) {
+        tmp_port_list.push_back(port_info.first);
+    }
+    ndi_port_list_t ndi_port_list{tmp_port_list.size(), tmp_port_list.data()};
     if (tagged_port_list) {
-        if ((rc = ndi_add_or_del_ports_to_vlan(npu_id, vlan_id,  p_ndi_port_list, NULL, true))
+        if ((rc = ndi_add_or_del_ports_to_vlan(npu_id, vlan_id,  &ndi_port_list, NULL, true))
                 != STD_ERR_OK)
             return rc;
     }
     else {
-        if ((rc = ndi_add_or_del_ports_to_vlan(npu_id, vlan_id, NULL, p_ndi_port_list, true))
+        if ((rc = ndi_add_or_del_ports_to_vlan(npu_id, vlan_id, NULL, &ndi_port_list, true))
              != STD_ERR_OK)
             return rc;
     }
-    return rc;
+    for (auto& port_info: port_list) {
+        npu_port_t port_id = port_info.first.npu_port;
+        auto pkt_drop = nas_get_intf_packet_drop(port_info.second);
+        EV_LOGGING(INTERFACE, INFO, "NAS-Port",
+                   "Updating packet drop for port <%d %d>: untagged - %s; tagged - %s",
+                   npu_id, port_id,
+                   pkt_drop.first ? "drop" : "not drop",
+                   pkt_drop.second ? "drop" : "not drop");
+        rc = ndi_port_set_packet_drop(npu_id, port_id, NDI_PORT_DROP_UNTAGGED, pkt_drop.first);
+        if (rc != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE, INFO, "NAS-Port", "Failed to disable untagged drop for port <%d %d>",
+                       npu_id, port_id);
+        }
+        rc = ndi_port_set_packet_drop(npu_id, port_id, NDI_PORT_DROP_TAGGED, pkt_drop.second);
+        if (rc != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE, INFO, "NAS-Port", "Failed to disable untagged drop for port <%d %d>",
+                       npu_id, port_id);
+        }
+    }
+    return STD_ERR_OK;
 }
 
 static t_std_error nas_vlan_get_intf_ctrl_info(hal_ifindex_t index, interface_ctrl_t &i){
@@ -247,18 +311,9 @@ static t_std_error nas_vlan_get_intf_ctrl_info(hal_ifindex_t index, interface_ct
 
 //@TODO change this to the vector..
 static void nas_copy_bridge_ports_to_ndi_port_list(std_dll_head *p_port_list,
-                                                   ndi_port_list_t *p_ndi_ports)
+                                    std::vector<std::pair<ndi_port_t, hal_ifindex_t>>& ndi_ports)
 {
     nas_list_node_t *p_link_iter_node = NULL, *p_temp_node = NULL;
-    ndi_port_t *p_port_t = NULL;
-    int count = 0;
-
-    if ((p_port_list == NULL) ||
-        (p_ndi_ports == NULL)) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
-                   "Bridge port list or NDI port list is empty");
-        return;
-    }
 
     p_link_iter_node = nas_get_first_link_node(p_port_list);
 
@@ -267,10 +322,7 @@ static void nas_copy_bridge_ports_to_ndi_port_list(std_dll_head *p_port_list,
         EV_LOGGING(INTERFACE, DEBUG, "NAS-Vlan",
                     "Copying untagged port %d",
                      p_link_iter_node->ndi_port.npu_port);
-
-        p_port_t = &(p_ndi_ports->port_list[count++]);
-        p_port_t->npu_id = p_link_iter_node->ndi_port.npu_id;
-        p_port_t->npu_port = p_link_iter_node->ndi_port.npu_port;
+        ndi_ports.push_back(std::make_pair(p_link_iter_node->ndi_port, p_link_iter_node->ifindex));
 
         p_temp_node = p_link_iter_node;
         p_link_iter_node = nas_get_next_link_node(p_port_list, p_temp_node);
@@ -280,7 +332,6 @@ static void nas_copy_bridge_ports_to_ndi_port_list(std_dll_head *p_port_list,
 
 static t_std_error nas_add_all_ut_ports_to_vlan(nas_bridge_t *p_bridge_node)
 {
-    ndi_port_list_t ndi_port_list;
     size_t port_count = p_bridge_node->untagged_list.port_count;
     int npu_id = 0;
     nas_list_node_t *p_iter_node = NULL;
@@ -289,16 +340,13 @@ static t_std_error nas_add_all_ut_ports_to_vlan(nas_bridge_t *p_bridge_node)
 
     if (port_count != 0) {
         do {
-            ndi_port_list.port_list = (ndi_port_t *)malloc(sizeof (ndi_port_t) * port_count);
-            if (ndi_port_list.port_list==NULL) { err = STD_ERR(INTERFACE,FAIL,0) ; break; }
-
-            ndi_port_list.port_count = port_count;
+            std::vector<std::pair<ndi_port_t, hal_ifindex_t>> port_list{};
             nas_copy_bridge_ports_to_ndi_port_list(&p_bridge_node->untagged_list.port_list,
-                                                   &ndi_port_list);
+                                                   port_list);
 
             /* @todo : NPU_ID for bridge */
             if (nas_add_port_list_to_vlan(npu_id, p_bridge_node->vlan_id,
-                                      &ndi_port_list,
+                                      port_list,
                                       false) != STD_ERR_OK) {
                 err = (STD_ERR(INTERFACE,FAIL, 0));
                 break;
@@ -315,7 +363,6 @@ static t_std_error nas_add_all_ut_ports_to_vlan(nas_bridge_t *p_bridge_node)
             }
 
         } while(0);
-        free(ndi_port_list.port_list);
     }
     return err;
 }
@@ -383,7 +430,8 @@ t_std_error nas_process_list_for_vlan_del(nas_bridge_t *p_bridge,
                      p_link_node->ndi_port.npu_port);
 
         if (nas_add_or_del_port_to_vlan(p_link_node->ndi_port.npu_id, vlan_id,
-                                        &(p_link_node->ndi_port), port_mode, false) != STD_ERR_OK) {
+                                        &(p_link_node->ndi_port), port_mode, false, if_index)
+                != STD_ERR_OK) {
             EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                         "Error deleting port %d from vlan %d",
                          if_index, vlan_id);
@@ -466,6 +514,12 @@ void nas_process_del_vlan_mem_from_os (hal_ifindex_t bridge_id, nas_port_list_t 
 
             publish_list.insert(if_index); // TODO combine with LAG members
         } else if (intf_type == nas_int_type_LAG) {
+
+            if(!nas_intf_cleanup_l2mc_config(if_index,  p_bridge_node->vlan_id)) {
+                EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
+                   "Error cleaning L2MC membership for interface %d", if_index);
+            }
+
             EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
                 "Delete %s LAG %d from Bridge %d ", (port_mode == NAS_PORT_UNTAGGED) ? "untagged" : "tagged",
                 if_index, bridge_id);
@@ -627,7 +681,8 @@ t_std_error nas_process_member_addition_to_vlan(nas_bridge_t *p_bridge_node, hal
         if(intf_type == nas_int_type_PORT) {
             //add tagged port to vlan
             if ((rc = nas_add_or_del_port_to_vlan(p_link_node->ndi_port.npu_id, p_bridge_node->vlan_id,
-                                                  &(p_link_node->ndi_port), port_mode, true)) != STD_ERR_OK) {
+                                                  &(p_link_node->ndi_port), port_mode, true, port_idx))
+                    != STD_ERR_OK) {
                 rc = (STD_ERR(INTERFACE,FAIL, rc));
                 return rc;
             }

@@ -129,7 +129,6 @@ def _gen_fp_port_list(obj, resp):
 # Generate HW port obj list
 def _gen_npu_lanes(obj, resp):
 
-    port_list = port_utils.get_phy_port_list()
     for npu in fp.get_npu_list():
         key_dict = {_lane_attr('npu-id'): npu.id
                      }
@@ -156,7 +155,6 @@ def _gen_npu_lanes(obj, resp):
                                             })
                 nas_if.log_info(str(elem.get()))
                 resp.append(elem.get())
-
 
 # publish FP object update
 def send_fp_event(port):
@@ -364,6 +362,36 @@ def get_npu_port_from_fp(fp_port, sub_port):
         raise ValueError('There is no physical mapped to hw_port %d for subport %d' % (
                          hw_port, sub_port))
     return (npu_id, port_id, hw_port)
+
+def get_mac_offset_from_fp(fp_port, sub_port, fp_cache = None):
+    nas_if.log_info('Trying to get npu port based on front-panel %d subport %d' % (
+                    fp_port, sub_port))
+    if fp_cache is None:
+        # Use local front-panel-port db
+        port_obj = fp.find_front_panel_port(fp_port)
+        if port_obj is None:
+            raise ValueError('Front-panel-port %d not found in cache' % fp_port)
+        br_mode = port_obj.get_breakout_mode()
+        mac_offset = port_obj.mac_offset
+    else:
+        cps_port_obj = fp_cache.get(fp_port)
+        if cps_port_obj is None:
+            raise ValueError('Front-panel-port %d not found in cps cache' % fp_port)
+        br_mode = nas_if.get_cps_attr(cps_port_obj, _fp_attr('breakout-mode'))
+        mac_offset = nas_if.get_cps_attr(cps_port_obj, _fp_attr('mac-offset'))
+        if br_mode is None or mac_offset is None:
+            raise ValueError('Mandatory attributes not found in cps object')
+
+    nas_if.log_info('Cached breakout mode of front panel port %d is %d' % (fp_port, br_mode))
+    lane_id = subport_to_lane(br_mode, sub_port)
+    if lane_id is None:
+        raise ValueError('Failed to get lane id from br_mode %d subport %d' % (
+                         br_mode, sub_port))
+    if isinstance(lane_id, tuple):
+        lane_id, flag = lane_id
+        nas_if.log_info('Get lane id %d with extended condition %s' % (lane_id, flag))
+
+    return mac_offset + lane_id
 
 def init_profile():
 

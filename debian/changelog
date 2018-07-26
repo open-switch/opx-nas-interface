@@ -1,3 +1,36 @@
+opx-nas-interface (5.17.0+vxlan1) unstable; urgency=medium
+
+  * Feature: VxLAN Support
+  * Update: Consolidate remote endpoint event into a single event with tunnnel ID
+  * Update: Allow ports to be added/removed from VLAN 1 in scaled vlan mode
+  * Update: Use separate service for mac address allocation
+  * Update: Avoid sending multiple set requests for speed to PAS
+  * Update: Set only ingress split horizon for pv subport
+  * Update: Split horizon changes
+  * Update: MAC learn mode for physical port, LAG
+  * Bugfix: Unable to delete/clear L2MC on removal of port channel as VLAN member
+  * Update: set_speed method changed to support QSA adaptor
+  * Update: Check profile type as DDQSFP28 for lane admin up
+  * Update: Publish vlan sub interface event for regular vlan interfaces as well
+  * Bugfix: MAC learn disable issue in vlan
+  * Update: Support to do get on VXLAN type interface
+  * Bugfix: The ability to set mac_lear_mode from CPS set for VXALN
+  * Update: Send vlan sub interface transaction directly to base
+  * Update: Correctly handle bridge name when deleting vlan
+  * Update: Enable/disable interface packet drop status based on its tagged/untagged membership
+  * Update: Send sequential hwport offset value from port group object to PAS for setting media transciever
+  * Update: Handle the mode change for lag blocked port in netlink handler
+  * Update: Get the port mode before adding port to lag in kernel
+  * Update: Ignore duplex failure while interface creation
+  * Update: Cache the default vlan id use default vlan id for vxlan in pv mode
+  * Update: Use vlan id of 1q vlan for untagged port when ports are being migrated to 1d bridge
+  * Update: Handle tunnel flood disable event and publish an event for the same
+  * Update: Move untagged vlan to 1d bridge
+  * Update: VxLAN changes to program npu first and then kernel
+
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Wed, 25 Jul 2018 17:17:56 -0800
+
 opx-nas-interface (5.17.0) unstable; urgency=medium
 
   * Update: VLAN filtering support

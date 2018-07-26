@@ -1,5 +1,12 @@
 #!/bin/bash -e
 
+apt-get update
+
+apt-get install -y python-pytest
+
+/usr/bin/python -m pytest -s
+
+./nas_int_vxlan_unittest
 ./nas_int_rpc_unittest
 ./nas_int_lag_unittest
 

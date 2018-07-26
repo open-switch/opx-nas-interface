@@ -164,13 +164,6 @@ def if_config_add(if_name, config_obj):
     return True
 
 def get_intf_type(cps_obj):
-    if_type_map = {'ianaift:ethernetCsmacd': 'front-panel',
-                   'ianaift:fibreChannel': 'front-panel',
-                   'ianaift:l2vlan': 'vlan',
-                   'ianaift:ieee8023adLag': 'lag',
-                   'ianaift:softwareLoopback': 'loopback',
-                   'base-if:management': 'management',
-                   'base-if:macvlan': 'macvlan'}
     try:
         obj_if_type = cps_obj.get_attr_data('if/interfaces/interface/type')
     except:

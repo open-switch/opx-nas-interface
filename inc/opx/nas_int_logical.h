@@ -23,6 +23,12 @@
 #ifndef NAS_INTERFACE_INC_NAS_INT_LOGICAL_H_
 #define NAS_INTERFACE_INC_NAS_INT_LOGICAL_H_
 
-t_std_error nas_int_logical_init(cps_api_operation_handle_t handle) ;
+#include "std_mutex_lock.h"
 
-#endif /* NAS_INTERFACE_INC_NAS_INT_LOGICAL_H_ */
+t_std_error nas_int_logical_init(cps_api_operation_handle_t handle) ;
+std_mutex_type_t *nas_physical_intf_lock(void);
+
+t_std_error nas_intf_admin_state_get(hal_ifindex_t if_index, bool *admin_state);
+t_std_error nas_intf_admin_state_set(hal_ifindex_t if_index, bool admin_state);
+
+#endif //NAS_INTERFACE_INC_NAS_INT_LOGICAL_H_

@@ -58,7 +58,15 @@ def set_media_transceiver(interface_obj):
     #
     for hwport in hwport_list:
         fp_details = fp.find_port_by_hwport(npu, hwport)
-        _lane = fp_details.lane
+        if fp_details.port_group_id is None:
+            _lane = fp_details.lane
+        else:
+            pg_list = fp.get_port_group_list()
+            pg_obj = pg_list[fp_details.port_group_id]
+            if ((pg_obj.get_profile_type()) == "ethernet_ddqsfp28"):
+                _lane = pg_obj.get_lane(hwport)
+            else:
+                _lane = fp_details.lane
         media.media_transceiver_set(1, fp_details.media_id, _lane, enable)
 
 def set_interface_media_speed(interface_obj, speed=None):
@@ -116,7 +124,7 @@ def _process_logical_if_event(obj):
     if_index = _get_obj_attr_value(obj, 'dell-base-if-cmn/if/interfaces/interface/if-index')
     speed = _get_obj_attr_value(obj, 'dell-if/if/interfaces/interface/speed')
     # check if if_index is present
-    if if_index == None:
+    if if_index == None or speed is None:
         nas_if.log_err('Interface index not present in the interface event')
         return
     # Get Interface attributes
@@ -165,9 +173,7 @@ def monitor_interface_event():
                 except:
                     nas_if.log_err("Unable to set media transceiver for if_index {}".format(str(if_index)))
 
-            if_type = _get_obj_attr_value(obj, 'if/interfaces-state/interface/type')
-
-            if _led_control == True or (if_type is not None and if_type == nas_if._g_if_fc_type):
+            if _led_control == True:
                 oper_state = _get_obj_attr_value(obj, 'if/interfaces-state/interface/oper-status')
                 if oper_state != None:
                     try:

@@ -186,7 +186,8 @@ hal_vlan_id_t vid, nas_port_mode_t port_mode, bool lag) {
         } else {
             if (!nas_is_non_npu_phy_port(p_iter_node->ifindex)) {
                 if (nas_add_or_del_port_to_vlan(p_iter_node->ndi_port.npu_id, vid,
-                                    &(p_iter_node->ndi_port), port_mode, false) != STD_ERR_OK) {
+                                    &(p_iter_node->ndi_port), port_mode, false, p_iter_node->ifindex)
+                        != STD_ERR_OK) {
                     EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                       "Error deleting port %d with mode %d from vlan %d", p_iter_node->ifindex,
                        port_mode, vid);

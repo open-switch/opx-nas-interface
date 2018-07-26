@@ -13,7 +13,6 @@
 # See the Apache Version 2.0 License for specific language governing
 # permissions and limitations under the License.
 
-
 import nas_port_group_utils as pg_utils
 from nas_common_header import *
 import argparse
@@ -26,10 +25,10 @@ _pg_state_key = 'base-pg/dell-pg/port-groups-state/port-group-state'
 
 def show_port_group(args):
     if args.pg_name == 'all':
-        call(["cps_get_oid.py", "target", _pg_key ])
+        call(["cps_get_oid.py", "target/", _pg_key ])
     else:
-        call(["cps_get_oid.py", "target", _pg_key, pg_utils.pg_attr('id') + '=' + args.pg_name])
-        call(["cps_get_oid.py", "observed", _pg_state_key, pg_utils.pg_state_attr('id') + '=' + args.pg_name])
+        call(["cps_get_oid.py", "target/", _pg_key, pg_utils.pg_attr('id') + '=' + args.pg_name])
+        call(["cps_get_oid.py", "observed/", _pg_state_key, pg_utils.pg_state_attr('id') + '=' + args.pg_name])
 
 def config_port_group(args):
     if args.pg_name == None or args.Breakout == None or args.PHY_Mode == None or args.Port_Speed == None:

@@ -456,6 +456,24 @@ int nas_process_payload_and_form_packet (uint8_t *pkt_buf,
     struct timespec   ts_cur_pkt;
     struct timespec   ts_diff;
 
+//@@TODO handle for ipv6 ND
+
+    /* reference arp header from nflog payload */
+    p_arp_header = (arp_header_t *) p_nas_nflog_params->payload;
+
+    if (!(p_nas_nflog_params->payload_len))
+    {
+        /* return, if payload length is not valid */
+        return -1;
+    }
+
+    if ((p_nas_nflog_params->hw_protocol != arp_protocol) ||
+        (p_arp_header->ptype != ip_protocol))
+    {
+        /* return, if its not IPv4 ARP */
+        return -1;
+    }
+
     memset(&intf_ctrl, 0, sizeof(interface_ctrl_t));
     intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF;
     intf_ctrl.if_index = p_nas_nflog_params->out_ifindex;
@@ -464,19 +482,7 @@ int nas_process_payload_and_form_packet (uint8_t *pkt_buf,
     if ((dn_hal_get_interface_info(&intf_ctrl)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"TAP-TX", "Processing payload failed. Invalid interface %d. ifInfo get failed",
                    p_nas_nflog_params->out_ifindex);
-        return 0;
-    }
-
-//@@TODO handle for ipv6 ND
-
-    /* reference arp header from nflog payload */
-    p_arp_header = (arp_header_t *) p_nas_nflog_params->payload;
-
-    if ((p_nas_nflog_params->hw_protocol != arp_protocol) ||
-        (p_arp_header->ptype != ip_protocol))
-    {
-        /* return 0, if its not IPv4 ARP */
-        return 0;
+        return -1;
     }
 
     clock_gettime (CLOCK_MONOTONIC, &ts_cur_pkt);
@@ -576,7 +582,7 @@ void process_nflog_packets (evutil_socket_t fd, short evt, void *arg)
         if (pkt_len > 0) {
             nas_nflog_pkts_tx_to_ingress_pipeline++;
             g_vif_pkt_tx.tx_to_ingress_fun (g_vif_pkt_tx.tx_buf,pkt_len);
-        } else {
+        } else if (pkt_len == 0) {
             nas_nflog_pkts_tx_to_ingress_pipeline_dropped++;
         }
     }
@@ -988,30 +994,6 @@ static t_std_error update_if_reg_info(const char *name, npu_id_t npu, port_t por
     return STD_ERR_OK;
 }
 
-static void nas_send_port_oper_event (const char *name , IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t status) {
-
-
-    char buff[CPS_API_MIN_OBJ_LEN];
-    cps_api_object_t obj = cps_api_object_init(buff,sizeof(buff));
-
-
-    if (!cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
-                DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_OBJ,
-                cps_api_qualifier_OBSERVED)) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG",
-                   "Could not translate to logical interface key for intf %s" ,name);
-        return;
-    }
-
-    cps_api_set_key_data(obj,IF_INTERFACES_STATE_INTERFACE_NAME,
-                               cps_api_object_ATTR_T_BIN, name, strlen(name)+1);
-    cps_api_object_attr_add_u32(obj,IF_INTERFACES_STATE_INTERFACE_OPER_STATUS,
-            status);
-
-    EV_LOGGING(INTERFACE,NOTICE,"NAS-INTF-EVENT",
-               "Sending oper event notification for interface %s: oper_status %d", name, status);
-    hal_interface_send_event(obj);
-}
 
 t_std_error nas_int_update_npu_port(const char *name, npu_id_t npu, port_t port,
                                     bool connect)
@@ -1045,8 +1027,6 @@ t_std_error nas_int_update_npu_port(const char *name, npu_id_t npu, port_t port,
         IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t state =
                         ndi_to_cps_oper_type(link_state.oper_status);
         _ports[npu][port]->set_link_state(state);
-        /*  Send event for oper status */
-        nas_send_port_oper_event (name, state);
     } else {
         _ports[npu][port]->set_link_state(IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN);
         _ports[name].init();
@@ -1072,6 +1052,10 @@ t_std_error nas_int_update_npu_port(const char *name, npu_id_t npu, port_t port,
                    name);
         return STD_ERR(INTERFACE, FAIL, 0);
     }
+
+    EV_LOGGING(INTERFACE, NOTICE, "INTF-UPDATE", "Interface %s is %s NPU %d PORT %d",
+               name, (connect ? "connected to" : "disconnected from"),
+               npu, port);
 
     return STD_ERR_OK;
 }

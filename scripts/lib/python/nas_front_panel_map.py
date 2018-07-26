@@ -201,7 +201,7 @@ class PortProfile(object):
 
     def set_phy_mode(self, mode):
         self.phy_mode = mode
-            
+
     def set_port_speed(self, speed):
         self.phy_port_speed = speed
 
@@ -210,7 +210,7 @@ class PortProfile(object):
 
     def get_supported_autoneg(self):
         return self.supported_autoneg
-    
+
     def get_default_phy_port_speed(self):
         return self.def_phy_port_speed
 
@@ -270,8 +270,11 @@ def process_Profile_fc_cap_cfg(fc_cap_node):
         fc_br_cap = {}
         _br_str = cap.get('breakout')
         _hwp_speed = cap.get('hwport_speed')
+        _phy_fc_speed = cap.get('phy_fc_speed')
         fc_br_cap = {'breakout':get_value(yang_breakout, _br_str),
-                   'hwp_speed':int(_hwp_speed)}
+                   'hwp_speed':int(_hwp_speed),
+                   'phy_fc_speed':int(_phy_fc_speed)
+                    }
 
         _fc_cap.append(fc_br_cap)
     return _fc_cap
@@ -370,7 +373,7 @@ class Port(PortProfile):
         self.hybrid_group_id = None
         self.hwports = []
         self.hybrid_profile = hybrid_profile
-    
+
     def get_hwports(self):
         if self.hwports is None:
             return None
@@ -421,7 +424,7 @@ class Port(PortProfile):
     def set_phy_port_speed(self):
         self.phy_port_speed = get_phy_port_speed(self.breakout, self.phy_mode,
                                     self.hwp_speed * len(self.hwports))
-        
+
     def set_default_phy_port_speed(self):
         self.def_phy_port_speed = get_phy_port_speed(self.def_breakout, self.def_phy_mode,
                                     self.def_hwport_speed * len(self.hwports))
@@ -528,6 +531,7 @@ def find_port_by_hwport(npu, hwport):
     pd.port = p.id
     pd.hwport = hwport
     pd.media_id = p.media_id
+    pd.port_group_id = p.port_group_id
     return pd
 
 
@@ -614,12 +618,14 @@ class PortGroup(PortProfile):
     def set_default_phy_port_speed(self):
         self.def_phy_port_speed = get_phy_port_speed(self.def_breakout, self.def_phy_mode,
                                     self.def_hwport_speed * len(self.hw_ports))
-   
+
     def get_fp_ports(self):
         return self.fp_ports[:]
+
     def get_hw_ports(self):
         return self.hw_ports[:]
-
+    def get_lane(self,hwport):
+        return self.hw_ports.index(hwport)
     def apply_port_profile(self, port_profile):
         self.apply(port_profile)
         self.set_default_phy_port_speed()
@@ -645,7 +651,7 @@ def process_frontPanelPort_cfg(root):
         _mac_offset = int(i.get('mac_offset'))
         _profile_name = i.get('profile_type')
         port_profile = get_port_profile(_profile_name)
-        
+
         if npu is None:
             npu = get_npu(_npu)
 
@@ -740,16 +746,16 @@ def process_hybridProfile_cfg(root):
     for hybrid_profile in _global.findall('hybrid_profile'):
         hybrid_profile_name = hybrid_profile.get('name')
         hybrid_profile_profile_modes = {}
-        
+
         for e in hybrid_profile.findall('profile_mode'):
             profile_mode = e.get('name')
             hybrid_profile_profile_modes[profile_mode] = []
             if profile_mode != None:
-                
+
                 for f in e.findall('port_profile'):
                     port_profile = f.get('name')
                     hybrid_profile_profile_modes[profile_mode].append(port_profile)
-        
+
         hybrid_profile_list[hybrid_profile_name] = HybridProfile(hybrid_profile_name, hybrid_profile_profile_modes)
 
 

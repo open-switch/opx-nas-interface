@@ -28,6 +28,7 @@
 #include "nas_int_bridge.h"
 #include "nas_int_com_utils.h"
 #include <stdbool.h>
+#include <string>
 
 #define MIN_VLAN_ID 1
 #define MAX_VLAN_ID 4094
@@ -132,7 +133,7 @@ cps_api_return_code_t nas_publish_vlan_object(nas_bridge_t *p_bridge_node, cps_a
 
 t_std_error nas_add_or_del_port_to_vlan(npu_id_t npu_id, hal_vlan_id_t vlan_id,
                                         ndi_port_t *p_ndi_port, nas_port_mode_t port_mode,
-                                        bool add_port);
+                                        bool add_port, hal_ifindex_t ifindex);
 
 t_std_error nas_cps_add_port_to_os(hal_ifindex_t br_index, hal_vlan_id_t vlan_id,
                                    nas_port_mode_t port_mode, hal_ifindex_t port_idx,uint32_t mtu,
@@ -144,7 +145,7 @@ t_std_error nas_lag_add_del_vlan_update(hal_ifindex_t lag_index, hal_vlan_id_t,
 t_std_error nas_handle_lag_add_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_t lag_index,
                               nas_port_mode_t port_mode, bool cps_add, vlan_roll_bk_t *roll_bk);
 t_std_error  nas_handle_lag_del_from_vlan(nas_bridge_t *p_bridge, hal_ifindex_t lag_index,
-                nas_port_mode_t port_mode, bool cps_del ,vlan_roll_bk_t *roll_bk);
+                nas_port_mode_t port_mode, bool cps_del ,vlan_roll_bk_t *roll_bk,bool migrate);
 
 t_std_error nas_cps_del_port_from_os(hal_vlan_id_t vlan_id, hal_ifindex_t port_index,
                                      nas_port_mode_t port_mode, BASE_IF_MODE_t vlan_mode);
@@ -159,4 +160,6 @@ t_std_error nas_handle_lag_index_in_cps_set(nas_bridge_t *p_bridge, nas_port_lis
                                             nas_port_mode_t port_mode, vlan_roll_bk_t *roll_bk);
 t_std_error nas_add_or_del_lag_in_vlan(hal_ifindex_t lag_index, hal_vlan_id_t vlan_id,
                                               nas_port_mode_t port_mode, bool add_flag, bool roll_bk);
+
+bool get_parent_bridge_info(const std::string & bridge_name, interface_ctrl_t & entry);
 #endif /* NAS_INTF_VLAN_H_ */

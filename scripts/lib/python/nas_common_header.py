@@ -20,6 +20,7 @@ keys_id = {
     'fp_key' :              cps.key_from_name('target', 'base-if-phy/front-panel-port'),
     'npu_lane_key' :        cps.key_from_name('target', 'base-if-phy/hardware-port'),
     'set_intf_key' :        cps.key_from_name('target', 'dell-base-if-cmn/set-interface'),
+    'set_bridge_key' :      cps.key_from_name('target', 'bridge-domain/set-bridge'),
     'get_mac_key' :         cps.key_from_name('target', 'dell-base-if-cmn/get-mac-address'),
     'media_key' :           cps.key_from_name('observed', 'base-pas/media'),
     'physical_key' :        cps.key_from_name('target', 'base-if-phy/physical'),
@@ -65,6 +66,17 @@ yang_speed = {
     '32GFC'     : 16,     # 16Gbps for FC port
     'auto'      : 8       # default speed
 }
+
+if_type_map = {'ianaift:ethernetCsmacd': 'front-panel',
+                   'ianaift:fibreChannel': 'front-panel',
+                   'ianaift:l2vlan': 'vlan',
+                   'ianaift:ieee8023adLag': 'lag',
+                   'ianaift:softwareLoopback': 'loopback',
+                   'base-if:vxlan': 'vxlan',
+                   'base-if:bridge': 'bridge',
+                   'base-if:management': 'management',
+                   'base-if:macvlan': 'macvlan',
+                   'base-if:vlanSubInterface': 'vlanSubInterface'}
 
 eth_to_fc_speed = { yang_speed['10G']:yang_speed['8GFC'],
                     yang_speed['20G']: yang_speed['16GFC'],

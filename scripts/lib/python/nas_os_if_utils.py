@@ -212,6 +212,22 @@ class IfComponentCache(object):
     def len(self):
         return len(self.m)
 
+    def __len__(self):
+        return self.len()
+
+    def __delitem__(self, name):
+        if self.exists(name):
+            del self.m[name]
+
+    def __getitem__(self, name):
+        return self.get(name)
+
+    def __iter__(self):
+        return iter(self.m)
+
+    def items(self):
+        for item in self.m.items():
+            yield item
 
 class FpPortCache(IfComponentCache):
 
@@ -233,7 +249,6 @@ class FpPortCache(IfComponentCache):
 
     def get_by_media_id(self, media_id):
         return self.get(self.make_media_key(media_id))
-
 
 class PhyPortCache(IfComponentCache):
 
@@ -301,7 +316,7 @@ def is_40g_mode_on_100g_port(fp_obj):
         log_err('Unable to find supported-speed from cps object')
         return False
     # Checking if default port speed is 100g and port speed is 40g
-    if (def_port_speed == nas_comm.get_value(nas_comm.yang_speed,'100G') and 
+    if (def_port_speed == nas_comm.get_value(nas_comm.yang_speed,'100G') and
         port_speed == nas_comm.get_value(nas_comm.yang_speed,'40G')):
         log_info('100G physical port was configured as 40G breakout mode')
         return True

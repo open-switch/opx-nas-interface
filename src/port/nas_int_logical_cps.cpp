@@ -49,12 +49,17 @@
 #include "cps_api_operation.h"
 #include "cps_api_db_interface.h"
 
+#include "interface/nas_interface.h"
+#include "interface/nas_interface_map.h"
+#include "interface/nas_interface_utils.h"
+
 #include "event_log.h"
 #include "std_utils.h"
 #include "nas_ndi_port.h"
 #include "nas_switch.h"
 #include "nas_int_com_utils.h"
 #include "cps_api_object_tools.h"
+#include "std_mutex_lock.h"
 
 #include <inttypes.h>
 #include <unordered_map>
@@ -68,12 +73,40 @@ struct _npu_port_t {
         return npu_id == p.npu_id && npu_port == p.npu_port;
     }
 };
-
 struct _npu_port_hash_t {
     std::size_t operator() (const _npu_port_t& p) const {
         return std::hash<int>()(p.npu_id) ^ (std::hash<int>()(p.npu_port) << 1);
     }
 };
+
+typedef struct _intf_cache {
+    bool admin_state;
+    _intf_cache() : admin_state(false){}
+} nas_intf_cache_t;
+
+using nas_intf_cache = std::unordered_map <hal_ifindex_t, nas_intf_cache_t>;
+static nas_intf_cache _nas_intf_cache;
+static std_mutex_lock_create_static_init_rec(_physical_intf_lock);
+std_mutex_type_t *nas_physical_intf_lock(void)
+{
+    return &_physical_intf_lock;
+}
+t_std_error nas_intf_admin_state_get(hal_ifindex_t if_index, bool *admin_state)
+{
+    auto it = _nas_intf_cache.find(if_index);
+    if (it != _nas_intf_cache.end()) {
+        *admin_state = (bool) it->second.admin_state;
+        return STD_ERR_OK;
+    }
+    return STD_ERR(INTERFACE, FAIL, 0);
+}
+
+t_std_error nas_intf_admin_state_set(hal_ifindex_t if_index, bool admin_state)
+{
+    _nas_intf_cache[if_index].admin_state = admin_state;
+    return STD_ERR_OK;
+}
+
 
 struct _port_cache {
     uint32_t mode;
@@ -378,6 +411,7 @@ static cps_api_return_code_t _if_fill_in_npu_attrs(npu_id_t npu, port_t port,
     BASE_IF_PHY_MAC_LEARN_MODE_t learn_mode;
     if (ndi_port_mac_learn_mode_get(npu, port, &learn_mode) == STD_ERR_OK) {
         cps_api_object_attr_add_u32(obj, BASE_IF_PHY_IF_INTERFACES_INTERFACE_LEARN_MODE, learn_mode);
+        cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_MAC_LEARN, learn_mode);
     }
 
     BASE_CMN_FEC_TYPE_t fec_mode;
@@ -950,6 +984,7 @@ static cps_api_return_code_t _set_attr_up (npu_id_t npu, port_t port, cps_api_ob
         return cps_api_ret_code_ERR;
     }
 
+    std_mutex_simple_lock_guard g(nas_physical_intf_lock());
     bool state;
     bool revert;
     state = (bool) cps_api_object_attr_data_uint(attr); // TRUE is ADMIN UP and false ADMIN DOWN
@@ -975,7 +1010,34 @@ static cps_api_return_code_t _set_attr_up (npu_id_t npu, port_t port, cps_api_ob
     nas_send_admin_state_event(if_index,
         (state == true) ? IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_UP: IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_DOWN);
 
+
+    nas_intf_admin_state_set(if_index, state);
+    EV_LOGGING(INTERFACE,NOTICE,"NAS-IF","Admin state for %d is %d ", if_index, state);
     return cps_api_ret_code_OK;
+}
+
+static BASE_IF_MAC_LEARN_MODE_t nas_common_learn_mode (BASE_IF_PHY_MAC_LEARN_MODE_t ndi_fdb_learn_mode){
+
+    static const auto nas_to_common_learn_mode = new std::unordered_map<BASE_IF_PHY_MAC_LEARN_MODE_t,
+                                                            BASE_IF_MAC_LEARN_MODE_t,std::hash<int>>
+    {
+        {BASE_IF_PHY_MAC_LEARN_MODE_DROP, BASE_IF_MAC_LEARN_MODE_DROP},
+        {BASE_IF_PHY_MAC_LEARN_MODE_DISABLE, BASE_IF_MAC_LEARN_MODE_DISABLE},
+        {BASE_IF_PHY_MAC_LEARN_MODE_HW, BASE_IF_MAC_LEARN_MODE_HW},
+        {BASE_IF_PHY_MAC_LEARN_MODE_CPU_TRAP, BASE_IF_MAC_LEARN_MODE_CPU_TRAP},
+        {BASE_IF_PHY_MAC_LEARN_MODE_CPU_LOG, BASE_IF_MAC_LEARN_MODE_CPU_LOG},
+    };
+
+    BASE_IF_MAC_LEARN_MODE_t mode;
+    auto it = nas_to_common_learn_mode->find(ndi_fdb_learn_mode);
+    if(it != nas_to_common_learn_mode->end()){
+        mode = it->second;
+    } else {
+        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-PORT",
+                       "invalid phy_mac_learn_mode: setting to HW ");
+        mode = BASE_IF_MAC_LEARN_MODE_HW;
+    }
+    return mode;
 }
 
 static cps_api_return_code_t _set_mac_learn_mode(npu_id_t npu, port_t port, cps_api_object_t obj) {
@@ -994,6 +1056,7 @@ static cps_api_return_code_t _set_mac_learn_mode(npu_id_t npu, port_t port, cps_
         return cps_api_ret_code_ERR;
     }
     cps_api_object_attr_t _ifix = cps_api_object_attr_get(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+    cps_api_object_attr_t _name = cps_api_get_key_data(obj,IF_INTERFACES_INTERFACE_NAME);
     if(_ifix){
         hal_ifindex_t ifindex = cps_api_object_attr_data_u32(_ifix);
         bool enable = true;
@@ -1003,11 +1066,67 @@ static cps_api_return_code_t _set_mac_learn_mode(npu_id_t npu, port_t port, cps_
         if(nas_os_mac_change_learning(ifindex,enable) != STD_ERR_OK){
             EV_LOG(INFO,INTERFACE,3,"NAS-IF-SET","Failed to update MAC learn mode in Linux kernel");
         }
+
     }else{
         EV_LOG(INFO,INTERFACE,3,"NAS-IF-SET","No ifindex in the object to update mac learn mode");
     }
+
+    if(_name){
+        const char * if_name = (const char *)cps_api_object_attr_data_bin(_name);
+        NAS_INTERFACE *i_obj = nullptr;
+        std::string intf_name = std::string(if_name);
+        BASE_IF_MAC_LEARN_MODE_t learn_mode = nas_common_learn_mode(mode);
+        if((i_obj = nas_interface_map_obj_get(intf_name)) != nullptr){
+            i_obj->set_mac_learn_mode(learn_mode);
+            nas_com_id_value_t attr;
+            attr.attr_id = DELL_IF_IF_INTERFACES_INTERFACE_MAC_LEARN;
+            attr.val = &learn_mode;
+            attr.vlen = sizeof(BASE_IF_MAC_LEARN_MODE_t);
+            nas_interface_utils_set_all_sub_intf_attr(intf_name,&attr,1);
+        }
+    }
     return cps_api_ret_code_OK;
 }
+
+static cps_api_return_code_t _set_attr_sh(cps_api_object_t obj, bool ingress){
+    cps_api_attr_id_t sh_id = ingress ?  DELL_IF_IF_INTERFACES_INTERFACE_INGRESS_SPLIT_HORIZON_ID :
+                                         DELL_IF_IF_INTERFACES_INTERFACE_EGRESS_SPLIT_HORIZON_ID;
+    cps_api_object_attr_t sh_attr = cps_api_object_attr_get(obj,sh_id);
+    if (sh_attr == nullptr) {
+        return cps_api_ret_code_ERR;
+    }
+
+    uint32_t sh_id_val = cps_api_object_attr_data_uint(sh_attr);
+    cps_api_object_attr_t _name = cps_api_get_key_data(obj,IF_INTERFACES_INTERFACE_NAME);
+
+    if(_name){
+        const char * if_name = (const char *)cps_api_object_attr_data_bin(_name);
+        NAS_INTERFACE *i_obj = nullptr;
+        std::string intf_name = std::string(if_name);
+
+        if((i_obj = nas_interface_map_obj_get(intf_name)) != nullptr){
+            ingress ? i_obj->set_ingress_split_horizon_id(sh_id_val) : i_obj->set_egress_split_horizon_id(sh_id_val);
+            nas_com_id_value_t attr;
+            attr.attr_id = sh_id;
+            attr.val = &sh_id_val;
+            attr.vlen = sizeof(uint32_t);
+            if(nas_interface_utils_set_all_sub_intf_attr(intf_name,&attr,1) != STD_ERR_OK){
+                return cps_api_ret_code_ERR;
+            }
+        }
+    }
+
+    return cps_api_ret_code_OK;
+}
+
+static cps_api_return_code_t _set_attr_ingress_sh(npu_id_t npu, port_t port, cps_api_object_t obj) {
+   return _set_attr_sh(obj,true);
+}
+
+static cps_api_return_code_t _set_attr_egress_sh(npu_id_t npu, port_t port, cps_api_object_t obj) {
+   return _set_attr_sh(obj,false);
+}
+
 
 static cps_api_return_code_t _set_phy_media(npu_id_t npu, port_t port, cps_api_object_t obj) {
 
@@ -1242,6 +1361,7 @@ static const std::unordered_map<cps_api_attr_id_t,
         { BASE_IF_PHY_IF_INTERFACES_INTERFACE_TAGGING_MODE, {_set_attr_tagging_mode, "tagging_mode"} },
         { DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, {_set_attr_mac, "mac_addr"} },
         { BASE_IF_PHY_IF_INTERFACES_INTERFACE_LEARN_MODE, {_set_mac_learn_mode, "mac_learn_mode"} },
+        { DELL_IF_IF_INTERFACES_INTERFACE_MAC_LEARN,{_set_mac_learn_mode, "mac_learn_mode"}},
         { BASE_IF_PHY_IF_INTERFACES_INTERFACE_PHY_MEDIA, {_set_phy_media, "phy_media"} },
         { BASE_IF_PHY_IF_INTERFACES_INTERFACE_IDENTIFICATION_LED, {_set_identification_led, "identification_led"} },
         { BASE_IF_PHY_IF_INTERFACES_INTERFACE_HW_PROFILE, {_set_hw_profile, "hw_profile"} },
@@ -1254,7 +1374,9 @@ static const std::unordered_map<cps_api_attr_id_t,
         { DELL_IF_IF_INTERFACES_INTERFACE_FEC, {_set_attr_fec, "fec"} },
         { DELL_IF_IF_INTERFACES_INTERFACE_OUI, {_set_attr_oui, "oui"} },
         { IF_INTERFACES_INTERFACE_DESCRIPTION, {_set_attr_desc, "description"}},
-        { DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_VLAN_FILTER, {_set_attr_vlan_filter, "vlan_filter"}}
+        { DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_VLAN_FILTER, {_set_attr_vlan_filter, "vlan_filter"}},
+        { DELL_IF_IF_INTERFACES_INTERFACE_INGRESS_SPLIT_HORIZON_ID, {_set_attr_ingress_sh, "Ingress_split_horizon"}},
+        { DELL_IF_IF_INTERFACES_INTERFACE_EGRESS_SPLIT_HORIZON_ID, {_set_attr_egress_sh, "Egress_split_horizon"}}
 };
 
 static void remove_same_values(cps_api_object_t now, cps_api_object_t req) {
@@ -1316,6 +1438,12 @@ static cps_api_return_code_t _if_delete(cps_api_object_t req_if, cps_api_object_
 
     if(cps_api_db_commit_one(cps_api_oper_DELETE,req_if,nullptr,false)!= cps_api_ret_code_OK){
         EV_LOGGING(INTERFACE,ERR,"NAS-INT-SET","Failed to write physical interface object to db");
+    }
+
+    NAS_INTERFACE * i_obj = nullptr;
+    std::string intf_name = std::string(_port.if_name);
+    if(nas_interface_map_obj_remove(intf_name,&i_obj) ==STD_ERR_OK){
+        if(i_obj) delete i_obj;
     }
 
     cps_api_key_set(cps_api_object_key(req_if),CPS_OBJ_KEY_INST_POS,cps_api_qualifier_OBSERVED);
@@ -1396,6 +1524,18 @@ static cps_api_return_code_t _intf_state_publish(npu_id_t npu_id, npu_port_t por
             cps_api_object_attr_add_u32(_intf_state,
                     DELL_IF_IF_INTERFACES_STATE_INTERFACE_AUTO_NEGOTIATION, _autoneg);
         }
+
+        ndi_intf_link_state_t link_state;
+        if (ndi_port_link_state_get(npu_id, port_id, &link_state) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE, ERR, "INT-UPDATE", "Failed to get link state for port %d",
+                       port_id);
+            return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t state =
+                        ndi_to_cps_oper_type(link_state.oper_status);
+        /*  Send event for oper status */
+        EV_LOGGING(INTERFACE, NOTICE, "INT-UPDATE", "publishing oper state for %s", ifname);
+        cps_api_object_attr_add_u32(_intf_state,IF_INTERFACES_STATE_INTERFACE_OPER_STATUS, state);
         cps_api_event_thread_publish(_intf_state);
     }
     return cps_api_ret_code_OK;
@@ -1531,11 +1671,18 @@ static cps_api_return_code_t _if_update(cps_api_object_t req_if, cps_api_object_
                        func->second.second, id, _port.if_name);
             ret = func->second.first(_port.npu_id,_port.port_id,req_if);
             if (ret!=cps_api_ret_code_OK) {
-                EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set Attribute %s (%" PRId64 ") for interface  %s",
-                           func->second.second, id, _port.if_name);
-                if_rollback(rollback,_port);
-                cps_api_object_delete(rollback);
-                return ret;
+                if (!(if_set) && (id == DELL_IF_IF_INTERFACES_INTERFACE_SPEED ||
+                        id == DELL_IF_IF_INTERFACES_INTERFACE_FEC ||
+                        id == DELL_IF_IF_INTERFACES_INTERFACE_DUPLEX)){
+                    EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set Attribute %s (%" PRId64 ") for interface  %s",
+                            func->second.second, id, _port.if_name);
+                } else {
+                    EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to set Attribute %s (%" PRId64 ") for interface  %s",
+                            func->second.second, id, _port.if_name);
+                    if_rollback(rollback,_port);
+                    cps_api_object_delete(rollback);
+                    return ret;
+                }
             } else {
                 const void *data = cps_api_object_get_data(prev, id);
                 if (NULL == data)
@@ -1785,6 +1932,12 @@ static cps_api_return_code_t _if_create(cps_api_object_t cur, cps_api_object_t p
         cps_api_return_code_t ret = cps_api_ret_code_ERR;
         if ((ret = _if_update(cur,prev,false)) != cps_api_ret_code_OK) {
             return ret;
+        }
+
+        std::string intf_name = std::string(name);
+        NAS_INTERFACE *i_obj = new NAS_INTERFACE(intf_name, ifix,nas_int_type_PORT);
+        if(i_obj){
+            nas_interface_map_obj_add(intf_name,i_obj);
         }
 
         return cps_api_ret_code_OK;

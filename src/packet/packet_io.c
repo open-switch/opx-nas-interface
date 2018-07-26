@@ -55,7 +55,10 @@
 
 #define MAX_PKT_LEN        12000
 #define PKT_DBG_ERR        (1)
-#define PKT_DBG_DUMP       (1 << 1)
+#define PKT_DBG_DIR_IN     (1 << 1)
+#define PKT_DBG_DIR_OUT    (1 << 2)
+#define PKT_DBG_DIR_BOTH   (PKT_DBG_DIR_IN | PKT_DBG_DIR_OUT)
+#define PKT_DBG_DUMP(x)    ((x & PKT_DBG_DIR_IN) || (x & PKT_DBG_DIR_OUT))
 
 #define PKT_DEBUG(arg...)\
     do {\
@@ -88,14 +91,15 @@ void pkt_debug_counters(std_parsed_string_t handle) {
  */
 static pthread_t packet_io_thr;
 
-static void hal_packet_io_dump(uint8_t *buf, int len)
+static void hal_packet_io_dump(uint8_t *buf, int len, int pkt_dir)
 {
     int var_j, var_n;
 
-    if (pkt_debug == PKT_DBG_DUMP) {
+    if (pkt_dir & pkt_debug) {
         var_n = 0;
         if (buf != NULL) {
-            printf("[PKT_IO]: %s: Dumping Raw Pkt\r\n", __FUNCTION__);
+            printf("[PKT_IO][DIR-%s]: %s: Dumping Raw Pkt\r\n",
+                   ((pkt_dir == PKT_DBG_DIR_IN)? "IN":"OUT"),  __FUNCTION__);
             for (var_j = 0; var_j < len; var_j++) {
                 printf("0x%02x ", buf[var_j]);
                 if ((var_n != 0) && ((var_n + 1) % 16 == 0))
@@ -481,8 +485,8 @@ static t_std_error _cps_init ()
 static t_std_error dn_hal_packet_rx(uint8_t *pkt, uint32_t len, ndi_packet_attr_t *p_attr)
 {
     ++packets_rxed;
+    if (PKT_DBG_DUMP(pkt_debug)) hal_packet_io_dump(pkt, len, PKT_DBG_DIR_IN);
     PKT_DEBUG("[RX] on front npu %d port %d len %d",p_attr->npu_id,p_attr->rx_port,len);
-    if (pkt_debug == PKT_DBG_DUMP) hal_packet_io_dump(pkt, len);
 
     if (p_attr->trap_id == NDI_PACKET_TRAP_ID_SAMPLEPACKET)
         return _sflow_pkt_hdl (pkt, len, p_attr);
@@ -504,9 +508,7 @@ static void dn_hal_packet_tx(npu_id_t npu, npu_port_t port, void  *pkt, uint32_t
     ++packets_txed;
     ++packets_txed_to_pipeline_bypass;
 
-    PKT_DEBUG("[TX] for npu %d port %d len %d\r\n",npu,port,len);
-
-    if (pkt_debug == PKT_DBG_DUMP) hal_packet_io_dump(pkt, len);
+    if (PKT_DBG_DUMP(pkt_debug)) hal_packet_io_dump(pkt, len, PKT_DBG_DIR_OUT);
 
     attr.npu_id  = npu;
     attr.tx_port = port;
@@ -520,8 +522,9 @@ static void dn_hal_packet_tx(npu_id_t npu, npu_port_t port, void  *pkt, uint32_t
 
     if (ndi_packet_tx(pkt, len, &attr) != STD_ERR_OK) {
         PKT_DEBUG("[TX] Pkt txmission FAILED \r\n");
+
     } else {
-        PKT_DEBUG("[TX] Pkt txmission OK \r\n");
+        PKT_DEBUG("[TX] Pkt txmission OK for npu %d port %d len %d\r\n",npu,port,len);
     }
 }
 
@@ -538,7 +541,7 @@ void dn_hal_packet_tx_to_ingress_pipeline (void  *pkt, uint32_t len)
     ++packets_txed;
     ++packets_txed_to_pipeline_lookup;
 
-    if (pkt_debug == PKT_DBG_DUMP) hal_packet_io_dump(pkt, len);
+    if (PKT_DBG_DUMP(pkt_debug)) hal_packet_io_dump(pkt, len, PKT_DBG_DIR_OUT);
 
     attr.npu_id  = npu;
     attr.tx_port = 0;
@@ -549,14 +552,33 @@ void dn_hal_packet_tx_to_ingress_pipeline (void  *pkt, uint32_t len)
     if (ndi_packet_tx (pkt, len, &attr) != STD_ERR_OK) {
         PKT_DEBUG("[TX] Pkt txmission to ingress pipeline FAILED \r\n");
     } else {
-        PKT_DEBUG("[TX] Pkt txmission to ingress pipeline OK \r\n");
+        PKT_DEBUG("[TX] Pkt txmission to ingress pipeline OK for npu %d len %d\r\n",npu,len);
     }
+}
+
+void hal_packet_io_debug (bool flag, int pkt_dir) {
+    pkt_debug = flag;
+    if (pkt_debug && pkt_dir) pkt_debug = pkt_dir;
 }
 
 static void change_debug_flag_state(std_parsed_string_t handle) {
     if(std_parse_string_num_tokens(handle)==0) return;
     size_t ix = 0;
-    pkt_debug = strstr(std_parse_string_next(handle,&ix),"true")!=NULL ? 1 : 0;
+    bool flag = strstr(std_parse_string_next(handle,&ix),"true")!=NULL ? 1 : 0;
+
+    ix = 1;
+    int pkt_dir = 0;
+    const char *token = NULL;
+    if((token = std_parse_string_next(handle,&ix))!= NULL) {
+        if(!strcmp(token,"in")) {
+            pkt_dir = PKT_DBG_DIR_IN;
+        } else if(!strcmp(token,"out")) {
+            pkt_dir = PKT_DBG_DIR_OUT;
+        } else if(!strcmp(token,"both")) {
+            pkt_dir = PKT_DBG_DIR_BOTH;
+        }
+    }
+    hal_packet_io_debug (flag, pkt_dir);
 }
 
 
@@ -594,7 +616,7 @@ t_std_error hal_packet_io_init(void)
 
     ndi_packet_rx_register(dn_hal_packet_rx);
 
-    hal_shell_cmd_add("pkt-io-debug",change_debug_flag_state,"[true|false] Changes Debug flag state\nWarning: Enabling this will generate lots of information and may impact the performance");
+    hal_shell_cmd_add("pkt-io-debug",change_debug_flag_state,"[true|false] [in|out|both] Changes Debug flag state\nWarning: Enabling this will generate lots of information and may impact the performance");
     hal_shell_cmd_add("pkt-io-counters",pkt_debug_counters,"Displays Packet count");
 
     return STD_ERR_OK;

@@ -82,9 +82,8 @@ def add_fc_br_cap_objs(pg, fc_caps, resp):
         if fp.verify_npu_supported_speed(phy_npu_speed) == False:
 #           don't add this entry of speed or breakout
             continue
-        phy_speed = fp.get_fc_speed_frm_npu_speed(phy_npu_speed)
-        if phy_speed == 0:
-            continue
+        phy_fc_speed = cap['phy_fc_speed']
+        phy_speed = get_value(mbps_to_yang_speed,phy_fc_speed)
         cps_obj = cps_object.CPSObject(module='base-pg/dell-pg/port-groups-state/port-group-state/br-cap',
                                        qual='observed',
             data={pg_state_attr('br-cap/phy-mode'):phy_mode,
@@ -144,9 +143,8 @@ def _append_fc_br_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index):
         if fp.verify_npu_supported_speed(phy_npu_speed) == False:
 #           don't add this entry of speed or breakout
             continue
-        phy_speed = fp.get_fc_speed_frm_npu_speed(phy_npu_speed)
-        if phy_speed == 0:
-            continue
+        phy_fc_speed = cap['phy_fc_speed']
+        phy_speed = get_value(mbps_to_yang_speed,phy_fc_speed)        
         cap_list[str(cap_index)] = {'phy-mode':phy_mode,
                                     'breakout-mode':mode,
                                     'port-speed':phy_speed,

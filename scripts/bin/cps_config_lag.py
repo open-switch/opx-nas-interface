@@ -52,7 +52,7 @@ def usage():
     ''' This is the Usage Method '''
 
     print '<cps_config_lag:- Lag operations >'
-    print '\t\t cps_config_lag.py  --create --lname <lagname>'
+    print '\t\t cps_config_lag.py  --create --lname <lagname> [--port <port_list> [--frwd <yes/no>]'
     print '\t\t cps_config_lag.py  --delete --lname <lagname>'
     print '\t\t cps_config_lag.py  --add --lname <lagname> --port <port_list>'
     print '\t\t cps_config_lag.py  --remove --lname <lagname> --port <port_list>'
@@ -142,7 +142,24 @@ def main(argv):
 
 
     if choice == 'create' and lag_name != '':
-        nas_lag_op("create", {"if/interfaces/interface/name":lag_name})
+        cmd_data = {"if/interfaces/interface/name":lag_name}
+        nas_lag_op("create", cmd_data)
+        if port != '':
+            (obj, op)  = nas_lag_op("set", cmd_data, False)
+            port_list = port.split(",")
+            l = ["dell-if/if/interfaces/interface/member-ports","0","name"]
+            index = 0
+            for i in port_list:
+                l[1]=str(index)
+                index = index +1
+                obj.add_embed_attr(l,i)
+            nas_ut.get_cb_method(op)(obj)
+            if frwd_enable != '':
+                cmd_data["dell-if/if/interfaces/interface/member-ports/name"] = port_list
+                # Member ports are unblocked by default
+                if frwd_enable == 'no':
+                    cmd_data["base-if-lag/if/interfaces/interface/block-port-list"] = port_list
+                nas_lag_op("set", cmd_data)
 
     elif choice == 'mac-learn' and lag_name != '':
         nas_lag_op("set", {"if/interfaces/interface/name":lag_name,
@@ -158,7 +175,6 @@ def main(argv):
         nas_lag_op("get", {"if/interfaces/interface/name": lag_name})
 
     elif choice == 'set' and port != '' and lag_name != '' and frwd_enable != '':
-        ifindex_list = []
         port_list = port.split(",")
         nas_lag_op("set", {"if/interfaces/interface/name":lag_name,
                            "base-if-lag/if/interfaces/interface/unblock-port-list"
@@ -166,7 +182,7 @@ def main(argv):
                            "base-if-lag/if/interfaces/interface/block-port-list": port_list})
 
     elif (choice == 'add' or choice == 'remove') and port != '' and lag_name != '':
-        op = "create" if (choice == "add") else "delete"
+        op = "set" if (choice == "add") else "delete"
         (obj, op) = nas_lag_op(op,
                    {"if/interfaces/interface/name": lag_name},False)
         port_list = port.split(",")

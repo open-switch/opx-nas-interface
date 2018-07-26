@@ -43,12 +43,15 @@
 #include "nas_if_utils.h"
 #include "std_config_node.h"
 #include "std_mutex_lock.h"
+#include "bridge/nas_interface_bridge_utils.h"
 #include "cps_api_object_tools.h"
+#include "interface/nas_interface_vlan.h"
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <unordered_set>
 
-const static int MAX_CPS_MSG_BUFF=10000;
+
 #define NUM_INT_CPS_API_THREAD 1
 
 #define INTERFACE_VLAN_CFG_FILE "/etc/opx/interface_vlan_config.xml"
@@ -61,7 +64,8 @@ static std_mutex_lock_create_static_init_rec(_vlan_mode_mtx);
 
 static  t_std_error nas_process_cps_ports(nas_bridge_t *p_bridge, nas_port_mode_t port_mode,
                                   nas_port_list_t &port_list, vlan_roll_bk_t *p_roll_bk);
-static t_std_error nas_cps_del_port_from_vlan(nas_bridge_t *p_bridge, nas_list_node_t *p_link_node, nas_port_mode_t port_mode);
+static t_std_error nas_cps_del_port_from_vlan(nas_bridge_t *p_bridge, nas_list_node_t *p_link_node,
+                                              nas_port_mode_t port_mode, bool migrate);
 t_std_error nas_cps_cleanup_vlan_lists(hal_vlan_id_t vlan_id, nas_list_t *p_link_node_list);
 static t_std_error nas_cps_add_port_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_t port_idx, nas_port_mode_t port_mode);
 
@@ -117,7 +121,7 @@ static bool nas_vlan_process_port_association(hal_ifindex_t ifindex, npu_id_t np
                 return false;
             }
 
-            if((nas_add_or_del_port_to_vlan(npu,br_m->vlan_id,&ndi_port, it.mode,add)) != STD_ERR_OK){
+            if((nas_add_or_del_port_to_vlan(npu,br_m->vlan_id,&ndi_port, it.mode, add, ifindex)) != STD_ERR_OK){
                 EV_LOGGING(INTERFACE, ERR, "NAS-VLAN-MAP","Error adding port <%d %d> to NPU",
                         ndi_port.npu_id, ndi_port.npu_port);
                 nas_bridge_unlock();
@@ -148,6 +152,23 @@ static bool nas_vlan_process_port_association(hal_ifindex_t ifindex, npu_id_t np
     return true;
 }
 
+bool get_parent_bridge_info(const std::string & bridge_name, interface_ctrl_t & entry){
+
+    memset(&entry,0,sizeof(entry));
+    memcpy(entry.if_name,bridge_name.c_str(),sizeof(entry.if_name));
+    entry.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+    if(dn_hal_get_interface_info(&entry) != STD_ERR_OK){
+        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN","Failed to find parent bridge %s info",bridge_name.c_str());
+        return false;
+    }
+
+    if(entry.int_type != nas_int_type_DOT1D_BRIDGE){
+        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN","Parent Bridge %s is not in 1D mode",bridge_name.c_str());
+        return false;
+    }
+
+    return true;
+}
 
 static bool nas_vlan_if_set_handler(cps_api_object_t obj, void *context)
 {
@@ -434,7 +455,7 @@ void handle_roll_bak(nas_bridge_t *p_bridge, vlan_roll_bk_t &p_roll_bk, cps_api_
            if (p_link_node->ifindex  == it->first) {
                /* del_port from vlan */
                del_ifindex = p_link_node->ifindex;
-               if (nas_cps_del_port_from_vlan(p_bridge, p_temp_node, mode) != STD_ERR_OK) {
+               if (nas_cps_del_port_from_vlan(p_bridge, p_temp_node, mode,false) != STD_ERR_OK) {
                    EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                        "Roll_bk: Error deleting port %d from Bridge %d ", p_link_node->ifindex, p_bridge->ifindex);
                } else {
@@ -463,7 +484,7 @@ void handle_roll_bak(nas_bridge_t *p_bridge, vlan_roll_bk_t &p_roll_bk, cps_api_
    for (auto it=p_roll_bk.lag_add_list.begin(); it!=p_roll_bk.lag_add_list.end(); ++it) {
        /* del added lag from vlan */
        if (nas_handle_lag_del_from_vlan(p_bridge, it->first,
-                                           it->second, true, nullptr) != STD_ERR_OK) {
+                                           it->second, true, nullptr,false) != STD_ERR_OK) {
            EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                        "Roll_bk: Error deleting lag %d from Bridge %d", it->first, p_bridge->ifindex);
 
@@ -502,6 +523,114 @@ static bool _nas_interface_handle_mode_change(nas_bridge_t * p_bridge){
     return true;
 }
 
+static t_std_error nas_vlan_attach_list_to_bridge(nas_bridge_t & p_bridge, nas_list_t * p_list, nas_port_mode_t mode ){
+
+    nas_list_node_t *p_link_node = nullptr;
+    t_std_error rc = STD_ERR_OK;
+
+    p_link_node = nas_get_first_link_node(&(p_list->port_list));
+    while (p_link_node != NULL) {
+
+        if ((rc = nas_cps_del_port_from_vlan(&p_bridge, p_link_node, mode,true)) != STD_ERR_OK) {
+            return rc;
+        }
+
+        p_link_node = nas_get_next_link_node(&p_list->port_list, p_link_node);
+    }
+
+    return STD_ERR_OK;
+}
+
+static t_std_error nas_vlan_attach_lag_list_to_bridge(nas_bridge_t & p_bridge, nas_list_t * p_list, nas_port_mode_t mode ){
+
+    nas_list_node_t *p_link_node = nullptr;
+    t_std_error rc = STD_ERR_OK;
+
+    p_link_node = nas_get_first_link_node(&(p_list->port_list));
+    while (p_link_node != NULL) {
+
+        if ((rc = nas_handle_lag_del_from_vlan(&p_bridge, p_link_node->ifindex,
+                                                mode,true,nullptr,true)) != STD_ERR_OK) {
+            return rc;
+        }
+
+        p_link_node = nas_get_next_link_node(&p_list->port_list, p_link_node);
+    }
+
+    return STD_ERR_OK;
+}
+
+static t_std_error nas_vlan_attach_to_bridge(nas_bridge_t & p_bridge, std::string & parent_bridge){
+    t_std_error rc = STD_ERR_OK;
+    p_bridge.parent_bridge = parent_bridge;
+
+    if((rc = nas_bridge_utils_set_untagged_vlan(parent_bridge.c_str(), p_bridge.vlan_id)) != STD_ERR_OK){
+        EV_LOGGING(INTERFACE,ERR,"Attach-VLAN","Failed to set default vlan to %d for bridge",p_bridge.vlan_id,
+                parent_bridge.c_str());
+        return rc;
+    }
+
+    EV_LOGGING(INTERFACE,DEBUG,"Attach-VLAN","Updated default VLAN to %d for bridge %s",p_bridge.vlan_id,
+                              parent_bridge.c_str());
+
+
+    if((rc = nas_vlan_attach_list_to_bridge(p_bridge, &p_bridge.untagged_list, NAS_PORT_UNTAGGED)) != STD_ERR_OK ){
+        return rc;
+    }
+
+    if((rc = nas_vlan_attach_list_to_bridge(p_bridge, &p_bridge.tagged_list, NAS_PORT_TAGGED)) != STD_ERR_OK ){
+        return rc;
+    }
+
+    if((rc = nas_vlan_attach_lag_list_to_bridge(p_bridge, &p_bridge.untagged_lag, NAS_PORT_UNTAGGED)) != STD_ERR_OK ){
+       return rc;
+    }
+
+    if((rc = nas_vlan_attach_lag_list_to_bridge(p_bridge, &p_bridge.tagged_lag, NAS_PORT_TAGGED)) != STD_ERR_OK ){
+       return rc;
+    }
+
+    return rc;
+}
+
+
+static cps_api_return_code_t nas_vlan_set_parent_bridge(nas_bridge_t * p_bridge, cps_api_object_it_t & it){
+
+    size_t len = cps_api_object_attr_len(it.attr);
+    cps_api_return_code_t rc = cps_api_ret_code_OK;
+    if(!len && p_bridge->parent_bridge.size()){
+        /*
+         * treat attribute len 0 as the detach
+         * if there was a valid parent bridge do clean up
+         */
+        rc = cps_api_ret_code_ERR;
+
+    }else if(len && p_bridge->parent_bridge.size()){
+        std::string parent_bridge = std::string((const char *)(cps_api_object_attr_data_bin(it.attr)));
+        if(parent_bridge != p_bridge->parent_bridge){
+            EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-ATTACH","Cannot add new parent bridge to vlan %d"
+                "it already has a valid parent bridge %s",p_bridge->vlan_id,
+                p_bridge->parent_bridge.c_str());
+            rc = cps_api_ret_code_ERR;
+        }
+
+    }else{
+        /*
+         * this is when existing members needs to be migrated to parent bridge
+         * for now assume when parent bridge is being set you can not
+         * modify any other properties
+         */
+        std::string parent_bridge = std::string((const char *)(cps_api_object_attr_data_bin(it.attr)));
+        if(!nas_bridge_is_empty(parent_bridge)){
+              EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-ATTACH","Can't attach parent bridge %s to vlan %d as "
+                      "parent bridge already has members",parent_bridge.c_str(),p_bridge->vlan_id);
+              return cps_api_ret_code_ERR;
+        }
+        rc = (cps_api_return_code_t)nas_vlan_attach_to_bridge(*p_bridge,parent_bridge);
+    }
+
+    return rc;
+}
 
 static cps_api_return_code_t nas_cps_update_vlan(nas_bridge_t *p_bridge, cps_api_object_t obj)
 {
@@ -534,7 +663,9 @@ static cps_api_return_code_t nas_cps_update_vlan(nas_bridge_t *p_bridge, cps_api
 
         int id = (int) cps_api_object_attr_id(it.attr);
         switch (id) {
-
+        case DELL_IF_IF_INTERFACES_INTERFACE_PARENT_BRIDGE:
+            return nas_vlan_set_parent_bridge(p_bridge,it);
+            break;
         case DELL_IF_IF_INTERFACES_INTERFACE_VLAN_MODE:
             p_bridge->mode = (BASE_IF_MODE_t)cps_api_object_attr_data_uint(it.attr);
             _nas_interface_handle_mode_change(p_bridge);
@@ -653,6 +784,24 @@ static cps_api_return_code_t nas_cps_create_vlan(cps_api_object_t obj)
         cps_api_set_object_return_attrs(obj, rc, "Missing VLAN ID during create vlan");
         return rc;
     }
+    hal_vlan_id_t vlan_id = cps_api_object_attr_data_u32(vlan_id_attr);
+
+    cps_api_object_attr_t parent_bridge_attr = cps_api_object_attr_get(obj,
+                                             DELL_IF_IF_INTERFACES_INTERFACE_PARENT_BRIDGE);
+    std::string parent_bridge;
+
+    if(parent_bridge_attr && cps_api_object_attr_len(parent_bridge_attr)){
+        parent_bridge = std::string((const char *)cps_api_object_attr_data_bin(parent_bridge_attr));
+
+        if(!nas_bridge_is_empty(parent_bridge)){
+            EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-ATTACH","Can't attach parent bridge %s to vlan %d as "
+                    "parent bridge already has members",parent_bridge.c_str(),vlan_id);
+            return rc;
+        }
+
+    }
+
+
     cps_api_object_attr_t vlan_name_attr = cps_api_get_key_data(obj, IF_INTERFACES_INTERFACE_NAME);
     cps_api_object_attr_t mac_attr = cps_api_object_attr_get(obj,DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS);
 
@@ -660,7 +809,7 @@ static cps_api_return_code_t nas_cps_create_vlan(cps_api_object_t obj)
     /* Construct Bridge name for this vlan -
      * if vlan_id is 100 then bridge name is "br100"
      */
-    hal_vlan_id_t vlan_id = cps_api_object_attr_data_u32(vlan_id_attr);
+
 
     cps_api_object_attr_t attr = cps_api_object_attr_get(obj, DELL_IF_IF_INTERFACES_INTERFACE_VLAN_TYPE);
     BASE_IF_VLAN_TYPE_t vlan_type = BASE_IF_VLAN_TYPE_DATA;
@@ -716,6 +865,8 @@ static cps_api_return_code_t nas_cps_create_vlan(cps_api_object_t obj)
         return rc;
     }
 
+
+
     EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
            "Kernel programmed, creating bridge with index %d", br_index);
 
@@ -731,6 +882,9 @@ static cps_api_return_code_t nas_cps_create_vlan(cps_api_object_t obj)
                 strncpy((char *)p_bridge_node->mac_addr, (char *)cps_api_object_attr_data_bin(mac_attr),
                         cps_api_object_attr_len(mac_attr));
             }
+
+            p_bridge_node->parent_bridge = parent_bridge;
+
             //Create Vlan in NPU, @TODO for npu_id
             if(vlan_id != SYSTEM_DEFAULT_VLAN) {
                 if (nas_vlan_create(0, vlan_id) != STD_ERR_OK) {
@@ -1042,11 +1196,30 @@ static cps_api_return_code_t nas_if_handle_global_set (void * context,
              _scaled_vlan = cps_api_object_attr_data_uint(_scaled_vlan_attr);
              EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN","Changed the default scaled vlan mode to %d",
                          _scaled_vlan);
-             return cps_api_ret_code_OK;
+
          }
+
+         cps_api_object_attr_t _def_vlan_id = cps_api_object_attr_get(obj,
+                                     DELL_IF_IF_INTERFACES_VLAN_GLOBALS_DEFAULT_VLAN_ID);
+         if(_def_vlan_id){
+             const char * default_vlan_name = (const char *)cps_api_object_attr_data_bin(_def_vlan_id);
+             EV_LOGGING(INTERFACE,INFO,"NAS-VLAN","Default VLAN Name %s",default_vlan_name);
+             interface_ctrl_t entry;
+             memset(&entry,0,sizeof(entry));
+             entry.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+             strncpy(entry.if_name, default_vlan_name, sizeof(entry.if_name) - 1);
+             if((dn_hal_get_interface_info(&entry) != STD_ERR_OK) || (entry.int_type != nas_int_type_VLAN)){
+                 EV_LOGGING(INTERFACE,ERR,"NAS-VLAN","Failed to find vlan interface %s",entry.if_name);
+                 return cps_api_ret_code_ERR;
+             }
+
+             nas_vlan_interface_set_default_vlan(entry.vlan_id);
+             EV_LOGGING(INTERFACE,INFO,"NAS-VLAN","Default VLAN is %d",entry.vlan_id);
+         }
+
      }
 
-     return cps_api_ret_code_ERR;
+     return cps_api_ret_code_OK;
 
 }
 
@@ -1174,17 +1347,33 @@ static t_std_error nas_cps_add_port_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_
     /* During add ports etc, application isn't passing the vlan id but just the index */
 
     vlan_id = p_bridge->vlan_id;
-    if_master_info_t master_info = { nas_int_type_VLAN, port_mode, p_bridge->ifindex};
     BASE_IF_MODE_t intf_mode = nas_intf_get_mode(port_idx);
 
     //add to kernel
-    if(nas_cps_add_port_to_os(p_bridge->ifindex, p_bridge->vlan_id, port_mode,
+    interface_ctrl_t entry;
+    bool entry_set = false;
+    if(p_bridge->parent_bridge.size()){
+        if(!get_parent_bridge_info(p_bridge->parent_bridge,entry)){
+            EV_LOGGING(INTERFACE,ERR,"NAS-VLAN","Can't find a parent bridge %s",p_bridge->parent_bridge.c_str());
+            return STD_ERR(INTERFACE,FAIL,0);
+        }
+        entry_set = true;
+    }
+    /*
+     * if parent bridge exist then use its index to add it to that bridge
+     * currently netlink event for that should take care of adding it to 1D bridge
+     * In this case don't add port to VLAN in npu
+     */
+    hal_ifindex_t ifindex = entry_set ? entry.if_index : p_bridge->ifindex;
+    bool add_npu = entry_set ? false : true;
+    if(nas_cps_add_port_to_os(ifindex, p_bridge->vlan_id, port_mode,
                            port_idx, p_bridge->mtu,p_bridge->mode) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                "Error inserting index %d in Vlan %d to OS", port_idx, p_bridge->vlan_id);
         rc = (STD_ERR(INTERFACE,FAIL, 0));
     }
 
+    if_master_info_t master_info = { nas_int_type_VLAN, port_mode,ifindex};
     if(!nas_intf_add_master(port_idx, master_info)){
         EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN","Failed to add master for vlan memeber port");
     } else {
@@ -1202,9 +1391,9 @@ static t_std_error nas_cps_add_port_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_
     p_link_node = nas_create_vlan_port_node(p_bridge, port_idx,
                                             port_mode, &create_flag);
 
-    if ((p_link_node != NULL) && (!nas_is_non_npu_phy_port(port_idx))) {
+    if ((p_link_node != NULL) && (!nas_is_non_npu_phy_port(port_idx)) && add_npu) {
         if((rc = nas_add_or_del_port_to_vlan(p_link_node->ndi_port.npu_id, vlan_id,
-                                      &(p_link_node->ndi_port), port_mode, true)) != STD_ERR_OK) {
+                                      &(p_link_node->ndi_port), port_mode, true, port_idx)) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                    "Error adding port <%d %d> to NPU",
                    p_link_node->ndi_port.npu_id, p_link_node->ndi_port.npu_port);
@@ -1267,18 +1456,41 @@ t_std_error nas_cps_del_port_from_os(hal_vlan_id_t vlan_id, hal_ifindex_t port_i
     return STD_ERR_OK;
 }
 
-static t_std_error nas_cps_del_port_from_vlan(nas_bridge_t *p_bridge, nas_list_node_t *p_link_node, nas_port_mode_t port_mode)
+static t_std_error nas_cps_del_port_from_vlan(nas_bridge_t *p_bridge, nas_list_node_t *p_link_node,
+                                              nas_port_mode_t port_mode, bool migrate)
 {
     nas_list_t *p_list = NULL;
-
+    hal_vlan_id_t vlan_id = 0;
     if (port_mode == NAS_PORT_TAGGED) {
         p_list = &p_bridge->tagged_list;
+        vlan_id = p_bridge->vlan_id;
     }
     else {
         p_list = &p_bridge->untagged_list;
     }
 
-    if_master_info_t master_info = { nas_int_type_VLAN, port_mode, p_bridge->ifindex};
+    interface_ctrl_t entry;
+    bool entry_set = false;
+    if(p_bridge->parent_bridge.size()){
+        if(!get_parent_bridge_info(p_bridge->parent_bridge,entry)){
+            EV_LOGGING(INTERFACE,ERR,"NAS-VLAN","Can't find a parent bridge %s",p_bridge->parent_bridge.c_str());
+            return STD_ERR(INTERFACE,FAIL,0);
+        }
+        entry_set = true;
+    }
+
+    /*
+     * If this is called not as part of migration and parent bridge is already set then use parent bridge
+     * to add this interface to kernel. Its netlink event should take care of adding it to 1D bridge
+     *
+     * If this is called as part of migration then it needs to be deleted from npu and in kernel
+     * only change its master from old bridge to new parent bridge
+     *
+     */
+    hal_ifindex_t ifindex = (!migrate && entry_set) ?  entry.if_index : p_bridge->ifindex;
+    bool remove_npu = (!migrate && entry_set)? false : true;
+
+    if_master_info_t master_info = { nas_int_type_VLAN, port_mode,ifindex};
     BASE_IF_MODE_t intf_mode = nas_intf_get_mode(p_link_node->ifindex);
     if(!nas_intf_del_master(p_link_node->ifindex, master_info)){
         EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN","Failed to del master for vlan memeber port");
@@ -1297,10 +1509,11 @@ static t_std_error nas_cps_del_port_from_vlan(nas_bridge_t *p_bridge, nas_list_n
         EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                "Error cleaning L2MC membership for interface %d", p_link_node->ifindex);
     }
-    if (!nas_is_non_npu_phy_port(p_link_node->ifindex)) {
+    if (!nas_is_non_npu_phy_port(p_link_node->ifindex) && remove_npu) {
     //delete the port from NPU if it is a NPU port
         if (nas_add_or_del_port_to_vlan(p_link_node->ndi_port.npu_id, p_bridge->vlan_id,
-                                    &(p_link_node->ndi_port), port_mode, false) != STD_ERR_OK) {
+                                    &(p_link_node->ndi_port), port_mode, false, p_link_node->ifindex)
+                != STD_ERR_OK) {
             EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                   "Error deleting port %d with mode %d from vlan %d", p_link_node->ifindex,
                    port_mode, p_bridge->vlan_id);
@@ -1308,13 +1521,21 @@ static t_std_error nas_cps_del_port_from_vlan(nas_bridge_t *p_bridge, nas_list_n
         }
     }
     //NPU delete done, now delete from Kernel
-    if (nas_cps_del_port_from_os(p_bridge->vlan_id, p_link_node->ifindex, port_mode,p_bridge->mode) != STD_ERR_OK) {
+    if(migrate){
+        if(nas_os_change_master(p_link_node->ifindex,vlan_id,entry.if_index) != STD_ERR_OK){
+            EV_LOGGING(INTERFACE,ERR,"NAS-VLAN","Failed to change the master for port %d to %s",
+                    p_link_node->ifindex,entry.if_name);
+        }
+    }
+    else if(nas_cps_del_port_from_os(p_bridge->vlan_id, p_link_node->ifindex, port_mode,p_bridge->mode) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                "Error deleting interface %d from OS", p_link_node->ifindex);
     }
 
-    nas_delete_link_node(&p_list->port_list, p_link_node);
-    --p_list->port_count;
+    if(!migrate){
+        nas_delete_link_node(&p_list->port_list, p_link_node);
+        --p_list->port_count;
+    }
 
     return STD_ERR_OK;
 }
@@ -1381,7 +1602,7 @@ static t_std_error nas_process_cps_ports(nas_bridge_t *p_bridge, nas_port_mode_t
                     ifindex);
 
             publish_list.insert(p_temp_node->ifindex);
-            if ((rc = nas_cps_del_port_from_vlan(p_bridge, p_temp_node, port_mode)) != STD_ERR_OK) {
+            if ((rc = nas_cps_del_port_from_vlan(p_bridge, p_temp_node, port_mode, false)) != STD_ERR_OK) {
                 EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
                        "Error deleting port %d from Bridge %d in OS", ifindex, p_bridge->ifindex);
                 return rc;

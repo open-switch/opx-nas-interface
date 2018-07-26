@@ -148,7 +148,7 @@ def create_hg_state_cps_obj(hg_obj):
 
             cur_port_profile_name = str(hybrid_profile.get_port_profile(profile_mode))
             port.apply_port_profile(fp.get_port_profile(cur_port_profile_name))
-            
+
             obj.add_embed_attr([hg_utils.hg_state_attr('port'), str(fpp_idx), 'port-id'], str(fpp_num), 6)
             obj.add_embed_attr([hg_utils.hg_state_attr('port'), str(fpp_idx), 'profile', str(profile_mode_idx), 'name'], str(profile_mode), 8)
             obj.add_embed_attr([hg_utils.hg_state_attr('port'), str(fpp_idx), 'profile', str(profile_mode_idx), 'default-phy-mode'], str(port.get_def_phy_mode()), 8)
@@ -196,7 +196,7 @@ def _service_set_hg(hg_name, obj, resp):
 
     '''Method to Service Hybrid Group Set Request'''
     hg_list = fp.get_hybrid_group_list()
-        
+
     if hg_name is None or hg_name not in hg_list:
         nas_if.log_err('Error in reading Hybrid Group Name')
         return False
@@ -204,7 +204,7 @@ def _service_set_hg(hg_name, obj, resp):
     if True is apply_cps_config_to_hg(obj, hg_list[hg_name]):
         resp = create_hg_cps_obj(hg_list[hg_name]).get()
         return True
-    
+
     return False
 
 
@@ -321,7 +321,7 @@ def _get_hg_state_hdlr(methods, params):
     if obj.get_key() == hg_utils.hg_state_key:
         hg_name = nas_if.get_cps_attr(obj, hg_utils.hg_state_attr('id'))
         return _service_get_hg_state(hg_name, resp)
-    
+
     nas_if.log_err("Key Error: Hybrid Group State Key issue")
     return False
 

@@ -16,7 +16,8 @@
 import nas_os_if_utils as nas_if
 import xml.etree.ElementTree as ET
 import copy
-import event_log as ev
+import nas_fp_port_utils as fp_utils
+import nas_common_header as nas_comm
 
 if_mac_info_cache = {}
 def get_mac_addr_base_range(if_type):
@@ -61,14 +62,59 @@ def get_offset_mac_addr(base_addr, offset):
 base_mac_addr = None
 def get_base_mac_addr():
     global base_mac_addr
-    if base_mac_addr == None:
+    if base_mac_addr is None:
         base_mac_addr = nas_if.get_base_mac_address()
     return base_mac_addr
+
+def get_alloc_mac_addr_params(if_type, cps_obj, fp_cache = None):
+    ret_list = {'if_type': if_type}
+    if if_type == 'front-panel':
+        try:
+            front_panel_port = cps_obj.get_attr_data(nas_comm.get_value(
+                                                     nas_comm.attr_name, 'fp_port'))
+        except ValueError:
+            nas_if.log_info('Create virtual interface without mac address assigned')
+            return None
+        try:
+            subport_id = cps_obj.get_attr_data(nas_comm.get_value(
+                                               nas_comm.attr_name, 'subport_id'))
+        except ValueError:
+            subport_id = 0
+        try:
+            mac_offset = fp_utils.get_mac_offset_from_fp(front_panel_port, subport_id,
+                                                         fp_cache)
+        except ValueError as inst:
+            nas_if.log_err('Failed to get mac address from <%d %d>' %
+                           (front_panel_port, subport_id))
+            nas_if.log_info(inst.args[0])
+            return None
+        ret_list['fp_mac_offset'] = mac_offset
+    elif if_type == 'vlan':
+        try:
+            vlan_id = cps_obj.get_attr_data(nas_comm.get_value(
+                                            nas_comm.attr_name, 'vlan_id'))
+        except ValueError:
+            nas_if.log_err('Input object does not contain VLAN id attribute')
+            return None
+        ret_list['vlan_id'] = vlan_id
+    elif if_type == 'lag':
+        try:
+            lag_name = cps_obj.get_attr_data(nas_comm.get_value(
+                                             nas_comm.attr_name, 'if_name'))
+        except ValueError:
+            nas_if.log_err('Input object does not contain name attribute')
+            return None
+        lag_id = nas_if.get_lag_id_from_name(lag_name)
+        ret_list['lag_id'] = lag_id
+    else:
+        nas_if.log_err('Unknown interface type %s' % if_type)
+        return None
+    return ret_list
 
 def if_get_mac_addr(if_type, fp_mac_offset = None, vlan_id = None, lag_id = None):
     base_mac = get_base_mac_addr()
     base_range = get_mac_addr_base_range(if_type)
-    if base_range == None:
+    if base_range is None:
         nas_if.log_err('Failed to get mac addr base and range for if type %s' % if_type)
         return None
     (base_offset, addr_range) = base_range

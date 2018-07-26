@@ -46,9 +46,36 @@ bool nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info)
     return true;
 }
 
+bool nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info, BASE_IF_MODE_t *new_mode, bool *mode_change)
+{
+    try {
+        if_cont_inst->nas_intf_add_master(ifx, m_info, new_mode, mode_change);
+    } catch (std::exception& e) {
+        EV_LOGGING(INTERFACE,ERR,"IF_CONT", "%s", e.what());
+        return false;
+    }
+
+    return true;
+}
 bool nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info)
 {
     return if_cont_inst->nas_intf_del_master(ifx, m_info);
+}
+
+bool nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info, BASE_IF_MODE_t *new_mode, bool *mode_change)
+{
+    return if_cont_inst->nas_intf_del_master(ifx, m_info, new_mode, mode_change);
+}
+
+
+bool nas_intf_update_master(hal_ifindex_t ifx, if_master_info_t m_info, bool add, BASE_IF_MODE_t *new_mode, bool *mode_change)
+{
+    if(add) {
+        return (nas_intf_add_master(ifx, m_info, new_mode, mode_change));
+    } else {
+        return (nas_intf_del_master(ifx, m_info, new_mode, mode_change));
+    }
+    return false;
 }
 
 void nas_intf_master_callback(hal_ifindex_t ifx, std::function< void (if_master_info_t)> fn)
@@ -92,6 +119,24 @@ void nas_intf_container::nas_intf_del_object(hal_ifindex_t ifx) {
     }
 }
 
+bool nas_intf_container::nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info,
+                                                BASE_IF_MODE_t *new_mode, bool *mode_change) {
+
+    std_rw_lock_write_guard lg(&rw_lock);
+    *mode_change = false;
+
+    auto itr = if_objects.find(ifx);
+
+    if(itr == if_objects.end()) {
+        itr = nas_intf_add_object(ifx);
+        *new_mode = BASE_IF_MODE_MODE_L2;
+        *mode_change = true;
+    }
+
+    auto& ptr = itr->second;
+    return ptr->nas_intf_obj_master_add(m_info);
+}
+
 bool nas_intf_container::nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info) {
 
     std_rw_lock_write_guard lg(&rw_lock);
@@ -106,6 +151,30 @@ bool nas_intf_container::nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t
     return ptr->nas_intf_obj_master_add(m_info);
 }
 
+bool nas_intf_container::nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info,
+                                                BASE_IF_MODE_t *new_mode, bool *mode_change) {
+
+    std_rw_lock_write_guard lg(&rw_lock);
+    *mode_change = false;
+
+    auto itr = if_objects.find(ifx);
+
+    //Interface object not created
+    if(itr == if_objects.end()) {
+        return false;
+    }
+
+    auto& ptr = itr->second;
+    auto rc = ptr->nas_intf_obj_master_delete(m_info);
+    if(ptr->nas_intf_obj_is_mlist_empty()) {
+        /*  If mester list has become empty then Intf mode changes from L2 to NONE */
+        *new_mode = BASE_IF_MODE_MODE_NONE;
+        *mode_change = true;
+        nas_intf_del_object(ifx);
+    }
+
+    return rc;
+}
 bool nas_intf_container::nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info) {
 
     std_rw_lock_write_guard lg(&rw_lock);
@@ -202,6 +271,12 @@ void nas_intf_container::nas_intf_dump_container(hal_ifindex_t ifx) noexcept {
 //Interface object class definitions
 
 bool nas_intf_obj::nas_intf_obj_master_add(if_master_info_t m_info) {
+
+    for(auto itr = m_list.begin(); itr != m_list.end(); ++itr) {
+        if(itr->m_if_idx == m_info.m_if_idx) {
+            return false;
+        }
+    }
 
     //If LAG master, insert at front
     if(m_info.type == nas_int_type_LAG){

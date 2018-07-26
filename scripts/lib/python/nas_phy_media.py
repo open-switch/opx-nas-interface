@@ -25,6 +25,29 @@ import bytearray_utils as ba
 
 _fp_port_key = cps.key_from_name('target','base-if-phy/front-panel-port')
 
+sfp_type_to_str = {
+    53: "SFP SX",
+    54: "SFP LX",
+    55: "SFP ZX",
+    56: "SFP CX",
+    57: "SFP DX",
+    58: "SFP T",
+    59: "SFP FX",
+    60: "SFP CWDM",
+    61: "SFP IR1",
+    62: "SFP LR1",
+    63: "SFP LR2",
+    64: "SFP BX10",
+    65: "SFP PX",
+    114: "SFP BX10 UP",
+    115: "SFP BX10 DOWN",
+    116: "SFP BX40 UP",
+    117: "SFP BX40 DOWN",
+    118: "SFP BX80 UP",
+    119: "SFP BX80 DOWN"
+}
+
+
 media_type_to_str = {
     0: "Not Applicable",
     1: "Not Present",
@@ -332,6 +355,12 @@ cps_utils.add_attr_type('base-pas/media/type', 'uint32_t')
 
 def is_qsfp28_media_type(media_type):
     if media_type in qsfp28_media_list:
+        return True
+    else:
+        return False
+
+def is_sfp_media_type(media_type):
+    if media_type in sfp_type_to_str:
         return True
     else:
         return False

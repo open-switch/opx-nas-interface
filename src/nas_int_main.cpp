@@ -54,6 +54,9 @@
 #include "nas_int_utils.h"
 #include "std_utils.h"
 #include "nas_vrf.h"
+#include "bridge/nas_interface_bridge_cps.h"
+#include "bridge/nas_vlan_bridge_cps.h"
+#include "interface/nas_interface_cps.h"
 #include "nas_vrf_utils.h"
 
 #include "nas_ndi_port.h"
@@ -337,6 +340,10 @@ t_std_error hal_interface_init(void) {
         return STD_ERR(INTERFACE,FAIL,0);
     }
 
+    if (nas_vxlan_remote_endpoint_handler_register() != STD_ERR_OK) {
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
+
     //Create a handle for CPS objects
     if (cps_api_operation_subsystem_init(&nas_if_handle,NUM_INT_CPS_API_THREAD)!=cps_api_ret_code_OK) {
         return STD_ERR(CPSNAS,FAIL,0);
@@ -361,11 +368,10 @@ t_std_error hal_interface_init(void) {
         return rc;
     }
 
-    if((rc = nas_cps_vlan_init(nas_if_handle)) != STD_ERR_OK) {
+    if((rc = nas_vlan_bridge_cps_init(nas_if_handle)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-INTF-CPS-VLAN-SWERR", "Initializing CPS for VLAN failed");
         return rc;
     }
-
     if ( (rc=nas_stats_if_init(nas_if_handle))!= STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-INT-SWERR", "Initializing interface statistic failed");
         return rc;
@@ -378,8 +384,33 @@ t_std_error hal_interface_init(void) {
         }
     }
 
+    if ( (rc=nas_interface_generic_init(nas_if_handle))!= STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-INT-SWERR", "Initializing vlan and vxlan interface failed");
+        return rc;
+    }
+
     if ( (rc=nas_stats_vlan_init(nas_if_handle))!= STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-INT-SWERR", "Initializing vlan statistics failed");
+        return rc;
+    }
+
+    if ( (rc=nas_stats_bridge_init(nas_if_handle))!= STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-INT-SWERR", "Initializing vlan statistics failed");
+        return rc;
+    }
+
+    if ( (rc=nas_stats_vlan_sub_intf_init(nas_if_handle))!= STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-INT-SWERR", "Initializing vlan statistics failed");
+        return rc;
+    }
+
+    if ( (rc=nas_stats_vxlan_init(nas_if_handle))!= STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-INT-SWERR", "Initializing vlan statistics failed");
+        return rc;
+    }
+
+    if ( (rc=nas_stats_tunnel_init(nas_if_handle))!= STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-INT-SWERR", "Initializing tunnel statistics failed");
         return rc;
     }
 
@@ -391,6 +422,15 @@ t_std_error hal_interface_init(void) {
 
     if ( (rc=interface_obj_init(nas_if_handle))!=STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-INT-INIT-IF", "Failed to initialize common interface handler");
+        return rc;
+    }
+    if ( (rc=nas_bridge_cps_obj_init(nas_if_handle))!=STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-INT-INIT-IF", "Failed to initialize Bridge handler");
+        return rc;
+    }
+
+    if((rc = nas_vxlan_init(nas_if_handle)) != STD_ERR_OK){
+        EV_LOGGING(INTERFACE,ERR,"NAS-INT-VXLAN-INIT","Failed to initialize VxLAN handler");
         return rc;
     }
 
