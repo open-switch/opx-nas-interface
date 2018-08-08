@@ -279,7 +279,7 @@ cps_api_return_code_t nas_vrf_process_cps_vrf_msg(cps_api_transaction_params_t *
     if (op == cps_api_oper_CREATE) {
         NAS_VRF_LOG_DEBUG("NAS-RT-CPS-SET", "In VRF CREATE ");
         /* Dont create VRF object for out of band management VRF */
-        if (strncmp(vrf_name, NAS_MGMT_VRF_NAME, sizeof(NAS_DEFAULT_VRF_NAME)) != 0) {
+        if (strncmp(vrf_name, NAS_MGMT_VRF_NAME, sizeof(NAS_MGMT_VRF_NAME)) != 0) {
             if (nas_vrf_update_vrf_id(vrf_name, true) == false) {
                 NAS_VRF_LOG_ERR("NAS-RT-CPS-SET", "VRF id handling failed for VRF:%s!", vrf_name);
                 return cps_api_ret_code_ERR;
@@ -302,7 +302,7 @@ cps_api_return_code_t nas_vrf_process_cps_vrf_msg(cps_api_transaction_params_t *
             rc = cps_api_ret_code_ERR;
         }
         /* Dont delete VRF object for out of band management VRF since it's not created */
-        if (strncmp(vrf_name, NAS_MGMT_VRF_NAME, sizeof(NAS_DEFAULT_VRF_NAME)) != 0) {
+        if (strncmp(vrf_name, NAS_MGMT_VRF_NAME, sizeof(NAS_MGMT_VRF_NAME)) != 0) {
             if (nas_vrf_update_vrf_id(vrf_name, false) == false) {
                 NAS_VRF_LOG_ERR("NAS-RT-CPS-SET", "VRF id delete failed for VRF:%s!", vrf_name);
                 return cps_api_ret_code_ERR;

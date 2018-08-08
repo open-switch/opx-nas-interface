@@ -82,9 +82,8 @@ def add_fc_br_cap_objs(pg, fc_caps, resp):
         if fp.verify_npu_supported_speed(phy_npu_speed) == False:
 #           don't add this entry of speed or breakout
             continue
-        phy_speed = fp.get_fc_speed_frm_npu_speed(phy_npu_speed)
-        if phy_speed == 0:
-            continue
+        phy_fc_speed = cap['phy_fc_speed']
+        phy_speed = get_value(mbps_to_yang_speed,phy_fc_speed)
         cps_obj = cps_object.CPSObject(module='base-pg/dell-pg/port-groups-state/port-group-state/br-cap',
                                        qual='observed',
             data={pg_state_attr('br-cap/phy-mode'):phy_mode,
@@ -144,9 +143,8 @@ def _append_fc_br_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index):
         if fp.verify_npu_supported_speed(phy_npu_speed) == False:
 #           don't add this entry of speed or breakout
             continue
-        phy_speed = fp.get_fc_speed_frm_npu_speed(phy_npu_speed)
-        if phy_speed == 0:
-            continue
+        phy_fc_speed = cap['phy_fc_speed']
+        phy_speed = get_value(mbps_to_yang_speed,phy_fc_speed)        
         cap_list[str(cap_index)] = {'phy-mode':phy_mode,
                                     'breakout-mode':mode,
                                     'port-speed':phy_speed,
@@ -343,8 +341,8 @@ def set_sfp_port_group_config(pg, br_mode, port_speed, phy_mode):
         rollback_list.insert(0, (port, []))
     return True
 
-# Set breakout mode to DDQSFP28 port group
-def set_ddqsfp_port_group_config(pg, fp_br_mode, port_speed, phy_mode):
+# Set breakout mode to DDQSFP28 port group or QSFP28 port group
+def set_qsfp28_port_group_config(pg, fp_br_mode, port_speed, phy_mode):
     fp_list = pg.get_fp_ports()
     if fp_list == None:
         print 'FP list is empty'
@@ -388,9 +386,11 @@ def set_port_group_config(pg, phy_mode, br_mode, port_speed):
             rollback_list.append(port)
     elif pg_type == 'ethernet_ddqsfp28':
         fp_br_mode = ddqsfp_2_qsfp_brmode[br_mode]
-        ret = set_ddqsfp_port_group_config(pg, fp_br_mode, port_speed, phy_mode)
+        ret = set_qsfp28_port_group_config(pg, fp_br_mode, port_speed, phy_mode)
+    elif pg_type == 'ethernet_qsfp28':
+        ret = set_qsfp28_port_group_config(pg, fp_br_mode, port_speed, phy_mode)
     else:
-        nas_if.log_err('Uknown port group type %s' % pg_type)
+        nas_if.log_err('Unknown port group type %s' % pg_type)
         return False
 
     if phy_mode != None:

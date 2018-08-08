@@ -66,6 +66,8 @@ static  cps_api_return_code_t nas_fc_to_eth_speed(BASE_IF_SPEED_t speed, size_t 
                 return cps_api_ret_code_ERR;
             break;
         case BASE_IF_SPEED_32GFC:
+            if (hwp_count == 1)  // 4x32G mode 25G
+                *npu_speed = BASE_IF_SPEED_25GIGE;
             if (hwp_count == 2)  // 2x32G mode 100G
                 *npu_speed = BASE_IF_SPEED_50GIGE;
             if (hwp_count == 4)  // 1x32G Mode 40G

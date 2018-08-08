@@ -48,6 +48,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <event2/event.h>
+#include <event2/thread.h>
 #include <signal.h>
 #include <unordered_map>
 
@@ -303,12 +304,19 @@ static t_std_error tap_fd_deregister_from_evt (swp_util_tap_descr tap) {
     return STD_ERR_OK;
 }
 
+static void tap_fd_close(swp_util_tap_descr tap) {
+
+    //make sure tap_fd access to be protected before closing it.
+    //make sure tap_fd_lock is not taken before calling any event lib api's.
+    std_mutex_simple_lock_guard l(&tap_fd_lock);
+    swp_util_close_fds(tap);
+    return;
+}
 
 static bool tap_link_down(swp_util_tap_descr tap) {
-    std_mutex_simple_lock_guard l(&tap_fd_lock);
     //during link down, deregister fd from event poll before closing fd's.
     tap_fd_deregister_from_evt (tap);
-    swp_util_close_fds(tap);
+    tap_fd_close(tap);
     return true;
 }
 
@@ -316,7 +324,7 @@ static bool tap_link_up(swp_util_tap_descr tap, CNasPortDetails *npu) {
     //just incase... clean up
     //during cleanup, deregister fd from event poll if already registered
     tap_fd_deregister_from_evt (tap);
-    swp_util_close_fds(tap);
+    tap_fd_close(tap);
 
     size_t retry = 0;
     const size_t MAX_RETRY = 12;
@@ -335,7 +343,7 @@ static bool tap_link_up(swp_util_tap_descr tap, CNasPortDetails *npu) {
                     swp_util_tap_descr_get_name(tap),retry);
             //on event reg failure, deregister fd from event poll for already registered fd's and retry
             tap_fd_deregister_from_evt (tap);
-            swp_util_close_fds(tap);
+            tap_fd_close(tap);
             std_usleep(MILLI_TO_MICRO((1<<retry)));
             continue;
         }
@@ -662,6 +670,10 @@ t_std_error hal_virtual_interface_wait (hal_virt_pkt_transmit tx_fun,
     g_vif_pkt_tx.tx_buf = data;
     g_vif_pkt_tx.tx_buf_len = len;
 
+    if (evthread_use_pthreads()) {
+        EV_LOGGING (INTERFACE,ERR,"TAP-TX", "NAS Packet event lock initialization failed.");
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
 
     /* initialize event base */
     g_vif_pkt_tx.nas_evt_base = event_base_new();

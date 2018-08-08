@@ -18,5 +18,11 @@
 -->
 
 <l3-vlans>
+    <!-- VLAN ID 1 is the default VLAN and before scale vlan can be configured
+         all ports will be added to default VLAN 1 as untagged hence when removing ports from
+         VLAN 1 it should be allowed to be deleted from VLAN 1. This VLAN is not actually a
+         L3 VLAN but because of the above behavior, it makes snese to allow adding/deleting
+         port to VLAN 1 in OS  -->
+    <vlan id="1"    />
     <vlan id="4094" />
 </l3-vlans>

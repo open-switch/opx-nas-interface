@@ -23,16 +23,19 @@
  * change(BASE_IF_MODE_MODE_NONE/BASE_IF_MODE_MODE_L2)
  */
 
+#include "dell-interface.h"
+#include "dell-base-if.h"
 #include "event_log.h"
 #include "event_log_types.h"
 #include "nas_int_base_if.h"
 #include "nas_int_utils.h"
-#include "std_utils.h"
+#include "nas_os_interface.h"
 #include "dell-base-routing.h"
 #include "cps_api_operation.h"
 #include "cps_api_object_key.h"
 #include "cps_class_map.h"
 #include "l2-multicast.h"
+#include "std_utils.h"
 
 t_std_error nas_get_if_type_from_name_or_ifindex (const char *if_name, hal_ifindex_t *ifindex, nas_int_type_t *type) {
     interface_ctrl_t if_info;
@@ -49,7 +52,7 @@ t_std_error nas_get_if_type_from_name_or_ifindex (const char *if_name, hal_ifind
     }
 
     if (dn_hal_get_interface_info(&if_info) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, ERR,"INTF-C","Failed to get if_info");
+        EV_LOGGING(INTERFACE, INFO ,"INTF-C","Failed to get if_info");
         return STD_ERR(INTERFACE,FAIL, 0);
     }
     *ifindex = if_info.if_index;
@@ -170,5 +173,25 @@ bool nas_intf_cleanup_l2mc_config (hal_ifindex_t ifx,  hal_vlan_id_t vlan_id)
     EV_LOGGING(INTERFACE, DEBUG, "IF_CONT", "Interface L2MC clean UP (%s)",
                rc == true ? "SUCCESS" : "FAILED");
     return rc;
+}
+
+t_std_error nas_set_intf_admin_state_os(hal_ifindex_t if_index, bool admin_state)
+{
+
+    char buff[CPS_API_MIN_OBJ_LEN];
+    cps_api_object_t obj = cps_api_object_init(buff,sizeof(buff));
+    if (!cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
+                DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_OBJ,
+                cps_api_qualifier_TARGET)) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG", "Failure to create cps obj admin set operation %d", if_index);
+        return STD_ERR(INTERFACE,FAIL, 0);
+    }
+    cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,if_index);
+    cps_api_object_attr_add_u32(obj,IF_INTERFACES_INTERFACE_ENABLED, admin_state);
+    if (nas_os_interface_set_attribute(obj, IF_INTERFACES_INTERFACE_ENABLED) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-IF", "Failed to set admin state for %d ",if_index);
+        return STD_ERR(INTERFACE,FAIL, 0);
+    }
+    return STD_ERR_OK;
 }
 

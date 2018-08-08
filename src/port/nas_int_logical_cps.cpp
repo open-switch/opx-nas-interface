@@ -55,6 +55,7 @@
 #include "nas_switch.h"
 #include "nas_int_com_utils.h"
 #include "cps_api_object_tools.h"
+#include "std_mutex_lock.h"
 
 #include <inttypes.h>
 #include <unordered_map>
@@ -68,12 +69,40 @@ struct _npu_port_t {
         return npu_id == p.npu_id && npu_port == p.npu_port;
     }
 };
-
 struct _npu_port_hash_t {
     std::size_t operator() (const _npu_port_t& p) const {
         return std::hash<int>()(p.npu_id) ^ (std::hash<int>()(p.npu_port) << 1);
     }
 };
+
+typedef struct _intf_cache {
+    bool admin_state;
+    _intf_cache() : admin_state(false){}
+} nas_intf_cache_t;
+
+using nas_intf_cache = std::unordered_map <hal_ifindex_t, nas_intf_cache_t>;
+static nas_intf_cache _nas_intf_cache;
+static std_mutex_lock_create_static_init_rec(_physical_intf_lock);
+std_mutex_type_t *nas_physical_intf_lock(void)
+{
+    return &_physical_intf_lock;
+}
+t_std_error nas_intf_admin_state_get(hal_ifindex_t if_index, bool *admin_state)
+{
+    auto it = _nas_intf_cache.find(if_index);
+    if (it != _nas_intf_cache.end()) {
+        *admin_state = (bool) it->second.admin_state;
+        return STD_ERR_OK;
+    }
+    return STD_ERR(INTERFACE, FAIL, 0);
+}
+
+t_std_error nas_intf_admin_state_set(hal_ifindex_t if_index, bool admin_state)
+{
+    _nas_intf_cache[if_index].admin_state = admin_state;
+    return STD_ERR_OK;
+}
+
 
 struct _port_cache {
     uint32_t mode;
@@ -203,7 +232,7 @@ static bool if_data_from_obj(obj_intf_cat_t obj_cat, cps_api_object_t o, interfa
         if (dn_hal_get_interface_info(&i)==STD_ERR_OK) return true;
     }
 
-    EV_LOGGING(INTERFACE,ERR,"IF-CPS-CREATE","Invalid fields - can't locate specified port");
+    EV_LOGGING(INTERFACE,INFO,"NAS-INT","Invalid fields - can't locate specified port");
     return false;
 }
 
@@ -358,13 +387,6 @@ static void _if_fill_in_speed_duplex_attrs(npu_id_t npu, port_t port, cps_api_ob
 
 static cps_api_return_code_t _if_fill_in_npu_attrs(npu_id_t npu, port_t port,
                                     nas_int_type_t int_type, cps_api_object_t obj) {
-    IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_t state;
-    if (ndi_port_admin_state_get(npu,port,&state)==STD_ERR_OK) {
-        cps_api_object_attr_delete(obj,IF_INTERFACES_INTERFACE_ENABLED);
-        cps_api_object_attr_add_u32(obj,IF_INTERFACES_INTERFACE_ENABLED,
-                ((state == IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_UP) ? true : false));
-    }
-
     BASE_IF_PHY_IF_INTERFACES_INTERFACE_TAGGING_MODE_t mode;
     if (ndi_port_get_untagged_port_attrib(npu,port,&mode)==STD_ERR_OK) {
         cps_api_object_attr_add_u32(obj,BASE_IF_PHY_IF_INTERFACES_INTERFACE_TAGGING_MODE,mode);
@@ -481,7 +503,7 @@ static cps_api_return_code_t if_get (void * context, cps_api_get_params_t * para
     if (ifix == nullptr && name != NULL) {
         interface_ctrl_t _port;
         if (!if_data_from_obj(obj_INTF, filt,_port)) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-INT-GET", "Wrong interface name or interface not present %s",_port.if_name);
+            EV_LOGGING(INTERFACE,INFO,"NAS-INT-GET", "Wrong interface name or interface not present %s",_port.if_name);
             return cps_api_ret_code_ERR;
         }
         cps_api_object_attr_add_u32(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
@@ -527,6 +549,12 @@ static cps_api_return_code_t if_get (void * context, cps_api_get_params_t * para
                 if (_port.port_mapped) {
                     cps_api_object_attr_add_u32(object,BASE_IF_PHY_IF_INTERFACES_INTERFACE_NPU_ID,_port.npu_id);
                     cps_api_object_attr_add_u32(object,BASE_IF_PHY_IF_INTERFACES_INTERFACE_PORT_ID,_port.port_id);
+
+                    bool state = false;
+                    nas_intf_admin_state_get(_port.if_index, &state);
+                    cps_api_object_attr_delete(object,IF_INTERFACES_INTERFACE_ENABLED);
+                    cps_api_object_attr_add_u32(object,IF_INTERFACES_INTERFACE_ENABLED, state);
+
                     if (_port.int_type == nas_int_type_FC) {
                         nas_fc_fill_intf_attr(_port.npu_id, _port.port_id, object);
                     } else {
@@ -629,7 +657,7 @@ static cps_api_return_code_t if_state_get (void * context, cps_api_get_params_t 
     if (ifix == nullptr && name != NULL) {
         interface_ctrl_t _port;
         if (!if_data_from_obj(obj_INTF_STATE, filt,_port)) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-INT-GET", "Wrong interface name or interface not present %s",_port.if_name);
+            EV_LOGGING(INTERFACE,INFO,"NAS-INT-GET", "Wrong interface name or interface not present %s",_port.if_name);
             return cps_api_ret_code_ERR;
         }
         cps_api_object_attr_add_u32(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
@@ -736,7 +764,7 @@ static cps_api_return_code_t loopback_if_state_get (void * context, cps_api_get_
     if (ifix == nullptr && name != NULL) {
         interface_ctrl_t _port;
         if (!if_data_from_obj(obj_INTF_STATE, filt,_port)) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-INT-GET", "Wrong interface name or interface not present %s",_port.if_name);
+            EV_LOGGING(INTERFACE,INFO,"NAS-INT-GET", "Wrong interface name or interface not present %s",_port.if_name);
             return cps_api_ret_code_ERR;
         }
         cps_api_object_attr_add_u32(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,
@@ -950,6 +978,7 @@ static cps_api_return_code_t _set_attr_up (npu_id_t npu, port_t port, cps_api_ob
         return cps_api_ret_code_ERR;
     }
 
+    std_mutex_simple_lock_guard g(nas_physical_intf_lock());
     bool state;
     bool revert;
     state = (bool) cps_api_object_attr_data_uint(attr); // TRUE is ADMIN UP and false ADMIN DOWN
@@ -975,6 +1004,9 @@ static cps_api_return_code_t _set_attr_up (npu_id_t npu, port_t port, cps_api_ob
     nas_send_admin_state_event(if_index,
         (state == true) ? IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_UP: IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_DOWN);
 
+
+    nas_intf_admin_state_set(if_index, state);
+    EV_LOGGING(INTERFACE,NOTICE,"NAS-IF","Admin state for %d is %d ", if_index, state);
     return cps_api_ret_code_OK;
 }
 
@@ -1984,7 +2016,7 @@ static cps_api_return_code_t loopback_if_get(void* context, cps_api_get_params_t
     if (ifix == nullptr && name != nullptr) {
         interface_ctrl_t _port;
         if (!if_data_from_obj(obj_INTF, filt,_port)) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-INT-GET", "Wrong interface name or interface not present %s",_port.if_name);
+            EV_LOGGING(INTERFACE,INFO,"NAS-INT-GET", "Wrong interface name or interface not present %s",_port.if_name);
             return cps_api_ret_code_ERR;
         }
         cps_api_object_attr_add_u32(filt, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,

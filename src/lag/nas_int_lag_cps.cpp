@@ -36,12 +36,14 @@
 #include "nas_ndi_obj_id_table.h"
 #include "interface_obj.h"
 #include "nas_int_utils.h"
+#include "nas_int_logical.h"
 #include "hal_interface_common.h"
 #include "nas_ndi_port.h"
 #include "nas_linux_l2.h"
 #include "iana-if-type.h"
 #include "nas_if_utils.h"
 #include "nas_int_com_utils.h"
+#include "std_rw_lock.h"
 
 #include <stdio.h>
 
@@ -360,12 +362,19 @@ static cps_api_return_code_t nas_cps_add_port_to_lag(nas_lag_master_info_t *nas_
         cps_api_object_attr_add_u32(name_obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, nas_lag_entry->ifindex);
         cps_api_object_attr_add_u32(name_obj,DELL_IF_IF_INTERFACES_INTERFACE_MEMBER_PORTS, port_idx);
 
+        /*  Apply save and then reapply the admin state on the interface after port add/delete  */
+        bool phy_admin_state  = false;
+        std_mutex_simple_lock_guard g(nas_physical_intf_lock());
+        nas_intf_admin_state_get(port_idx, &phy_admin_state);
         if(nas_os_add_port_to_lag(name_obj) != STD_ERR_OK) {
              EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
                         "Error adding port %d to lag  %d in the Kernel",
                         port_idx,nas_lag_entry->ifindex);
              return cps_api_ret_code_ERR;
         }
+    /*  Apply the admin in the kernel */
+        nas_set_intf_admin_state_os(port_idx, phy_admin_state);
+        EV_LOGGING(INTERFACE,NOTICE,"NAS-CPS-LAG","set Admin state for %d is %d ", port_idx, phy_admin_state);
     }
 
     if_master_info_t master_info = { nas_int_type_LAG, NAS_PORT_NONE, nas_lag_entry->ifindex};
@@ -444,10 +453,15 @@ static cps_api_return_code_t nas_cps_delete_port_from_lag(nas_lag_master_info_t 
      * in that case no need of deleting it from kernel
      */
     if(nas_lag_entry->block_port_list.find(ifindex) == nas_lag_entry->block_port_list.end()){
+        bool phy_admin_state  = false;
+        std_mutex_simple_lock_guard g(nas_physical_intf_lock());
+        nas_intf_admin_state_get(ifindex, &phy_admin_state);
         if(nas_os_delete_port_from_lag(obj) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG","Error deleting interface %d from OS", ifindex);
             return cps_api_ret_code_ERR;
         }
+        /*  Apply the admin in the kernel */
+        nas_set_intf_admin_state_os(ifindex, phy_admin_state);
     }
 
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",

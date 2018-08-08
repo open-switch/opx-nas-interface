@@ -98,32 +98,6 @@ def _verify_intf_supported_speed(config, speed):
             return False
     return True
 
-def _add_default_speed(config, cps_obj):
-    # fetch default speed
-    media_type = config.get_media_type()
-    if media_type is None:
-        return
-    nas_if.log_info("set default speed for media type " + str(media_type))
-    speed = media.get_default_media_setting(media_type, 'speed')
-    try:
-        if (cps_obj.get_attr_data(speed_attr_name)):
-            cps_obj.del_attr(speed_attr_name)
-    except ValueError:
-        # ignore exception
-        pass
-    if speed is None:
-        nas_if.log_info('default speed setting not found')
-        return
-    if fp.is_qsfp28_cap_supported(config.get_fp_port()) == True:
-        if config.get_ietf_intf_type() !=  'ianaift:fibreChannel':
-            nas_if.log_info('Do not push default speed in case of QSFP28 port')
-            return
-    if _verify_intf_supported_speed(config, speed) == False:
-        nas_if.log_err('Media based default speed not supported %s' % str(speed))
-        return
-    cps_obj.add_attr(speed_attr_name, speed)
-    nas_if.log_info("default speed is " + str(speed))
-
 def _add_default_autoneg(media_type, cps_obj):
     if media_type == None:
         return
@@ -148,24 +122,60 @@ def _add_default_duplex(media_type, cps_obj):
     cps_obj.add_attr(duplex_attr_name, duplex)
     nas_if.log_info("default Duplex is " + str(duplex))
 
-# Interface Speed is pushed down to hardware based on media connected and if it is configured AUTO(default).
-# Based on the port capability (QSFP+ or QSFP28) and mode configured(ethernet or FC), connected physical media
-# may not be supported and media based default speed will not be pushed down to the NPU/Hardware.
-# If user set something other than AUTO( default) then it will be passed down without checking connected media.
-# in case of ethernet fanout mode, default speed is skipped.
+
+def _get_min_speed(sp1, sp2):
+    if sp1 not in nas_comm.yang_to_mbps_speed or sp2 not in nas_comm.yang_to_mbps_speed:
+        return None
+    speed = min(nas_comm.yang_to_mbps_speed[sp1], nas_comm.yang_to_mbps_speed[sp2])
+    return nas_comm.mbps_to_yang_speed[speed]
+
+
+def _get_default_speed(config):
+    ''' Method to retrieve minimum of port speed and media speed '''
+
+    # Retrieve media default speed for mode as media_speed
+    media_type = config.get_media_type()
+    if media_type is None:
+        return None
+    media_speed = media.get_default_media_setting(media_type, 'speed')
+
+    # Retreive port default speed for mode as fp_speed. fp_speed is the max speed supported on the port
+    fp_port = fp.find_front_panel_port(config.get_fp_port())
+    fp_speed = fp_port.get_port_speed()
+
+    # Return min(port_speed, media_speed)
+    return _get_min_speed(media_speed, fp_speed)
+
+
+# 1. Interface Speed is pushed down to hardware based on media connected and if it is configured AUTO(default).
+# 2. Based on the port capability (QSFP+ or QSFP28) and mode configured(ethernet or FC), connected physical media
+#    may not be supported and media based default speed will not be pushed down to the NPU/Hardware.
+# 3. If user set something other than AUTO( default ) then it will be passed down without checking connected media.
+# 4. In case of ethernet fanout mode, default speed is skipped.
 def _set_speed(speed, config, obj):
-    intf_phy_mode = nas_comm.get_value(nas_comm.ietf_type_2_phy_mode, config.get_ietf_intf_type())
-    breakout_mode = config.get_breakout_mode()
-    nas_if.log_info("breakout mode %s and speed %s " % (str(breakout_mode), str(speed)))
-    if speed != _yang_auto_speed:
-        if _verify_intf_supported_speed(config, speed) == False:
-            return False
+    ''' Method to set Speed in CPS Object '''
+
+    nas_if.log_info("Application Configured Breakout Mode: " + str(config.get_breakout_mode()))
+    nas_if.log_info("Application Configured Speed: " +  str(speed))
+    if speed != _yang_auto_speed and _verify_intf_supported_speed(config, speed) is False:
+        return False
+
+    # Set in config object
     config.set_speed(speed)
+
+    # Retrieve default setting
     if speed == _yang_auto_speed:
-        if intf_phy_mode == nas_comm.get_value(nas_comm.yang_phy_mode, 'fc') or breakout_mode == _yang_breakout_1x1 or breakout_mode == _yang_breakout_4x4 or media.is_sfp_media_type(config.get_media_type()):
-            # TODO default speed in breakout mode is not supported  yet
-            # TODO it may cause issue in port group ports. Verify the usecases.
-            _add_default_speed(config, obj)
+        try:
+            obj.del_attr(speed_attr_name)
+        except:
+            pass
+        speed = _get_default_speed(config)
+        nas_if.log_info('Default Speed: ' + str(speed))
+
+    # Add attribute to CPS object
+    if speed is not None and _verify_intf_supported_speed(config, speed) == True:
+        obj.add_attr(speed_attr_name, speed)
+
     return True
 
 def _set_autoneg(negotiation, config, obj):
@@ -311,13 +321,13 @@ def if_handle_set_media_type(op, obj):
 
     config.set_is_media_supported(True)
 
-    intf_phy_mode = nas_comm.get_value(nas_comm.ietf_type_2_phy_mode, config.get_ietf_intf_type())
-
     obj.add_attr(ifname_attr_name, if_name)
     # set the default speed if the speed is configured to auto it is in non-breakout mode
     if config.get_speed() == _yang_auto_speed:
-        if config.get_breakout_mode() == _yang_breakout_1x1 or config.get_breakout_mode() == _yang_breakout_4x4 or intf_phy_mode == nas_comm.get_value(nas_comm.yang_phy_mode, 'fc'):
-            _add_default_speed(config, obj)
+        speed = _get_default_speed(config)
+        if speed is not None:
+            obj.add_attr(speed_attr_name, speed)
+
     if config.get_negotiation() == _yang_auto_neg:
         _add_default_autoneg(media_type, obj)
     if config.get_duplex() == _yang_auto_dup:

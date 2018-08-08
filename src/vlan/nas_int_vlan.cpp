@@ -558,6 +558,12 @@ void nas_process_del_vlan_mem_from_os (hal_ifindex_t bridge_id, nas_port_list_t 
 
             publish_list.insert(if_index); // TODO combine with LAG members
         } else if (intf_type == nas_int_type_LAG) {
+
+            if(!nas_intf_cleanup_l2mc_config(if_index,  p_bridge_node->vlan_id)) {
+                EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
+                   "Error cleaning L2MC membership for interface %d", if_index);
+            }
+
             EV_LOGGING(INTERFACE, INFO, "NAS-Vlan",
                 "Delete %s LAG %d from Bridge %d ", (port_mode == NAS_PORT_UNTAGGED) ? "untagged" : "tagged",
                 if_index, bridge_id);

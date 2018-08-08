@@ -21,7 +21,6 @@
  */
 
 #include "event_log.h"
-#include "std_assert.h"
 #include "hal_interface_common.h"
 #include "hal_if_mapping.h"
 #include "nas_int_utils.h"
@@ -31,6 +30,7 @@
 #include "nas_int_lag.h"
 #include "nas_int_lag_api.h"
 #include "nas_int_com_utils.h"
+#include "nas_int_logical.h"
 #include "std_error_codes.h"
 #include "cps_api_object_category.h"
 #include "cps_api_interface_types.h"
@@ -564,6 +564,7 @@ void nas_int_ev_handler(cps_api_object_t obj) {
         return;
     }
 
+    std_mutex_simple_lock_guard g(nas_physical_intf_lock());
     /*
      * Admin State
      */
@@ -583,6 +584,8 @@ void nas_int_ev_handler(cps_api_object_t obj) {
                     EV_LOGGING(INTERFACE,INFO,"INTF-NPU","Admin state change on %d:%d to %d",
                         ndi_port.npu_id, ndi_port.npu_port,state);
                 }
+                /*  Update in local cache and publish the msg */
+                nas_intf_admin_state_set(if_index, state);
                 nas_send_admin_state_event(if_index, state);
             }
         } else {

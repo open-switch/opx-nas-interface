@@ -270,8 +270,11 @@ def process_Profile_fc_cap_cfg(fc_cap_node):
         fc_br_cap = {}
         _br_str = cap.get('breakout')
         _hwp_speed = cap.get('hwport_speed')
+        _phy_fc_speed = cap.get('phy_fc_speed')
         fc_br_cap = {'breakout':get_value(yang_breakout, _br_str),
-                   'hwp_speed':int(_hwp_speed)}
+                   'hwp_speed':int(_hwp_speed),
+                   'phy_fc_speed':int(_phy_fc_speed)
+                    }
 
         _fc_cap.append(fc_br_cap)
     return _fc_cap

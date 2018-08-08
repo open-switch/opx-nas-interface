@@ -128,8 +128,8 @@ bool nas_stat_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index, bo
         strncpy(i.if_name,name,sizeof(i.if_name)-1);
         i.q_type = HAL_INTF_INFO_FROM_IF_NAME;
         if (dn_hal_get_interface_info(&i)!=STD_ERR_OK){
-            EV_LOG(ERR, INTERFACE, 0, "NAS-STAT",
-                    "Can't get interface control information for %s",name);
+            EV_LOGGING(INTERFACE, INFO, "NAS-STAT",
+                       "Can't get interface control information for %s", name);
             return false;
         }
         *index = i.if_index;

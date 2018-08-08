@@ -72,7 +72,7 @@ static bool nas_get_ifindex (cps_api_object_t obj,
         strncpy(i.if_name,name,sizeof(i.if_name)-1);
         i.q_type = HAL_INTF_INFO_FROM_IF_NAME;
         if (dn_hal_get_interface_info(&i)!=STD_ERR_OK){
-            EV_LOGGING(INTERFACE, ERR, "NAS-STAT",
+            EV_LOGGING(INTERFACE, INFO, "NAS-STAT",
                        "Can't get interface control information for %s", name);
             return false;
         }

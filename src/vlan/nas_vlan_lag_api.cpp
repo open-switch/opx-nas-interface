@@ -189,6 +189,13 @@ t_std_error  nas_handle_lag_del_from_vlan(nas_bridge_t *p_bridge, hal_ifindex_t 
     bool roll_bk_sup = (roll_bk==nullptr)? false:true;
 
 
+    if (cps_del == true) {
+        if(!nas_intf_cleanup_l2mc_config(lag_index,  p_bridge->vlan_id)) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
+                   "Error cleaning L2MC membership for Lag interface %d", lag_index);
+        }
+    }
+
     if (nas_add_or_del_lag_in_vlan(lag_index, p_bridge->vlan_id,
           port_mode, false, roll_bk_sup) != STD_ERR_OK){
         return STD_ERR(INTERFACE,FAIL, 0);
@@ -223,10 +230,6 @@ t_std_error  nas_handle_lag_del_from_vlan(nas_bridge_t *p_bridge, hal_ifindex_t 
         }
     }
 
-    if(!nas_intf_cleanup_l2mc_config(lag_index,  p_bridge->vlan_id)) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-Vlan",
-               "Error cleaning L2MC membership for Lag interface %d", lag_index);
-    }
     if(port_mode == NAS_PORT_TAGGED) {
         nas_process_lag_for_vlan_del(&p_bridge->tagged_lag, lag_index);
     }
