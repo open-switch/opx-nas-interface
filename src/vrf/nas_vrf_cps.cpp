@@ -24,6 +24,11 @@
 #include "nas_vrf_utils.h"
 #include "nas_vrf_extn.h"
 #include "vrf-mgmt.h"
+#include "dell-base-common.h"
+#include "hal_if_mapping.h"
+#include "std_utils.h"
+#include <vector>
+
 #define NUM_INT_CPS_API_THREAD 1
 
 static cps_api_operation_handle_t nas_vrf_handle;
@@ -84,9 +89,62 @@ static cps_api_return_code_t nas_vrf_cps_vrf_set_func(void *ctx,
     return rc;
 }
 
+static cps_api_return_code_t nas_vrf_add_obj(const nas_vrf_ctrl_t &vrf_ctrl_block, cps_api_object_list_t param_list) {
+
+    cps_api_object_t obj = cps_api_object_create();
+    if(obj == NULL){
+        NAS_VRF_LOG_ERR("VRF-INTF-GET", "Failed to allocate memory to cps object");
+        return cps_api_ret_code_ERR;
+    }
+
+    cps_api_key_t key;
+    cps_api_key_from_attr_with_qual(&key, NI_NETWORK_INSTANCES_OBJ,
+                                    cps_api_qualifier_TARGET);
+    cps_api_object_set_key(obj, &key);
+    cps_api_object_attr_add(obj, NI_NETWORK_INSTANCES_NETWORK_INSTANCE_NAME, (const void*) vrf_ctrl_block.vrf_name,
+                    strlen(vrf_ctrl_block.vrf_name) + 1);
+    if (!cps_api_object_list_append(param_list, obj)) {
+        cps_api_object_delete(obj);
+        NAS_VRF_LOG_ERR("VRF-INTF-GET", "Object append to list is failed for %s", vrf_ctrl_block.vrf_name);
+        return cps_api_ret_code_ERR;
+    }
+
+    return cps_api_ret_code_OK;
+}
+
 static cps_api_return_code_t nas_vrf_cps_vrf_get_func (void *ctx,
                                                          cps_api_get_params_t * param,
                                                          size_t ix) {
+    cps_api_object_t filt = cps_api_object_list_get(param->filters, ix);
+    if (filt == NULL) {
+        NAS_VRF_LOG_ERR("NAS-RT-CPS","VRF intf object is not present");
+        return cps_api_ret_code_ERR;
+    }
+
+    const char *vrf_name = (const char*) cps_api_object_get_data(filt,NI_NETWORK_INSTANCES_NETWORK_INSTANCE_NAME);
+
+    if (vrf_name) {
+        /* get VRF into from name */
+        nas_vrf_ctrl_t vrf_ctrl_block;
+        if (nas_get_vrf_ctrl_from_vrf_name(vrf_name, &vrf_ctrl_block) != STD_ERR_OK) {
+            NAS_VRF_LOG_ERR("NAS-RT-CPS","VRF ctrl-block is not present");
+            return cps_api_ret_code_ERR;
+        }
+
+        if (nas_vrf_add_obj(vrf_ctrl_block, param->list) != cps_api_ret_code_OK) {
+            return cps_api_ret_code_ERR;
+        }
+    } else {
+        /* get all VRF intf info */
+        std::vector <nas_vrf_ctrl_t> vrf_ctrl_lst;
+        nas_get_all_vrf_ctrl(vrf_ctrl_lst);
+        for (auto vrf_ctrl_block : vrf_ctrl_lst) {
+            if (nas_vrf_add_obj(vrf_ctrl_block, param->list) != cps_api_ret_code_OK) {
+                return cps_api_ret_code_ERR;
+            }
+        }
+    }
+
     NAS_VRF_LOG_DEBUG("NAS-RT-CPS", "VRF get function");
     return cps_api_ret_code_OK;
 }

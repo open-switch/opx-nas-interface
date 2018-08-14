@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Dell Inc.
+ * Copyright (c) 2018 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -209,33 +209,35 @@ bool nas_vrf_update_vrf_id(const char *vrf_name, bool is_add) {
     nas_vrf_ctrl_t vrf_info;
     memset(&vrf_info, 0, sizeof(vrf_info));
 
-    if (is_add) {
-        ndi_vr_entry_t  vr_entry;
-        /* Create a virtual router entry and get vr_id (maps to fib vrf id) */
-        memset (&vr_entry, 0, sizeof (ndi_vr_entry_t));
+    /* Dont create VRF object for out of band management VRF */
+    if (strncmp(vrf_name, NAS_MGMT_VRF_NAME, sizeof(NAS_MGMT_VRF_NAME)) != 0) {
+        if (is_add) {
+            ndi_vr_entry_t  vr_entry;
+            /* Create a virtual router entry and get vr_id (maps to fib vrf id) */
+            memset (&vr_entry, 0, sizeof (ndi_vr_entry_t));
 
-        nas_switch_wait_for_sys_base_mac(&vr_entry.src_mac);
+            nas_switch_wait_for_sys_base_mac(&vr_entry.src_mac);
 
-        /*
-         * Set system MAC address for the VRs
-         */
-        vr_entry.flags = NDI_VR_ATTR_SRC_MAC_ADDRESS;
+            /*
+             * Set system MAC address for the VRs
+             */
+            vr_entry.flags = NDI_VR_ATTR_SRC_MAC_ADDRESS;
 
-        if ((rc = ndi_route_vr_create(&vr_entry, &vrf_info.vrf_id))!= STD_ERR_OK) {
-            NAS_VRF_LOG_ERR("VRF-ID", "VRF oid creation failed for VRF:%s", vrf_name);
-            return false;
-        }
-    } else {
-        nas_obj_id_t ndi_vr_id = 0;
-        if (nas_get_vrf_obj_id_from_vrf_name(vrf_name, &ndi_vr_id) == STD_ERR_OK) {
-            if ((rc = ndi_route_vr_delete(0, ndi_vr_id))!= STD_ERR_OK) {
-                NAS_VRF_LOG_ERR("VRF-ID", "VRF oid deletion failed for VRF:%s VRFF id 0x%lx", vrf_name, ndi_vr_id);
+            if ((rc = ndi_route_vr_create(&vr_entry, &vrf_info.vrf_id))!= STD_ERR_OK) {
+                NAS_VRF_LOG_ERR("VRF-ID", "VRF oid creation failed for VRF:%s", vrf_name);
                 return false;
             }
-            NAS_VRF_LOG_INFO("VRF-ID", "VRF oid deletion successful for VRF:%s id 0x%lx", vrf_name, ndi_vr_id);
+        } else {
+            nas_obj_id_t ndi_vr_id = 0;
+            if (nas_get_vrf_obj_id_from_vrf_name(vrf_name, &ndi_vr_id) == STD_ERR_OK) {
+                if ((rc = ndi_route_vr_delete(0, ndi_vr_id))!= STD_ERR_OK) {
+                    NAS_VRF_LOG_ERR("VRF-ID", "VRF oid deletion failed for VRF:%s VRFF id 0x%lx", vrf_name, ndi_vr_id);
+                    return false;
+                }
+                NAS_VRF_LOG_INFO("VRF-ID", "VRF oid deletion successful for VRF:%s id 0x%lx", vrf_name, ndi_vr_id);
+            }
         }
     }
-
     safestrncpy(vrf_info.vrf_name, vrf_name, sizeof(vrf_info.vrf_name));
     if (nas_update_vrf_info((is_add ? NAS_VRF_OP_ADD : NAS_VRF_OP_DEL), &vrf_info) != STD_ERR_OK) {
         NAS_VRF_LOG_ERR("VRF-ID-GET", "VRF oid update failed for VRF:%s is_add:%d", vrf_name, is_add);
@@ -278,12 +280,9 @@ cps_api_return_code_t nas_vrf_process_cps_vrf_msg(cps_api_transaction_params_t *
     }
     if (op == cps_api_oper_CREATE) {
         NAS_VRF_LOG_DEBUG("NAS-RT-CPS-SET", "In VRF CREATE ");
-        /* Dont create VRF object for out of band management VRF */
-        if (strncmp(vrf_name, NAS_MGMT_VRF_NAME, sizeof(NAS_MGMT_VRF_NAME)) != 0) {
-            if (nas_vrf_update_vrf_id(vrf_name, true) == false) {
-                NAS_VRF_LOG_ERR("NAS-RT-CPS-SET", "VRF id handling failed for VRF:%s!", vrf_name);
-                return cps_api_ret_code_ERR;
-            }
+        if (nas_vrf_update_vrf_id(vrf_name, true) == false) {
+            NAS_VRF_LOG_ERR("NAS-RT-CPS-SET", "VRF id handling failed for VRF:%s!", vrf_name);
+            return cps_api_ret_code_ERR;
         }
         if(nas_os_add_vrf(obj) != STD_ERR_OK){
             NAS_VRF_LOG_ERR("NAS-RT-CPS-SET", "OS VRF add failed for VRF:%s", vrf_name);
@@ -301,12 +300,9 @@ cps_api_return_code_t nas_vrf_process_cps_vrf_msg(cps_api_transaction_params_t *
             NAS_VRF_LOG_ERR("NAS-RT-CPS-SET", "OS VRF del failed");
             rc = cps_api_ret_code_ERR;
         }
-        /* Dont delete VRF object for out of band management VRF since it's not created */
-        if (strncmp(vrf_name, NAS_MGMT_VRF_NAME, sizeof(NAS_MGMT_VRF_NAME)) != 0) {
-            if (nas_vrf_update_vrf_id(vrf_name, false) == false) {
-                NAS_VRF_LOG_ERR("NAS-RT-CPS-SET", "VRF id delete failed for VRF:%s!", vrf_name);
-                return cps_api_ret_code_ERR;
-            }
+        if (nas_vrf_update_vrf_id(vrf_name, false) == false) {
+            NAS_VRF_LOG_ERR("NAS-RT-CPS-SET", "VRF id delete failed for VRF:%s!", vrf_name);
+            return cps_api_ret_code_ERR;
         }
     }
 

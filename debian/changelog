@@ -1,3 +1,12 @@
+opx-nas-interface (5.18.0+opx6) unstable; urgency=medium
+
+  * Update: VRF get-handler support
+  * Update: VRF configuration script
+  * Bugfix: Fix VRF APIs so VRF control-blocks gets properly allocated during VRF
+            creation
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 13 Aug 2018 17:17:56 -0800
+
 opx-nas-interface (5.18.0+opx5) unstable; urgency=medium
 
   * Bugfix: Altered tap fd lock access to be called only after event add/del.
@@ -11,6 +20,7 @@ opx-nas-interface (5.18.0+opx5) unstable; urgency=medium
   * Update: Re-apply admin state after membership changes
 
  -- Dell EMC <ops-dev@lists.openswitch.net>  Wed, 8 Aug 2018 17:17:56 -0800
+
 opx-nas-interface (5.18.0+opx4) unstable; urgency=medium
 
   * Bugfix: Correct service startup dependencies and timings
