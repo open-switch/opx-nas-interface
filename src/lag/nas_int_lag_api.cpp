@@ -496,7 +496,7 @@ t_std_error nas_lag_set_admin_status(hal_ifindex_t index, bool enable)
 
     if(nas_lag_entry == NULL){
         EV_LOGGING(INTERFACE, ERR, "NAS-LAG",
-                   "Lag intf %d Err in %s", index, __FUNCTION__);
+                   "Lag intf %d Err in set_admin_statue", index);
         return STD_ERR(INTERFACE,FAIL, 0);
     }
 
@@ -508,44 +508,6 @@ t_std_error nas_lag_set_admin_status(hal_ifindex_t index, bool enable)
                    "Lag events publish failure");
         return STD_ERR(INTERFACE, FAIL, 0);
     }
-    return STD_ERR_OK;
-}
-
-t_std_error nas_lag_get_admin_status(hal_ifindex_t index, bool &admin_status)
-{
-    nas_lag_master_info_t *nas_lag_entry = NULL;
-
-    EV_LOGGING(INTERFACE, INFO, "NAS-LAG", "Lag intf %d for set_admin_status",
-               index);
-
-    nas_lag_entry = nas_get_lag_node(index);
-
-    if(nas_lag_entry == NULL){
-        EV_LOGGING(INTERFACE, ERR, "NAS-LAG",
-                   "Lag intf %d Err in %s", index, __FUNCTION__);
-        return STD_ERR(INTERFACE,FAIL, 0);
-    }
-
-    admin_status = nas_lag_entry->admin_status;
-    return STD_ERR_OK;
-}
-
-t_std_error nas_lag_get_oper_status(hal_ifindex_t index, bool &oper_status)
-{
-    nas_lag_master_info_t *nas_lag_entry = NULL;
-
-    EV_LOGGING(INTERFACE, INFO, "NAS-LAG", "Lag intf %d for set_admin_status",
-               index);
-
-    nas_lag_entry = nas_get_lag_node(index);
-
-    if(nas_lag_entry == NULL){
-        EV_LOGGING(INTERFACE, ERR, "NAS-LAG",
-                   "Lag intf %d Err in %s", index, __FUNCTION__);
-        return STD_ERR(INTERFACE,FAIL, 0);
-    }
-
-    oper_status = nas_lag_entry->oper_status;
     return STD_ERR_OK;
 }
 

@@ -60,9 +60,15 @@ static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj);
 static cps_api_return_code_t nas_cps_delete_port_from_lag(nas_lag_master_info_t *nas_lag_entry, hal_ifindex_t ifindex);
 static void nas_cps_update_oper_state(nas_lag_master_info_t *nas_lag_entry);
 
-static bool nas_lag_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index){
-    cps_api_object_attr_t lag_name_attr = cps_api_get_key_data(obj, IF_INTERFACES_INTERFACE_NAME);
+static bool nas_lag_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index, bool get_state){
     cps_api_object_attr_t lag_attr = cps_api_object_attr_get(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX );
+    cps_api_object_attr_t lag_name_attr;
+
+    if (get_state) {
+        lag_name_attr = cps_api_get_key_data(obj, IF_INTERFACES_STATE_INTERFACE_NAME);
+    } else {
+        lag_name_attr = cps_api_get_key_data(obj, IF_INTERFACES_INTERFACE_NAME);
+    }
 
     if(lag_attr == NULL && lag_name_attr == NULL) {
         EV_LOGGING(INTERFACE, DEBUG, "NAS-CPS-LAG",
@@ -145,7 +151,7 @@ static cps_api_return_code_t nas_cps_create_lag(cps_api_object_t obj)
 
     const char * name = (const char *)cps_api_object_attr_data_bin(lag_id_attr);
 
-    if(nas_lag_get_ifindex_from_obj(obj,&lag_index)){
+    if(nas_lag_get_ifindex_from_obj(obj,&lag_index, false)){
         EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG","Lag %s already exists",
                 name);
         return nas_cps_set_lag(obj);
@@ -209,7 +215,7 @@ static cps_api_return_code_t nas_cps_delete_lag(cps_api_object_t obj)
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "CPS Delete LAG");
 
     hal_ifindex_t lag_index = 0;
-    if(!nas_lag_get_ifindex_from_obj(obj,&lag_index)){
+    if(!nas_lag_get_ifindex_from_obj(obj,&lag_index, false)){
         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "CPS Delete LAG or it's Member operation Failed");
         return cps_api_ret_code_ERR;
     }
@@ -868,7 +874,7 @@ static cps_api_return_code_t nas_cps_set_lag(cps_api_object_t obj)
 
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "CPS Set LAG");
 
-    if(!nas_lag_get_ifindex_from_obj(obj,&lag_index)){
+    if(!nas_lag_get_ifindex_from_obj(obj,&lag_index, false)){
         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "CPS Set LAG failed");
         return cps_api_ret_code_ERR;
     }
@@ -1231,7 +1237,7 @@ static cps_api_return_code_t nas_process_cps_lag_get(void * context, cps_api_get
 
     std_mutex_simple_lock_guard lock_t(nas_lag_mutex_lock());
 
-    if(nas_lag_get_ifindex_from_obj(obj,&ifindex)){
+    if(nas_lag_get_ifindex_from_obj(obj,&ifindex, false)){
         if(nas_get_lag_intf(ifindex, param->list, false)!= STD_ERR_OK){
             return cps_api_ret_code_ERR;
         }
@@ -1302,7 +1308,7 @@ static cps_api_return_code_t nas_process_cps_lag_state_get(void * context, cps_a
 
     std_mutex_simple_lock_guard lock_t(nas_lag_mutex_lock());
 
-    if(nas_lag_get_ifindex_from_obj(obj,&ifindex)){
+    if(nas_lag_get_ifindex_from_obj(obj,&ifindex, true)){
         if(nas_get_lag_intf(ifindex, param->list, true)!= STD_ERR_OK){
             return cps_api_ret_code_ERR;
         }

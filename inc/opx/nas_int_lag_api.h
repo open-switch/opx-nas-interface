@@ -164,8 +164,6 @@ t_std_error nas_lag_set_mac(hal_ifindex_t index,const char *lag_mac);
 t_std_error nas_lag_set_admin_status(hal_ifindex_t index, bool enable);
 t_std_error nas_lag_block_port(nas_lag_master_info_t  *p_lag_info ,hal_ifindex_t slave_ifindex,bool block_state);
 t_std_error nas_lag_get_port_mode(hal_ifindex_t slave_ifindex,bool& block_state);
-t_std_error nas_lag_get_admin_status(hal_ifindex_t index, bool enable);
-t_std_error nas_lag_get_oper_status(hal_ifindex_t index, bool enable);
 hal_ifindex_t nas_get_master_idx(hal_ifindex_t ifindex);
 void nas_cps_handle_mac_set (const char *lag_name, hal_ifindex_t lag_index);
 

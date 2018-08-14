@@ -1,3 +1,11 @@
+opx-nas-interface (5.18.0+opx7) unstable; urgency=medium
+
+  * Bugfix: Remove useless imported libraries from cps_config_lag.py
+  * Bugfix: Remove unneeded function definitions
+  * Bugfix: Fix LAG interface-state get-handler not honoring name-filters
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 13 Aug 2018 19:20:56 -0800
+
 opx-nas-interface (5.18.0+opx6) unstable; urgency=medium
 
   * Update: VRF get-handler support

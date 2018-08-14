@@ -17,9 +17,7 @@ import sys
 import getopt
 import cps
 import cps_object
-import cps_utils
 import nas_ut_framework as nas_ut
-import nas_os_utils
 
 intf_rpc_key_id = 'dell-base-if-cmn/set-interface'
 intf_rpc_op_attr_id = 'dell-base-if-cmn/set-interface/input/operation'
@@ -47,6 +45,7 @@ def nas_lag_op(op, data_dict,commit=True):
         nas_ut.get_cb_method(op)(obj)
     else:
         return (obj, op)
+    return None
 
 
 def usage():
