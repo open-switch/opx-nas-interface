@@ -44,6 +44,7 @@ mgmt_rpc_op_type_map = {'set':'create','unset':'delete'}
 
 def nas_vrf_op(op, data_dict):
     obj_list = []
+    commit_changes = False
     try:
         if op == 'get':
             obj = cps_object.CPSObject( vrf_show_attr_id, data=data_dict)
@@ -57,10 +58,10 @@ def nas_vrf_op(op, data_dict):
             if op == "create":
                 obj = cps_object.CPSObject(vrf_rpc_key_id, data=data_dict)
                 if data_dict[vrf_name_attr_id] == 'management' and data_dict[intf_name_mgmt_attr_id] != []:
-                    commit(op, obj)
+                    commit_changes = commit(op, obj)
                     obj = cps_object.CPSObject(intf_mgmt_key_attr_id, data=data_dict)
                 elif data_dict[intf_rpc_key_attr] != []:
-                    commit(op, obj)
+                    commit_changes = commit(op, obj)
                     obj_list = _port_obj_list(intf_rpc_key_id,data_dict)
                     op = 'rpc'
                 else:
@@ -79,11 +80,16 @@ def nas_vrf_op(op, data_dict):
 
         if obj_list != []:
             for obj in obj_list:
-                commit(op, obj)
+                commit_changes = commit(op, obj)
+                if commit_changes == False:
+                    break
         elif op == 'get':
             nas_common.get_cb_method(op)(obj)
         else:
-            commit(op,obj)
+            commit_changes = commit(op,obj)
+
+        if commit_changes != False:
+            print "Configuration Successful..."
 
     except ValueError:
         print "Configuration Error"
@@ -109,7 +115,7 @@ def usage():
     print 'opx-config-vrf  --delete --vrf blue'
     print 'opx-config-vrf  --addport --vrf blue --port e101-001-0,e101-004-0'
     print 'opx-config-vrf  --removeport --vrf blue --port e101-001-0,e101-004-0'
-    print 'opx-config-vrf  --show    [--name blue]'
+    print 'opx-config-vrf  --show    [--vrf blue]'
     sys.exit(1)
 
 
@@ -130,7 +136,7 @@ def commit(op, obj):
     if ret == False:
         print "Configuration Failed..."
     else:
-        print "Configuration Successful..."
+        pass
     return ret
 
 def _port_name_list(ports):

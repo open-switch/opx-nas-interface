@@ -93,7 +93,7 @@ static cps_api_return_code_t nas_vrf_add_obj(const nas_vrf_ctrl_t &vrf_ctrl_bloc
 
     cps_api_object_t obj = cps_api_object_create();
     if(obj == NULL){
-        NAS_VRF_LOG_ERR("VRF-INTF-GET", "Failed to allocate memory to cps object");
+        NAS_VRF_LOG_ERR("VRF-ADD", "Failed to allocate memory to cps object");
         return cps_api_ret_code_ERR;
     }
 
@@ -105,7 +105,7 @@ static cps_api_return_code_t nas_vrf_add_obj(const nas_vrf_ctrl_t &vrf_ctrl_bloc
                     strlen(vrf_ctrl_block.vrf_name) + 1);
     if (!cps_api_object_list_append(param_list, obj)) {
         cps_api_object_delete(obj);
-        NAS_VRF_LOG_ERR("VRF-INTF-GET", "Object append to list is failed for %s", vrf_ctrl_block.vrf_name);
+        NAS_VRF_LOG_ERR("VRF-ADD", "Object append to list is failed for %s", vrf_ctrl_block.vrf_name);
         return cps_api_ret_code_ERR;
     }
 

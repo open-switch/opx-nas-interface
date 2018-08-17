@@ -1,3 +1,12 @@
+opx-nas-interface (5.18.0+opx8) unstable; urgency=medium
+
+  * Bugfix: opx-vrf-config script so success message isn't display 
+            multiple times
+  * Bugfix: network restart script to address fanned out interface
+            issues
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Thu, 16 Aug 2018 19:20:56 -0800
+
 opx-nas-interface (5.18.0+opx7) unstable; urgency=medium
 
   * Bugfix: Remove useless imported libraries from cps_config_lag.py
