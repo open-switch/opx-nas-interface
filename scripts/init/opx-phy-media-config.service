@@ -1,7 +1,7 @@
 [Unit]
 Description=Physical media configuration function provider
-After=opx-cps.service
-Requires=opx-cps.service
+After=opx-cps.service opx-create-interface.service
+Requires=opx-cps.service opx-create-interface.service
 OnFailure=service_onfailure@%n.service
 
 [Service]
