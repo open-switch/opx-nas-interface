@@ -1,3 +1,9 @@
+opx-nas-interface (5.18.0+opx9) unstable; urgency=medium
+
+  * Bugfix: 10g port is not coming up in S5148 (changed the dependency on opx-phy-media-config.service file)
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Wed, 05 Sep 2018 19:06:56 -0800
+
 opx-nas-interface (5.18.0+opx8) unstable; urgency=medium
 
   * Bugfix: opx-vrf-config script so success message isn't display 
