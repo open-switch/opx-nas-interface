@@ -1,7 +1,7 @@
 [Unit]
 Description=Front panel port object access handler
-After=opx-cps.service opx-nas.service
-Requires=opx-cps.service opx-nas.service
+After=opx-cps.service opx-nas.service opx-pas.service opx-phy-media-config.service
+Requires=opx-cps.service opx-nas.service opx-pas.service opx-phy-media-config.service
 OnFailure=service_onfailure@%n.service
 
 [Service]

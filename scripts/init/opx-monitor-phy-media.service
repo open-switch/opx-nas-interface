@@ -1,7 +1,7 @@
 [Unit]
 Description=Physical media event handler
-After=opx-cps.service opx-create-interface.service
-Requires=opx-cps.service opx-create-interface.service
+After=opx-cps.service opx-front-panel-ports.service
+Requires=opx-cps.service opx-front-panel-ports.service
 OnFailure=service_onfailure@%n.service
 
 [Service]

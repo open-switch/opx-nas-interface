@@ -1,3 +1,9 @@
+opx-nas-interface (5.18.0+opx11) unstable; urgency=medium
+
+  * Update: Service start-up sequence
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Fri, 14 Sep 2018 11:41:56 -0800
+
 opx-nas-interface (5.18.0+opx10) unstable; urgency=medium
 
   * Bugfix: Reverted the earlier change in opx-phy-media-config.service
@@ -12,7 +18,7 @@ opx-nas-interface (5.18.0+opx9) unstable; urgency=medium
 
 opx-nas-interface (5.18.0+opx8) unstable; urgency=medium
 
-  * Bugfix: opx-vrf-config script so success message isn't display 
+  * Bugfix: opx-vrf-config script so success message isn't display
             multiple times
   * Bugfix: network restart script to address fanned out interface
             issues
@@ -59,7 +65,7 @@ opx-nas-interface (5.18.0+opx4) unstable; urgency=medium
 opx-nas-interface (5.18.0+opx3) unstable; urgency=medium
 
   * Bugfix: SSH connection lost during package installation
-  * Bugfix: Installation hangs due to service start-up order 
+  * Bugfix: Installation hangs due to service start-up order
 
  -- Dell EMC <ops-dev@lists.openswitch.net>  Fri, 13 Jul 2018 17:17:56 -0800
 
@@ -68,9 +74,9 @@ opx-nas-interface (5.18.0+opx2) unstable; urgency=medium
   * Bugfix: Properly update/publish LAG operation-state information
   * Bugfix: Minor speed improvements
   * Bugfix: cps_config_lag.py script to add memberports properly
- 
+
  -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 09 Jul 2018 17:17:56 -0800
- 
+
 opx-nas-interface (5.18.0+opx1) unstable; urgency=medium
 
   * Bugfix: Sending sequential hwport offset value from port group object to PAS
@@ -86,7 +92,7 @@ opx-nas-interface (5.18.0+opx1) unstable; urgency=medium
  -- Dell EMC <ops-dev@lists.openswitch.net>  Thu, 05 Jul 2018 17:17:56 -0800
 
 opx-nas-interface (5.18.0) unstable; urgency=medium
-  
+
   * Update: VLAN interface-state get-handler
 
  -- Dell EMC <ops-dev@lists.openswitch.net>  Thu, 28 Jun 2018 17:17:56 -0800
@@ -107,11 +113,11 @@ opx-nas-interface (5.17.0) unstable; urgency=medium
             from VLAN
   * Bugfix: FEC is not shown on 100g and 25g interface
   * Bugfix: WFB negotiation is turned off by default
-  * Bugfix: Set NPU port correctly for a member in a bridge for 
+  * Bugfix: Set NPU port correctly for a member in a bridge for
             mapped/unmapped events/
 
  -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 18 Jun 2018 17:17:56 -0800
- 
+
 opx-nas-interface (5.10.1+opx15) unstable; urgency=medium
 
   * Bugfix: Fix error when configuring block and unblock LAG memberports in
@@ -125,7 +131,7 @@ opx-nas-interface (5.10.1+opx14) unstable; urgency=medium
 
  -- Dell EMC <ops-dev@lists.openswitch.net>  Wed, 18 Apr 2018 17:17:56 -0800
 opx-nas-interface (5.10.1+opx13) unstable; urgency=medium
-  
+
   * Bugfix: Crash LAG name doesn't have a number during interface creation
 
  -- Dell EMC <ops-dev@lists.openswitch.net>  Thu, 12 Apr 2018 17:17:56 -0800
@@ -143,7 +149,7 @@ opx-nas-interface (5.10.1+opx11) unstable; urgency=medium
  -- Dell EMC <ops-dev@lists.openswitch.net>  Fri, 23 Mar 2018 15:07:52 -0800
 
 opx-nas-interface (5.10.1+opx10) unstable; urgency=medium
-  
+
   * Bugfix: delete LAG when there are member ports fail.
   * Bugfix: Fix opx-nas-common dependency
 
