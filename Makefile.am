@@ -18,8 +18,6 @@ AM_LDFLAGS=-shared -version-info 1:1:0 -levent
 libopx_nas_interface_la_SOURCES=src/swp_util_tap.c src/nas_int_main.cpp \
          src/nas_int_common_obj.cpp src/nas_int_list.c \
          src/nas_int_ev_handlers.cpp src/nas_int_base_if.cpp \
-         src/vlan/nas_int_bridge.cpp src/vlan/nas_int_vlan.cpp \
-         src/vlan/nas_vlan_cps.cpp src/vlan/nas_vlan_lag_api.cpp \
          src/lag/nas_int_lag.c src/lag/nas_int_lag_api.cpp src/lag/nas_int_lag_cps.cpp \
          src/port/hal_int_utils.c src/port/nas_int_logical_cps.cpp \
          src/port/nas_int_port.cpp src/port/nas_fc_intf.cpp src/port/nas_int_physical_cps.cpp \
@@ -30,7 +28,6 @@ libopx_nas_interface_la_SOURCES=src/swp_util_tap.c src/nas_int_main.cpp \
          src/nas_int_com_utils.cpp src/stats/nas_stats_utils.c \
          src/vrf/nas_vrf_api.cpp src/vrf/nas_vrf_cps.cpp \
          src/bridge/nas_interface_1d_bridge.cpp src/bridge/nas_interface_bridge.cpp \
-         src/bridge/nas_interface_bridge_update_vlan.cpp \
          src/bridge/nas_interface_1q_bridge.cpp   src/bridge/nas_interface_bridge_cps.cpp \
          src/bridge/nas_interface_bridge_utils.cpp \
          src/bridge/nas_interface_bridge_com.cpp  src/bridge/nas_interface_bridge_map.cpp  \
