@@ -9,7 +9,7 @@ Type=oneshot
 RemainAfterExit=yes
 EnvironmentFile=/etc/opx/opx-environment
 ExecStart=/usr/bin/python -u /usr/bin/base_nas_create_interface.py
-ExecStartPost=/bin/sh -c "/bin/sh -c /usr/bin/base_nas_fanout_init.sh && /usr/bin/network_restart.sh"
+ExecStartPost=/usr/bin/python -u /usr/bin/base_nas_fanout_init.py && "/bin/sh -c /usr/bin/network_restart.sh"
 TimeoutStartSec=180
 
 [Install]

@@ -18,11 +18,13 @@ from xml.dom import minidom
 import event_log as ev
 from time import sleep
 import os
+import sys
 import subprocess
 import cps
 import nas_os_if_utils as nas_if
 
 fanout_config_file = "/etc/opx/dn_nas_fanout_init_config.xml"
+nocreate_file = "/etc/opx/nas_if_nocreate"
 
 def parse_intf_config(intf_list):
     """parse the fanout config from xml and
@@ -59,6 +61,9 @@ def parse_config_file():
 
 
 if __name__ == '__main__':
+
+    if os.path.isfile(nocreate_file):
+        sys.exit(0) 
 
     # Wait till interface service is ready
     while nas_if.nas_os_if_list() == None:
