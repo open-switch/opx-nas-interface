@@ -41,7 +41,7 @@ def check_intf_presence(intf_name):
 
 def test_fanout_100g_to_10g():
      print '=========== Configuring fanout for %s with Mode 4x1 and 10G Speed ===========' % ifname
-     cmd_str = '/opt/dell/opx/bin/opx-config-fanout ' + ifname + ' 4x1 10G'
+     cmd_str = '/usr/bin/opx-config-fanout ' + ifname + ' 4x1 10G'
      os.system(cmd_str)
      temp = ifname[:-1] + str(4)
      assert check_intf_presence(temp) == 0
@@ -50,13 +50,13 @@ def revert_fanout_100g():
      #Deleting the fanout config using one of the newly created fanout interface
      print '=========== Deleting fanout for %s =========== ' % ifname
      temp = ifname[:-1] + str(2)
-     cmd_str = '/opt/dell/opx/bin/opx-config-fanout ' + temp + ' 1x1 100G'
+     cmd_str = '/usr/bin/opx-config-fanout ' + temp + ' 1x1 100G'
      return os.system(cmd_str)
 
 def test_fanout_100g_to_25g():
      revert_fanout_100g()
      print '=========== Configuring fanout for %s with Mode 4x1 and 25G Speed ===========' % ifname
-     cmd_str = '/opt/dell/opx/bin/opx-config-fanout ' + ifname + ' 4x1 25G'
+     cmd_str = '/usr/bin/opx-config-fanout ' + ifname + ' 4x1 25G'
      os.system(cmd_str)
      temp = ifname[:-1] + str(3)
      assert check_intf_presence(temp) == 0
@@ -64,7 +64,7 @@ def test_fanout_100g_to_25g():
 def test_fanout_100g_to_50g():
      revert_fanout_100g()
      print '=========== Configuring fanout for %s with Mode 2x1 and 50G Speed ===========' % ifname
-     cmd_str = '/opt/dell/opx/bin/opx-config-fanout ' + ifname + ' 2x1 50G'
+     cmd_str = '/usr/bin/opx-config-fanout ' + ifname + ' 2x1 50G'
      os.system(cmd_str)
      temp = ifname[:-1] + str(2)
      assert check_intf_presence(temp) == 0

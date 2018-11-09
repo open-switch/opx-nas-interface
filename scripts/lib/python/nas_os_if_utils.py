@@ -19,8 +19,10 @@ import cps_object
 import bytearray_utils
 import event_log as ev
 
-from nas_common_header import *
 import nas_common_header as nas_comm
+import nas_media_config as media_config
+import nas_yang_values as yv
+
 
 nas_os_if_keys = {'interface': 'dell-base-if-cmn/if/interfaces/interface',
         'interface-state': 'dell-base-if-cmn/if/interfaces-state/interface',
@@ -212,6 +214,22 @@ class IfComponentCache(object):
     def len(self):
         return len(self.m)
 
+    def __len__(self):
+        return self.len()
+
+    def __delitem__(self, name):
+        if self.exists(name):
+            del self.m[name]
+
+    def __getitem__(self, name):
+        return self.get(name)
+
+    def __iter__(self):
+        return iter(self.m)
+
+    def items(self):
+        for item in self.m.items():
+            yield item
 
 class FpPortCache(IfComponentCache):
 
@@ -233,7 +251,6 @@ class FpPortCache(IfComponentCache):
 
     def get_by_media_id(self, media_id):
         return self.get(self.make_media_key(media_id))
-
 
 class PhyPortCache(IfComponentCache):
 
@@ -301,8 +318,8 @@ def is_40g_mode_on_100g_port(fp_obj):
         log_err('Unable to find supported-speed from cps object')
         return False
     # Checking if default port speed is 100g and port speed is 40g
-    if (def_port_speed == nas_comm.get_value(nas_comm.yang_speed,'100G') and 
-        port_speed == nas_comm.get_value(nas_comm.yang_speed,'40G')):
+    if (def_port_speed == nas_comm.yang.get_value('100g', 'yang-speed') and
+        port_speed == nas_comm.yang.get_value('40g', 'yang-speed')):
         log_info('100G physical port was configured as 40G breakout mode')
         return True
     return False
@@ -343,7 +360,7 @@ def make_interface_from_phy_port(obj, mode = None, speed = None):
         mode = elem.get_attr_data('fanout-mode')
     if speed is None:
         speed = _yang_auto_speed
-    _subport = lane_to_subport(mode, lane, is_40g_mode_on_100g_port(fp_obj))
+    _subport = nas_comm.lane_to_subport(mode, lane, is_40g_mode_on_100g_port(fp_obj))
     if _subport is None:
         raise Exception('Failed to get subport id from br_mode %d lane %d' % (
                         mode, lane))
@@ -364,7 +381,7 @@ def make_interface_from_phy_port(obj, mode = None, speed = None):
         'dell-if/if/interfaces/interface/mtu': _mtu,
         'dell-if/if/interfaces/interface/negotiation':_yang_auto_neg,
         'dell-if/if/interfaces/interface/speed':speed,
-        'dell-if/if/interfaces/interface/duplex':nas_comm.get_value(yang_duplex,'auto'),
+        'dell-if/if/interfaces/interface/duplex': nas_comm.yang.get_value('auto', 'yang-duplex'),
         'if/interfaces/interface/type':_g_if_eth_type})
 
     return ifobj
@@ -390,14 +407,16 @@ def physical_ports_for_front_panel_port(fp_obj):
     phy_port_cache = PhyPortCache()
 
     for i in ports:
-        _port = cps_object.types.from_data(
-            'base-if-phy/front-panel-port/port',
-            i)
-        phy_port = phy_port_cache.get_by_hw_port(npu, _port)
-        if phy_port is None:
-            continue
-        phy_port.add_attr('front-panel-number', fp_port)
-        phy_port_list.append(phy_port)
+        try:
+            _port = cps_object.types.from_data('base-if-phy/front-panel-port/port', i)
+            phy_port = phy_port_cache.get_by_hw_port(npu, _port)
+            if phy_port is None:
+                continue
+            phy_port.add_attr('front-panel-number', fp_port)
+            phy_port_list.append(phy_port)
+        except:
+            log_err("Physical port get failed")
+            pass
 
     return phy_port_list
 

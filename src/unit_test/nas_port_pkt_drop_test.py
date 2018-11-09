@@ -1,4 +1,5 @@
 import subprocess
+import pytest
 import cps
 import cps_object
 

@@ -1,0 +1,13 @@
+[Unit]
+Description=NAS interface manager
+After=opx-cps.service opx-nas.service
+Requires=opx-cps.service opx-nas.service
+
+[Service]
+Type=notify
+EnvironmentFile=/etc/opx/opx-environment
+ExecStart=/usr/bin/python -u /usr/bin/base_interface_manager.py
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target

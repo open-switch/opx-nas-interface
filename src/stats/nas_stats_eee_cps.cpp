@@ -57,7 +57,7 @@ static bool nas_get_ifindex (cps_api_object_t obj,
 
 
     if (if_index_attr == NULL && if_name_attr == NULL) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-STAT",
+        EV_LOGGING (NAS_INT_STATS, ERR, "NAS-STAT",
                    "Missing Name/ifindex attribute for STAT Get");
         return false;
     }
@@ -72,7 +72,7 @@ static bool nas_get_ifindex (cps_api_object_t obj,
         strncpy(i.if_name,name,sizeof(i.if_name)-1);
         i.q_type = HAL_INTF_INFO_FROM_IF_NAME;
         if (dn_hal_get_interface_info(&i)!=STD_ERR_OK){
-            EV_LOGGING(INTERFACE, INFO, "NAS-STAT",
+            EV_LOGGING (NAS_INT_STATS, ERR, "NAS-STAT",
                        "Can't get interface control information for %s", name);
             return false;
         }
@@ -91,7 +91,7 @@ static cps_api_return_code_t if_eee_stats_clear (void *context,
         = cps_api_object_type_operation(cps_api_object_key(obj));
 
     if (op != cps_api_oper_ACTION) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-EEE-STATS",
+        EV_LOGGING (NAS_INT_STATS, ERR, "NAS-EEE-STATS",
                    "Invalid operation %d for clearing stat", op);
         return (cps_api_ret_code_ERR);
     }
@@ -111,7 +111,7 @@ static cps_api_return_code_t if_eee_stats_clear (void *context,
      * Sanity
      */
     if (dn_hal_get_interface_info(&intf_ctrl) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-EEE-STATS",
+        EV_LOGGING (NAS_INT_STATS, ERR, "NAS-EEE-STATS",
                    "Interface %d has NO slot %d, port %d",
                    intf_ctrl.if_index, intf_ctrl.npu_id, intf_ctrl.port_id);
         return (cps_api_ret_code_ERR);
@@ -122,12 +122,12 @@ static cps_api_return_code_t if_eee_stats_clear (void *context,
      */
     if (ndi_port_clear_eee_stats(intf_ctrl.npu_id, intf_ctrl.port_id)
         != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-EEE-STATS", "NDI failed");
+        EV_LOGGING (NAS_INT_STATS, ERR, "NAS-EEE-STATS", "NDI failed");
 
         return (cps_api_ret_code_ERR);
     }
 
-    EV_LOGGING(INTERFACE, DEBUG, "NAS-EEE-STATS", "leaving");
+    EV_LOGGING (NAS_INT_STATS, DEBUG, "NAS-EEE-STATS", "leaving");
 
     return cps_api_ret_code_OK;
 }
@@ -147,7 +147,7 @@ extern "C" t_std_error nas_eee_stats_if_init (cps_api_operation_handle_t handle)
 
     if (!cps_api_key_from_attr_with_qual(&f.key, DELL_BASE_IF_CMN_DELL_IF_CLEAR_EEE_COUNTERS_INPUT_OBJ,
                                          cps_api_qualifier_TARGET)) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-EEE-STATS",
+        EV_LOGGING (NAS_INT_STATS, ERR, "NAS-EEE-STATS",
                    "Could not translate %d to key %s",
                    DELL_BASE_IF_CMN_DELL_IF_CLEAR_EEE_COUNTERS_INPUT_OBJ,
                    cps_api_key_print(&f.key, buff, sizeof(buff) - 1));

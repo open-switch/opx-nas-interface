@@ -39,6 +39,8 @@ class nas_intf_obj {
 
     hal_ifindex_t  m_if_idx;
     std::string    m_if_name;
+    int tagged_cnt = 0;
+    int untagged_cnt = 0;
     std::list<if_master_info_t> m_list;
 
 public:
@@ -57,6 +59,8 @@ public:
     std::list<if_master_info_t> nas_intf_obj_master_list(void) const {
         return m_list;
     }
+    // Return tagged / untagged count
+    std::pair<int, int> nas_intf_obj_untag_tag_cnt(void);
 
     bool nas_intf_obj_is_mlist_empty(void) const {
         return m_list.empty();
@@ -83,9 +87,14 @@ public:
     void nas_intf_del_object(hal_ifindex_t ifx);
 
     bool nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info);
+    bool nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info, BASE_IF_MODE_t *new_mode, bool *mode_change);
     bool nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info);
+    bool nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info, BASE_IF_MODE_t *new_mode, bool *mode_change);
+    bool nas_intf_update_master(hal_ifindex_t ifx, if_master_info_t m_info, bool add, BASE_IF_MODE_t *new_mode,
+                                                                            bool *mode_change);
     void nas_intf_master_callbk(hal_ifindex_t ifx, master_fn_type fn);
     std::list<if_master_info_t> nas_intf_get_master_list(hal_ifindex_t ifx);
+    std::pair<int,int> nas_intf_get_untag_tag_cnt(hal_ifindex_t ifx);
     BASE_IF_MODE_t nas_intf_get_mode(hal_ifindex_t ifx);
 
     //Debug routine

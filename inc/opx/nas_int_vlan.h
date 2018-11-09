@@ -28,6 +28,7 @@
 #include "nas_int_bridge.h"
 #include "nas_int_com_utils.h"
 #include <stdbool.h>
+#include <string>
 
 #define MIN_VLAN_ID 1
 #define MAX_VLAN_ID 4094
@@ -49,6 +50,7 @@ t_std_error nas_delete_lag_from_vlan_in_npu(hal_ifindex_t ifindex ,hal_vlan_id_t
                  nas_port_mode_t port_mode);
 t_std_error nas_process_lag_for_vlan_del(nas_list_t *p_list,
                                               hal_ifindex_t if_index);
+
 cps_api_return_code_t nas_cps_set_vlan_mac(cps_api_object_t obj, nas_bridge_t *p_bridge);
 
 /**
@@ -124,9 +126,9 @@ t_std_error nas_vlan_get_all_info(cps_api_object_list_t list);
  *
  * @return : Standard error code
  */
-t_std_error nas_get_vlan_intf(const char *if_name, hal_ifindex_t ifindex, cps_api_object_list_t list, bool get_state);
+t_std_error nas_get_vlan_intf(const char *if_name, hal_ifindex_t ifindex, cps_api_object_list_t list);
 
-t_std_error nas_get_vlan_intf_from_vid(hal_vlan_id_t vid, cps_api_object_list_t list, bool get_state);
+t_std_error nas_get_vlan_intf_from_vid(hal_vlan_id_t vid, cps_api_object_list_t list);
 t_std_error nas_register_vlan_intf(nas_bridge_t *p_bridge, hal_intf_reg_op_type_t op);
 cps_api_return_code_t nas_publish_vlan_object(nas_bridge_t *p_bridge_node, cps_api_operation_types_t op);
 
@@ -144,7 +146,7 @@ t_std_error nas_lag_add_del_vlan_update(hal_ifindex_t lag_index, hal_vlan_id_t,
 t_std_error nas_handle_lag_add_to_vlan(nas_bridge_t *p_bridge, hal_ifindex_t lag_index,
                               nas_port_mode_t port_mode, bool cps_add, vlan_roll_bk_t *roll_bk);
 t_std_error  nas_handle_lag_del_from_vlan(nas_bridge_t *p_bridge, hal_ifindex_t lag_index,
-                nas_port_mode_t port_mode, bool cps_del ,vlan_roll_bk_t *roll_bk);
+                nas_port_mode_t port_mode, bool cps_del ,vlan_roll_bk_t *roll_bk,bool migrate);
 
 t_std_error nas_cps_del_port_from_os(hal_vlan_id_t vlan_id, hal_ifindex_t port_index,
                                      nas_port_mode_t port_mode, BASE_IF_MODE_t vlan_mode);
@@ -159,4 +161,6 @@ t_std_error nas_handle_lag_index_in_cps_set(nas_bridge_t *p_bridge, nas_port_lis
                                             nas_port_mode_t port_mode, vlan_roll_bk_t *roll_bk);
 t_std_error nas_add_or_del_lag_in_vlan(hal_ifindex_t lag_index, hal_vlan_id_t vlan_id,
                                               nas_port_mode_t port_mode, bool add_flag, bool roll_bk);
+
+bool get_parent_bridge_info(const std::string & bridge_name, interface_ctrl_t & entry);
 #endif /* NAS_INTF_VLAN_H_ */

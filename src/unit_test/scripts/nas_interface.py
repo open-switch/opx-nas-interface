@@ -5,7 +5,9 @@ import cps_object
 import cps_utils
 import os
 import argparse
-from nas_common_header import *
+import nas_common_header as nas_comm
+import nas_yang_values as yv
+yang = yv.YangValues()
 
 def get_cps_object(module_name, attr_list = {}, qual='target'):
     cps_obj = cps_object.CPSObject(module = module_name, qual = qual, data = attr_list)
@@ -36,23 +38,20 @@ def extract_intf_attr(args, attr_list):
             key_val = int(args.speed)
         else:
             key_val = args.speed
-        if is_key_valid(mbps_to_yang_speed, key_val):
-            attr_list['dell-if/if/interfaces/interface/speed'] = get_value(
-                    mbps_to_yang_speed, key_val)
-        elif is_key_valid(yang_to_mbps_speed, key_val):
+        if key_val in nas_comm.yang.get_tbl('mbps-to-yang-speed'):
+            attr_list['dell-if/if/interfaces/interface/speed'] = nas_comm.yang.get_tbl('mbps-to-yang-speed')[key_val]
+        elif key_val in nas_comm.yang.get_tbl('yang-to-mbps-speed'):
             attr_list['dell-if/if/interfaces/interface/speed'] = key_val
         else:
             print 'Invalid speed setting: %s' % args.speed
     if args.negotiation != None:
-        if is_key_valid(yang_autoneg, args.negotiation):
-            attr_list['dell-if/if/interfaces/interface/negotiation'] = get_value(
-                    yang_autoneg, args.negotiation)
+        if args.negotiation in nas_comm.yang.get_tbl('yang-autoneg'):
+            attr_list['dell-if/if/interfaces/interface/negotiation'] = nas_comm.yang.get_value(args.negotiation, 'yang-autoneg')
         else:
             print 'Invalid negotiation setting: %s' % args.negotiation
     if args.duplex != None:
-        if is_key_valid(yang_duplex, args.duplex):
-            attr_list['dell-if/if/interfaces/interface/duplex'] = get_value(
-                    yang_duplex, args.duplex)
+        if args.duplex in nas_comm.yang.get_tbl('yang-duplex'):
+            attr_list['dell-if/if/interfaces/interface/duplex'] = nas_comm.yang.get_value(args.duplex, 'yang-duplex')
         else:
             print 'Invalid duplex setting: %s' % args.duplex
     if args.fec != None:
@@ -61,9 +60,8 @@ def extract_intf_attr(args, attr_list):
         elif args.fec == 'cl74':
             args.fec += '-fc'
         args.fec = args.fec.upper()
-        if is_key_valid(yang_fec_mode, args.fec):
-            attr_list['dell-if/if/interfaces/interface/fec'] = get_value(
-                    yang_fec_mode, args.fec)
+        if args.fec in nas_comm.yang.get_tbl('yang-fec'):
+            attr_list['dell-if/if/interfaces/interface/fec'] = nas_comm.yang.get_value(args.fec, 'yang-fec')
         else:
             print 'Invalid fec setting: %s' % args.fec
 

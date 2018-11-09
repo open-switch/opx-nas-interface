@@ -46,14 +46,47 @@ bool nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info)
     return true;
 }
 
+bool nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info, BASE_IF_MODE_t *new_mode, bool *mode_change)
+{
+    try {
+        if_cont_inst->nas_intf_add_master(ifx, m_info, new_mode, mode_change);
+    } catch (std::exception& e) {
+        EV_LOGGING(INTERFACE,ERR,"IF_CONT", "%s", e.what());
+        return false;
+    }
+
+    return true;
+}
 bool nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info)
 {
     return if_cont_inst->nas_intf_del_master(ifx, m_info);
 }
 
+bool nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info, BASE_IF_MODE_t *new_mode, bool *mode_change)
+{
+    return if_cont_inst->nas_intf_del_master(ifx, m_info, new_mode, mode_change);
+}
+
+
+bool nas_intf_update_master(hal_ifindex_t ifx, if_master_info_t m_info, bool add, BASE_IF_MODE_t *new_mode, bool *mode_change)
+{
+    if(add) {
+        return (nas_intf_add_master(ifx, m_info, new_mode, mode_change));
+    } else {
+        return (nas_intf_del_master(ifx, m_info, new_mode, mode_change));
+    }
+    return false;
+}
+
 void nas_intf_master_callback(hal_ifindex_t ifx, std::function< void (if_master_info_t)> fn)
 {
     if_cont_inst->nas_intf_master_callbk(ifx, fn);
+}
+
+std::pair<int,int> nas_intf_untag_tag_count(hal_ifindex_t ifx)
+{
+     return if_cont_inst->nas_intf_get_untag_tag_cnt(ifx);
+
 }
 
 std::list<if_master_info_t> nas_intf_get_master(hal_ifindex_t ifx)
@@ -92,6 +125,24 @@ void nas_intf_container::nas_intf_del_object(hal_ifindex_t ifx) {
     }
 }
 
+bool nas_intf_container::nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info,
+                                                BASE_IF_MODE_t *new_mode, bool *mode_change) {
+
+    std_rw_lock_write_guard lg(&rw_lock);
+    *mode_change = false;
+
+    auto itr = if_objects.find(ifx);
+
+    if(itr == if_objects.end()) {
+        itr = nas_intf_add_object(ifx);
+        *new_mode = BASE_IF_MODE_MODE_L2;
+        *mode_change = true;
+    }
+
+    auto& ptr = itr->second;
+    return ptr->nas_intf_obj_master_add(m_info);
+}
+
 bool nas_intf_container::nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info) {
 
     std_rw_lock_write_guard lg(&rw_lock);
@@ -106,6 +157,30 @@ bool nas_intf_container::nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t
     return ptr->nas_intf_obj_master_add(m_info);
 }
 
+bool nas_intf_container::nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info,
+                                                BASE_IF_MODE_t *new_mode, bool *mode_change) {
+
+    std_rw_lock_write_guard lg(&rw_lock);
+    *mode_change = false;
+
+    auto itr = if_objects.find(ifx);
+
+    //Interface object not created
+    if(itr == if_objects.end()) {
+        return false;
+    }
+
+    auto& ptr = itr->second;
+    auto rc = ptr->nas_intf_obj_master_delete(m_info);
+    if(ptr->nas_intf_obj_is_mlist_empty()) {
+        /*  If mester list has become empty then Intf mode changes from L2 to NONE */
+        *new_mode = BASE_IF_MODE_MODE_NONE;
+        *mode_change = true;
+        nas_intf_del_object(ifx);
+    }
+
+    return rc;
+}
 bool nas_intf_container::nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info) {
 
     std_rw_lock_write_guard lg(&rw_lock);
@@ -140,6 +215,20 @@ void nas_intf_container::nas_intf_master_callbk(hal_ifindex_t ifx, master_fn_typ
     ptr->nas_intf_obj_for_each_master(fn);
 }
 
+std::pair<int,int> nas_intf_container::nas_intf_get_untag_tag_cnt(hal_ifindex_t ifx) {
+    std_rw_lock_read_guard lg(&rw_lock);
+
+    auto itr = if_objects.find(ifx);
+
+    //Return -1 if interface not created
+    if(itr == if_objects.end()) {
+        return std::make_pair(-1,-1);
+    }
+    auto& ptr = itr->second;
+    return ptr->nas_intf_obj_untag_tag_cnt();
+
+
+}
 std::list<if_master_info_t> nas_intf_container::nas_intf_get_master_list(hal_ifindex_t ifx) {
 
     std::list<if_master_info_t> tmp;
@@ -162,7 +251,6 @@ BASE_IF_MODE_t nas_intf_container::nas_intf_get_mode(hal_ifindex_t ifx) {
     std_rw_lock_read_guard lg(&rw_lock);
 
     auto itr = if_objects.find(ifx);
-
     return ((itr == if_objects.end())
             ? BASE_IF_MODE_MODE_NONE
             : BASE_IF_MODE_MODE_L2);
@@ -173,7 +261,11 @@ void nas_intf_container::nas_intf_dump_container(hal_ifindex_t ifx) noexcept {
     std_rw_lock_read_guard lg(&rw_lock);
 
     auto l_fn = [] (const std::unique_ptr<nas_intf_obj> & ptr) {
+
         auto list = ptr->nas_intf_obj_master_list();
+        auto untag_tag_pair = ptr->nas_intf_obj_untag_tag_cnt();
+        EV_LOGGING(INTERFACE,DEBUG,"IF_CONT", "Untagged cnt %d , tagged_cnt %d \n",
+                untag_tag_pair.first, untag_tag_pair.second);
         for(auto iy : list) {
             EV_LOGGING(INTERFACE,DEBUG,"IF_CONT", "Master idx %d, type %d, mode %d",
                        iy.m_if_idx, iy.type, iy.mode);
@@ -215,6 +307,16 @@ bool nas_intf_obj::nas_intf_obj_master_add(if_master_info_t m_info) {
     }else{
         m_list.push_back(m_info);
     }
+    if (m_info.type == nas_int_type_VLAN) {
+        if (m_info.mode == NAS_PORT_UNTAGGED) {
+            untagged_cnt ++;
+            EV_LOGGING(INTERFACE,DEBUG,"IF_CONT", "nas_intf_obj_master_add master %d untag_cnt %d", m_info.m_if_idx, untagged_cnt);
+        }
+        if (m_info.mode == NAS_PORT_TAGGED) {
+            tagged_cnt ++;
+            EV_LOGGING(INTERFACE,DEBUG,"IF_CONT", "nas_intf_obj_master_add master %d tag_cnt %d", m_info.m_if_idx, tagged_cnt);
+        }
+    }
 
     return true;
 }
@@ -223,11 +325,26 @@ bool nas_intf_obj::nas_intf_obj_master_delete(if_master_info_t m_info) {
 
     for(auto itr = m_list.begin(); itr != m_list.end(); ++itr) {
         if(itr->m_if_idx == m_info.m_if_idx) {
-            itr = m_list.erase(itr);
-            return true;
+            if (m_info.type == nas_int_type_VLAN) {
+                if (m_info.mode == NAS_PORT_UNTAGGED || m_info.mode == NAS_PORT_HYBRID) {
+                    untagged_cnt --;
+                }
+                if (m_info.mode == NAS_PORT_TAGGED || m_info.mode == NAS_PORT_HYBRID) {
+                    tagged_cnt --;
+                }
+            }
+        itr = m_list.erase(itr);
+        return true;
         }
     }
-
     //No master found
     return false;
+}
+
+
+std::pair<int, int> nas_intf_obj::nas_intf_obj_untag_tag_cnt(void) {
+    std::pair<int,int> val;
+    val.first = untagged_cnt;
+    val.second = tagged_cnt;
+    return val;
 }

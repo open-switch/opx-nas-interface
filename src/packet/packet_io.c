@@ -119,7 +119,7 @@ static void _sflow_sock_init ()
     t_std_error rc = std_socket_create (e_std_sock_INET4, e_std_sock_type_DGRAM,
                                         0, NULL, &sflow_sock_fd);
     if (rc != STD_ERR_OK) {
-        EV_LOG_ERR(ev_log_t_INTERFACE, ev_log_s_CRITICAL, "PKT-IO", "SFlow socket Error %d", rc);
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "SFlow socket Error %d", rc);
     }
     /* Set the SFlow pkt dest addr from default values. Will be made configurable in future */
 #define SFLOW_PKT_DEF_IP    "127.0.0.1"
@@ -127,7 +127,7 @@ static void _sflow_sock_init ()
     rc = std_sock_addr_from_ip_str (e_std_sock_INET4, SFLOW_PKT_DEF_IP,
                                     SFLOW_PKT_DEF_PORT, &sflow_sock_dest);
     if (rc != STD_ERR_OK) {
-        EV_LOG_ERR(ev_log_t_INTERFACE, ev_log_s_CRITICAL, "PKT-IO", "SFlow socket address creation error %d", rc);
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "SFlow socket address creation error %d", rc);
     }
 }
 
@@ -137,19 +137,19 @@ static t_std_error _sflow_pkt_hdl (uint8_t *pkt, uint32_t pkt_len,
     hal_ifindex_t rx_ifindex,tx_ifindex = 0;
 
     if (!nas_int_port_ifindex (p_attr->npu_id, p_attr->rx_port, &rx_ifindex)) {
-        EV_LOGGING (INTERFACE,DEBUG, "PKT-IO",
+        EV_LOGGING (NAS_PKT_IO, DEBUG, "PKT-IO",
                  "Interface invalid - no matching port %d:%d",
                 p_attr->npu_id, p_attr->rx_port);
         return STD_ERR (INTERFACE, PARAM, 0);
     }
 
     if (!nas_int_port_ifindex (p_attr->npu_id, p_attr->tx_port, &tx_ifindex)) {
-        EV_LOGGING (INTERFACE,DEBUG, "PKT-IO",
+        EV_LOGGING (NAS_PKT_IO, DEBUG, "PKT-IO",
                  "Interface invalid - no matching port %d:%d",
                 p_attr->npu_id, p_attr->tx_port);
     }
 
-    EV_LOGGING(INTERFACE,DEBUG,"PKT-IO","[RX] SFLOW Pkt received - length %d npu %d rx_ifindex %d"
+    EV_LOGGING (NAS_PKT_IO, DEBUG,"PKT-IO","[RX] SFLOW Pkt received - length %d npu %d rx_ifindex %d"
               " tx_ifindex %d sample count %lu\r\n",
               pkt_len, p_attr->npu_id, rx_ifindex,tx_ifindex,sample_count);
 
@@ -218,18 +218,18 @@ static cps_api_return_code_t _cps_api_read (void                 *context,
     cps_api_object_t filter_obj = cps_api_object_list_get (param->filters, index);
 
     if (cps_api_key_get_cat (cps_api_object_key (filter_obj)) != cps_api_obj_CAT_BASE_SFLOW) {
-        EV_LOG (ERR, INTERFACE, ev_log_s_MAJOR, "PKT-IO", "Invalid Category");
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "Invalid Category");
         return cps_api_ret_code_ERR;
     }
 
     if (cps_api_key_get_subcat (cps_api_object_key (filter_obj)) != BASE_SFLOW_SOCKET_ADDRESS_OBJ) {
-        EV_LOG (ERR, INTERFACE, ev_log_s_MAJOR, "PKT-IO", "Invalid Sub-Category");
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "Invalid Sub-Category");
         return cps_api_ret_code_ERR;
     }
 
     cps_api_object_t obj = cps_api_object_list_create_obj_and_append (param->list);
     if (!obj) {
-        EV_LOG (ERR, INTERFACE, ev_log_s_MAJOR, "PKT-IO",
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO",
                 "Obj Append failed. Index: %ld", index);
         return cps_api_ret_code_ERR;
     }
@@ -237,7 +237,7 @@ static cps_api_return_code_t _cps_api_read (void                 *context,
     if (!cps_api_key_from_attr_with_qual (cps_api_object_key (obj),
                                           BASE_SFLOW_SOCKET_ADDRESS_OBJ,
                                           cps_api_qualifier_TARGET)) {
-        EV_LOG (ERR, INTERFACE, ev_log_s_MAJOR, "PKT-IO",
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO",
                 "Failed to create Key from Table Object");
         return cps_api_ret_code_ERR;
     }
@@ -268,13 +268,13 @@ static cps_api_return_code_t _cps_api_write_int (void                         *c
 
     obj = cps_api_object_list_get (param->change_list, index);
     if (obj == NULL) {
-        EV_LOG (ERR, INTERFACE, ev_log_s_MAJOR, "PKT-IO", "Missing Change Object");
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "Missing Change Object");
         return cps_api_ret_code_ERR;
     }
 
     op = cps_api_object_type_operation (cps_api_object_key (obj));
     if (op != cps_api_oper_SET) {
-        EV_LOG (ERR, INTERFACE, ev_log_s_MAJOR, "PKT-IO", "Invalid operation");
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "Invalid operation");
         return cps_api_ret_code_ERR;
     }
 
@@ -293,7 +293,7 @@ static cps_api_return_code_t _cps_api_write_int (void                         *c
         switch (attr_id) {
             case BASE_SFLOW_SOCKET_ADDRESS_IP:
                 if (cps_api_object_attr_len (it.attr) < sizeof (ip)) {
-                    EV_LOG (ERR, INTERFACE, ev_log_s_MINOR, "PKT-IO",
+                    EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO",
                             "Invalid attribute %ld data length", attr_id);
                     return cps_api_ret_code_ERR;
                 }
@@ -311,7 +311,7 @@ static cps_api_return_code_t _cps_api_write_int (void                         *c
                 dirty = true;
                 break;
             default:
-                EV_LOG (ERR, INTERFACE, ev_log_s_MINOR, "PKT-IO",
+                EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO",
                         "Unknown attribute ignored %ld", attr_id);
                 break;
         }
@@ -349,20 +349,20 @@ static cps_api_return_code_t _cps_api_pf_read (void                 *context,
     cps_api_object_t filt = cps_api_object_list_get(param->filters,index);
 
     if (cps_api_key_get_subcat (cps_api_object_key (filt)) != BASE_PACKET_RULE_OBJ) {
-        EV_LOGGING (INTERFACE, ERR, "PKT-IO", "Invalid Sub-Category");
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "Invalid Sub-Category");
         return cps_api_ret_code_ERR;
     }
 
     cps_api_object_t obj = cps_api_object_list_create_obj_and_append (param->list);
     if (!obj) {
-        EV_LOGGING (INTERFACE, ERR, "PKT-IO","Obj Append failed");
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO","Obj Append failed");
         return cps_api_ret_code_ERR;
     }
 
     if (!cps_api_key_from_attr_with_qual (cps_api_object_key (obj),
                                           BASE_PACKET_RULE_OBJ,
                                           cps_api_qualifier_TARGET)) {
-        EV_LOGGING (INTERFACE, ERR, "PKT-IO", "Failed to create Key from Table Object");
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "Failed to create Key from Table Object");
         return cps_api_ret_code_ERR;
     }
 
@@ -382,7 +382,7 @@ static cps_api_return_code_t _cps_api_pf_write_int (void                        
 
     obj = cps_api_object_list_get (param->change_list, index);
     if (obj == NULL) {
-        EV_LOGGING (INTERFACE, ERR, "PKT-IO", "Missing Change Object");
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "Missing Change Object");
         return cps_api_ret_code_ERR;
     }
 
@@ -427,7 +427,7 @@ static t_std_error _cps_packet_filter_init(cps_api_operation_handle_t handle)
 
     /* Register for the control Packet Filter object */
     if (cps_api_register (&f) != cps_api_ret_code_OK) {
-        EV_LOGGING (INTERFACE, ERR, "PKT-IO", "CPS object Register failed");
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "CPS object Register failed");
         return STD_ERR(INTERFACE, FAIL, 0);
     }
 
@@ -443,7 +443,7 @@ static t_std_error _cps_init ()
     rc = cps_api_operation_subsystem_init (&handle,1);
 
     if (rc != cps_api_ret_code_OK) {
-        EV_LOG (ERR, INTERFACE, ev_log_s_CRITICAL, "PKT-IO",
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO",
                  "CPS Subsystem Init failed");
         return STD_ERR(INTERFACE, FAIL, rc);
     }
@@ -465,7 +465,7 @@ static t_std_error _cps_init ()
     rc = cps_api_register (&f);
 
     if (rc != cps_api_ret_code_OK) {
-        EV_LOG (ERR, INTERFACE, ev_log_s_CRITICAL, "PKT-IO",
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO",
                 "CPS object Register failed");
         return STD_ERR(INTERFACE, FAIL, rc);
     }
@@ -590,7 +590,7 @@ t_std_error hal_packet_io_main(void) {
     if (hal_virtual_interface_wait(dn_hal_packet_tx,
                                    dn_hal_packet_tx_to_ingress_pipeline,
                                    pkt_buf,MAX_PKT_LEN)!=STD_ERR_OK) {
-        EV_LOGGING (INTERFACE,ERR, "PKT-IO", "Error in initializing virtual interface packet tx");
+        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "Error in initializing virtual interface packet tx");
     }
 
     return STD_ERR_OK;

@@ -23,8 +23,7 @@ import dn_base_ip_tool
 import ifindex_utils
 import nas_mac_addr_utils as ma
 import nas_os_if_utils as nas_if
-
-ifindex_attr_name = 'dell-base-if-cmn/if/interfaces/interface/if-index'
+import nas_common_header as nas_comm
 
 def  set_loopback_interface(obj):
     name = None
@@ -85,7 +84,7 @@ def create_loopback_interface(obj, params):
         nas_if.log_info("loopback interface is created" +str(name))
         rc = set_loopback_interface(obj)
         if_index = ifindex_utils.if_nametoindex(name)
-        obj.add_attr(ifindex_attr_name, if_index)
+        obj.add_attr(nas_comm.yang.get_value('if_index', 'attr_name'), if_index)
         params['change'] = obj.get()
     return rc
 

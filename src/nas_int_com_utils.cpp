@@ -31,6 +31,7 @@
 #include "nas_int_utils.h"
 #include "nas_os_interface.h"
 #include "dell-base-routing.h"
+#include "dell-base-if-phy.h"
 #include "cps_api_operation.h"
 #include "cps_api_object_key.h"
 #include "cps_class_map.h"
@@ -52,7 +53,7 @@ t_std_error nas_get_if_type_from_name_or_ifindex (const char *if_name, hal_ifind
     }
 
     if (dn_hal_get_interface_info(&if_info) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, INFO ,"INTF-C","Failed to get if_info");
+        EV_LOGGING(INTERFACE, ERR,"INTF-C","Failed to get if_info");
         return STD_ERR(INTERFACE,FAIL, 0);
     }
     *ifindex = if_info.if_index;
@@ -68,7 +69,7 @@ bool nas_intf_handle_intf_mode_change (const char * if_name, BASE_IF_MODE_t mode
     cps_api_key_t                keys;
     bool                         rc = true;
 
-    EV_LOGGING(INTERFACE, DEBUG, "IF_CONT", "Interface mode change update called for %s", if_name);
+    EV_LOGGING(INTERFACE, DEBUG, "IF_CONT", "Interface mode change update called for %s, mode is  %d", if_name, mode);
     do {
         if ((obj = cps_api_object_create()) == NULL) {
             EV_LOGGING(INTERFACE,ERR,"IF_CONT", "Interface mode change update failed");
@@ -193,5 +194,74 @@ t_std_error nas_set_intf_admin_state_os(hal_ifindex_t if_index, bool admin_state
         return STD_ERR(INTERFACE,FAIL, 0);
     }
     return STD_ERR_OK;
+}
+
+bool if_data_from_obj(obj_intf_cat_t obj_cat, cps_api_object_t o, interface_ctrl_t& i) {
+    cps_api_object_attr_t _name = cps_api_get_key_data(o,(obj_cat == obj_INTF) ?
+                                                  (uint)IF_INTERFACES_INTERFACE_NAME:
+                                                  (uint)IF_INTERFACES_STATE_INTERFACE_NAME);
+    cps_api_object_attr_t _ifix = cps_api_object_attr_get(o,(obj_cat == obj_INTF) ?
+                                (uint)DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX:
+                                (uint)IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
+
+
+    cps_api_object_attr_t _npu = nullptr;
+    cps_api_object_attr_t _port = nullptr;
+
+    if (obj_cat == obj_INTF) {
+        _npu = cps_api_object_attr_get(o,BASE_IF_PHY_IF_INTERFACES_INTERFACE_NPU_ID);
+        _port = cps_api_object_attr_get(o,BASE_IF_PHY_IF_INTERFACES_INTERFACE_PORT_ID);
+    }
+
+    if (_ifix!=nullptr) {
+        memset(&i,0,sizeof(i));
+        i.if_index = cps_api_object_attr_data_u32(_ifix);
+        i.q_type = HAL_INTF_INFO_FROM_IF;
+        if (dn_hal_get_interface_info(&i)==STD_ERR_OK) return true;
+    }
+
+    if (_name!=nullptr) {
+        memset(&i,0,sizeof(i));
+        strncpy(i.if_name,(const char *)cps_api_object_attr_data_bin(_name),sizeof(i.if_name)-1);
+        i.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+        if (dn_hal_get_interface_info(&i)==STD_ERR_OK) return true;
+    }
+
+    if (_npu!=nullptr && _port!=nullptr &&
+        cps_api_object_attr_len(_npu) > 0 && cps_api_object_attr_len(_port) > 0) {
+        memset(&i,0,sizeof(i));
+        i.npu_id = cps_api_object_attr_data_u32(_npu);
+        i.port_id = cps_api_object_attr_data_u32(_port);
+        i.q_type = HAL_INTF_INFO_FROM_PORT;
+        if (dn_hal_get_interface_info(&i)==STD_ERR_OK) return true;
+    }
+
+    EV_LOGGING(INTERFACE,ERR,"IF-CPS-CREATE","Invalid fields - can't locate specified port");
+    return false;
+}
+
+#define SPEED_1MBPS (1000*1000)
+#define SPEED_1GIGE (uint64_t)(1000*1000*1000)
+static std::unordered_map<BASE_IF_SPEED_t, uint64_t ,std::hash<int>>
+_base_to_ietf64bit_speed = {
+    {BASE_IF_SPEED_0MBPS,                     0},
+    {BASE_IF_SPEED_10MBPS,       10*SPEED_1MBPS},
+    {BASE_IF_SPEED_100MBPS,     100*SPEED_1MBPS},
+    {BASE_IF_SPEED_1GIGE,         1*SPEED_1GIGE},
+    {BASE_IF_SPEED_10GIGE,       10*SPEED_1GIGE},
+    {BASE_IF_SPEED_20GIGE,       20*SPEED_1GIGE},
+    {BASE_IF_SPEED_25GIGE,       25*SPEED_1GIGE},
+    {BASE_IF_SPEED_40GIGE,       40*SPEED_1GIGE},
+    {BASE_IF_SPEED_50GIGE,       50*SPEED_1GIGE},
+    {BASE_IF_SPEED_100GIGE,     100*SPEED_1GIGE},
+};
+
+bool nas_base_to_ietf_state_speed(BASE_IF_SPEED_t speed, uint64_t *ietf_speed) {
+    auto it = _base_to_ietf64bit_speed.find(speed);
+    if (it != _base_to_ietf64bit_speed.end()) {
+        *ietf_speed = it->second;
+        return true;
+    }
+    return false;
 }
 

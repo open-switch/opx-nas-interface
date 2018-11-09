@@ -24,7 +24,6 @@
 #ifndef INTERFACE_OBJ_H_
 #define INTERFACE_OBJ_H_
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -28,8 +28,8 @@ subport_id_key = 'base-if-phy/hardware-port/subport-id'
 intf_types = {
                 'fc':'ianaift:fibreChannel',
                 'ether':'ianaift:ethernetCsmacd',
-		'lo':'ianaift:softwareLoopback',
-		'lag':'ianaift:ieee8023adLag'
+                'lo':'ianaift:softwareLoopback',
+                'lag':'ianaift:ieee8023adLag'
              }
 
 oper_type = {'create':'1','delete':'2','set':'3','get':'4'}

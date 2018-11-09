@@ -63,7 +63,7 @@ def parse_config_file():
 if __name__ == '__main__':
 
     if os.path.isfile(nocreate_file):
-        sys.exit(0) 
+            sys.exit(0)
 
     # Wait till interface service is ready
     while nas_if.nas_os_if_list() == None:

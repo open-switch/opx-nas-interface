@@ -17,7 +17,6 @@ import sys
 import getopt
 import cps
 import cps_utils
-import nas_ut_framework as nas_ut
 import nas_os_utils
 import cps_object
 import nas_os_if_utils as nas_if

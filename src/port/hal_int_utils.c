@@ -46,7 +46,7 @@ bool nas_is_non_npu_phy_port(hal_ifindex_t if_index) {
     }
     return false;
 }
-int nas_int_name_to_if_index(hal_ifindex_t *if_index, const char *name) {
+t_std_error nas_int_name_to_if_index(hal_ifindex_t *if_index, const char *name) {
 
     interface_ctrl_t intf_ctrl;
     t_std_error rc = STD_ERR_OK;
@@ -152,6 +152,27 @@ t_std_error nas_get_int_type(hal_ifindex_t index, nas_int_type_t *type)
 
     intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF;
     intf_ctrl.if_index = index;
+
+    if((rc= dn_hal_get_interface_info(&intf_ctrl)) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-INT",
+                   "Interface %d returned error %d", \
+                    intf_ctrl.if_index, rc);
+
+        return STD_ERR(INTERFACE,FAIL, rc);
+    }
+
+    *type = intf_ctrl.int_type;
+    return STD_ERR_OK;
+}
+t_std_error nas_get_int_name_type(const char *name, nas_int_type_t *type)
+{
+    interface_ctrl_t intf_ctrl;
+    t_std_error rc = STD_ERR_OK;
+
+    memset(&intf_ctrl, 0, sizeof(interface_ctrl_t));
+
+    intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+    safestrncpy(intf_ctrl.if_name, name, strlen(name)+1);
 
     if((rc= dn_hal_get_interface_info(&intf_ctrl)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, DEBUG, "NAS-INT",

@@ -37,8 +37,10 @@
 #include "nas_ndi_port.h"
 #include "nas_int_utils.h"
 #include "std_utils.h"
+#include "vrf-mgmt.h"
 #include "dell-interface.h"
 #include "ietf-interfaces.h"
+#include "nas_os_interface.h"
 
 #include <time.h>
 #include <chrono>
@@ -77,7 +79,7 @@ nas_stat_get_name_from_obj(cps_api_object_t obj, char *if_name, size_t name_sz) 
     cps_api_object_attr_t if_name_attr = cps_api_get_key_data(obj, IF_INTERFACES_STATE_INTERFACE_NAME);
     cps_api_object_attr_t if_index_attr = cps_api_object_attr_get(obj,IF_INTERFACES_STATE_INTERFACE_IF_INDEX );
     if (if_index_attr == NULL && if_name_attr == NULL) {
-        EV_LOGGING(INTERFACE, ERR, "NAS-STAT" ,"Get intf name: missing Name/ifindex attribute ");
+        EV_LOGGING (NAS_INT_STATS, ERR, "NAS-STAT" ,"Get intf name: missing Name/ifindex attribute ");
         return false;
     }
     if (if_name_attr) {
@@ -128,8 +130,8 @@ bool nas_stat_get_ifindex_from_obj(cps_api_object_t obj,hal_ifindex_t *index, bo
         strncpy(i.if_name,name,sizeof(i.if_name)-1);
         i.q_type = HAL_INTF_INFO_FROM_IF_NAME;
         if (dn_hal_get_interface_info(&i)!=STD_ERR_OK){
-            EV_LOGGING(INTERFACE, INFO, "NAS-STAT",
-                       "Can't get interface control information for %s", name);
+            EV_LOG(ERR, INTERFACE, 0, "NAS-STAT",
+                    "Can't get interface control information for %s",name);
             return false;
         }
         *index = i.if_index;
@@ -220,7 +222,7 @@ static bool fill_cps_stats (cps_api_object_t obj, char *ptr, const char *name) {
     uint64_t   stats_arr[16];
     memset(stats_arr, 0, sizeof(stats_arr));
     if ((p = strstr(ptr, name)) == NULL) {
-        EV_LOGGING(INTERFACE, ERR ,"NAS-STAT", "lpbk :fill_cps_stats error");
+        EV_LOGGING (NAS_INT_STATS, ERR ,"NAS-STAT", "lpbk :fill_cps_stats error");
         return false;
     }
     p = strtok_r(p, " ", &save_ptr);
@@ -247,7 +249,7 @@ bool get_intf_stats_from_os( const char *name, cps_api_object_list_t list) {
     cps_api_object_t obj = cps_api_object_list_create_obj_and_append(list);
 
     if (obj == NULL) {
-        EV_LOGGING(INTERFACE, ERR ,"NAS-STAT", "lpbk: Failed to create/append new object to list");
+        EV_LOGGING (NAS_INT_STATS, ERR ,"NAS-STAT", "lpbk: Failed to create/append new object to list");
         return ret;
     }
 
@@ -286,6 +288,39 @@ static cps_api_return_code_t if_lpbk_stats_get (void * context, cps_api_get_para
 
 }
 
+cps_api_return_code_t if_mgmt_stats_get (void * context, cps_api_get_params_t * param,
+                                          size_t ix)
+{
+    char name[HAL_IF_NAME_SZ];
+    cps_api_object_t filter = cps_api_object_list_get(param->filters,ix);
+    cps_api_object_t obj = cps_api_object_list_create_obj_and_append(param->list);
+
+    cps_api_object_clone(obj, filter);
+
+    if (!nas_stat_get_name_from_obj(obj, name, sizeof(name))) {
+        return (cps_api_return_code_t)STD_ERR(INTERFACE,CFG,0);
+    }
+
+     interface_ctrl_t intf_ctrl;
+     memset(&intf_ctrl, 0, sizeof(interface_ctrl_t));
+     safestrncpy(intf_ctrl.if_name, name, sizeof(intf_ctrl.if_name));
+     intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+
+     if ((dn_hal_get_interface_info(&intf_ctrl)) == STD_ERR_OK) {
+         if (intf_ctrl.vrf_id != NAS_DEFAULT_VRF_ID) {
+             cps_api_object_attr_add_u32(obj, VRF_MGMT_NI_IF_INTERFACES_INTERFACE_VRF_ID,
+                     intf_ctrl.vrf_id);
+         }
+     }
+
+     nas_os_get_interface_stats(name, obj);
+     return cps_api_ret_code_OK;
+}
+
+static cps_api_return_code_t if_mgmt_stats_set (void * context, cps_api_transaction_params_t * param,                                                    size_t ix) {
+     EV_LOGGING(INTERFACE,DEBUG,"NAS-MGMT-STAT","Set mgmt stats not supported");
+     return cps_api_ret_code_ERR;
+}
 
 static cps_api_return_code_t if_stats_get (void * context, cps_api_get_params_t * param,
                                            size_t ix) {
@@ -304,7 +339,7 @@ static cps_api_return_code_t if_stats_get (void * context, cps_api_get_params_t 
 }
 
 static cps_api_return_code_t if_lpbk_stats_set (void * context, cps_api_transaction_params_t * param,                                                    size_t ix) {
-     EV_LOGGING(INTERFACE,DEBUG,"NAS-STAT","Set loopback stats not supported");
+     EV_LOGGING (NAS_INT_STATS, DEBUG,"NAS-STAT","Set loopback stats not supported");
      return cps_api_ret_code_ERR;
 }
 
@@ -330,7 +365,7 @@ static cps_api_return_code_t if_stats_set (void * context, cps_api_transaction_p
         intf_ctrl.if_index = ifindex;
 
         if (dn_hal_get_interface_info(&intf_ctrl) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,DEBUG,"NAS-STAT","Interface %d has NO slot %d, port %d",
+            EV_LOGGING (NAS_INT_STATS, DEBUG,"NAS-STAT","Interface %d has NO slot %d, port %d",
                     intf_ctrl.if_index, intf_ctrl.npu_id, intf_ctrl.port_id);
             return cps_api_ret_code_ERR;
         }
@@ -374,8 +409,8 @@ static cps_api_return_code_t if_stats_clear (void * context, cps_api_transaction
         return (cps_api_return_code_t)STD_ERR(INTERFACE,CFG,0);
     }
 
-
     interface_ctrl_t intf_ctrl;
+
     memset(&intf_ctrl, 0, sizeof(interface_ctrl_t));
 
     intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF;
@@ -389,8 +424,10 @@ static cps_api_return_code_t if_stats_clear (void * context, cps_api_transaction
 
     if (intf_ctrl.int_type == nas_int_type_FC)
     {
-        EV_LOGGING(INTERFACE,DEBUG,"NAS-FC-STAT","clearing FC stat");
+        EV_LOGGING (NAS_INT_STATS, DEBUG,"NAS-FC-STAT","clearing FC stat");
         return (nas_if_fc_stats_clear(context, param, ix));
+    }else if(intf_ctrl.int_type == nas_int_type_VLANSUB_INTF){
+        return nas_vlan_sub_intf_stat_clear(obj);
     }
     if(ndi_port_clear_all_stat(intf_ctrl.npu_id,intf_ctrl.port_id) != STD_ERR_OK) {
         return (cps_api_return_code_t)STD_ERR(INTERFACE,FAIL,0);
@@ -404,14 +441,19 @@ t_std_error nas_stats_if_init(cps_api_operation_handle_t handle) {
 
     if (intf_obj_handler_registration(obj_INTF_STATISTICS, nas_int_type_PORT,
                                       if_stats_get, if_stats_set) != STD_ERR_OK) {
-        EV_LOGGING (INTERFACE, ERR,"NAS-STATS-INIT", "Failed to register interface stats CPS handler");
+        EV_LOGGING (NAS_INT_STATS, ERR,"NAS-STATS-INIT", "Failed to register interface stats CPS handler");
         return STD_ERR(INTERFACE,FAIL,0);
     }
     if (intf_obj_handler_registration(obj_INTF_STATISTICS, nas_int_type_LPBK,
                                       if_lpbk_stats_get, if_lpbk_stats_set) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, ERR ,"NAS-STATS-INIT", "Failed to register loopback stats CPS handler");
+        EV_LOGGING (NAS_INT_STATS, ERR ,"NAS-STATS-INIT", "Failed to register loopback stats CPS handler");
         return STD_ERR(INTERFACE,FAIL,0);
 
+    }
+    if (intf_obj_handler_registration(obj_INTF_STATISTICS, nas_int_type_MGMT,
+                                      if_mgmt_stats_get, if_mgmt_stats_set) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR ,"NAS-MGMT-INTF-STATS", "Failed to register mgmt stats CPS handler");
+        return STD_ERR(INTERFACE,FAIL,0);
     }
     cps_api_registration_functions_t f;
     memset(&f,0,sizeof(f));

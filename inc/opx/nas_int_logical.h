@@ -30,5 +30,6 @@ std_mutex_type_t *nas_physical_intf_lock(void);
 
 t_std_error nas_intf_admin_state_get(hal_ifindex_t if_index, bool *admin_state);
 t_std_error nas_intf_admin_state_set(hal_ifindex_t if_index, bool admin_state);
+bool nas_base_to_ietf_state_speed(BASE_IF_SPEED_t speed, uint64_t *ietf_speed);
 
 #endif //NAS_INTERFACE_INC_NAS_INT_LOGICAL_H_

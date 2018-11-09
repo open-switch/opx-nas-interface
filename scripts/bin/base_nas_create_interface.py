@@ -41,14 +41,14 @@ def create_interface(obj):
 
 if __name__ == '__main__':
 
-    while cps.enabled(nas_comm.get_value(nas_comm.keys_id, "fp_key")) == False:
+    while cps.enabled(nas_comm.yang.get_tbl('keys_id')['fp_key']) == False:
         nas_if.log_err('fetch front panel port info  not ready ')
         time.sleep(1) #in seconds
     front_panel_ports = nas_if.FpPortCache()
     if front_panel_ports.len() == 0:
         nas_if.log_err('front panel port info  not present')
 
-    while cps.enabled(nas_comm.get_value(nas_comm.keys_id, "physical_key")) == False:
+    while cps.enabled(nas_comm.yang.get_tbl('keys_id')['physical_key']) == False:
         nas_if.log_err('physical port info  not ready ')
         time.sleep(1) #in seconds
     port_cache = nas_if.PhyPortCache()

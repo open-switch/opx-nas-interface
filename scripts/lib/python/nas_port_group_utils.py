@@ -13,29 +13,14 @@ import event_log as ev
 import nas_front_panel_map as fp
 import nas_os_if_utils as nas_if
 import nas_fp_port_utils as fp_utils
-from nas_common_header import *
-
+import nas_common_header as nas_comm
 import logging
-
 import sys
-
-
-yang_phy_mode_ether = 1
-yang_phy_mode_fc = 2
-
-_yang_breakout_1x1=4
-_yang_breakout_2x1=3
-_yang_breakout_4x1=2
-_yang_breakout_8x2=5 # for DDQSFP28
-_yang_breakout_2x2=6 # for DDQSFP28
-_yang_breakout_4x2=9 # for DDQSFP28 not yet added inthe yang
 
 
 _port_group_state_key = cps.key_from_name('observed', 'base-pg/dell-pg/port-groups-state/port-group-state')
 _port_group_key = cps.key_from_name('target', 'base-pg/dell-pg/port-groups/port-group')
 port_group_state_id_attr = 'dell-pg/port-groups/port-group'
-
-
 
 def pg_state_attr(t):
     return 'dell-pg/port-groups-state/port-group-state/' + t
@@ -59,31 +44,31 @@ def base_pg_state_attr(t):
 # fp breakout mode
 # Phy mode Fc/Ether
 def get_hwp_speed(breakout, phy_speed, phy_mode):
-    hwp_count =  breakout_to_hwp_count[breakout]
+    hwp_count =  nas_comm.yang.get_value(breakout, 'breakout-to-hwp-count')
     _phy_speed_mbps = nas_if.from_yang_speed(phy_speed)
     if _phy_speed_mbps is None or hwp_count is None or hwp_count == 0:
         return None
     _hwp_speed_mbps = _phy_speed_mbps/hwp_count
-    if phy_mode  == yang_phy_mode_fc:
-        hwp_speed_eth =  get_hwp_fc_to_eth_speed(nas_if.to_yang_speed(_hwp_speed_mbps))
+    if phy_mode  == nas_comm.yang.get_value('fc', 'yang-phy-mode'):
+        hwp_speed_eth =  nas_comm.get_hwp_fc_to_eth_speed(nas_if.to_yang_speed(_hwp_speed_mbps))
         return nas_if.from_yang_speed(hwp_speed_eth)
     else:
         return _hwp_speed_mbps
 
 def add_fc_br_cap_objs(pg, fc_caps, resp):
-    phy_mode =  get_value(yang_phy_mode, 'fc')
+    phy_mode =  nas_comm.yang.get_value('fc', 'yang-phy-mode')
     hwp_count = len(pg.get_hw_ports())
     fp_count = len(pg.get_fp_ports())
     for cap in fc_caps:
         mode = cap['breakout']
-        skip_ports = breakout_to_skip_port[mode]
+        skip_ports =  nas_comm.yang.get_value(mode, 'breakout-to-skip-port')
         hw_speed = cap['hwp_speed']
         phy_npu_speed = fp.get_phy_npu_port_speed(mode, (hw_speed * hwp_count) / fp_count)
         if fp.verify_npu_supported_speed(phy_npu_speed) == False:
 #           don't add this entry of speed or breakout
             continue
         phy_fc_speed = cap['phy_fc_speed']
-        phy_speed = get_value(mbps_to_yang_speed,phy_fc_speed)
+        phy_speed = nas_comm.yang.get_value(phy_fc_speed, 'mbps-to-yang-speed')
         cps_obj = cps_object.CPSObject(module='base-pg/dell-pg/port-groups-state/port-group-state/br-cap',
                                        qual='observed',
             data={pg_state_attr('br-cap/phy-mode'):phy_mode,
@@ -98,7 +83,7 @@ def add_fc_br_cap_objs(pg, fc_caps, resp):
 # Create port group capability object for  port group object get request.
 # Each Capability object includes breakout mode, phy mode and phy port speed
 def create_and_add_pg_caps(pg, phy_mode, resp):
-    if phy_mode == get_value(yang_phy_mode, 'fc'):
+    if phy_mode == nas_comm.yang.get_value('fc', 'yang-phy-mode'):
         fc_caps = pg.get_fc_caps()
         if fc_caps is not None and len(fc_caps) != 0:
             add_fc_br_cap_objs(pg, fc_caps, resp)
@@ -108,7 +93,7 @@ def create_and_add_pg_caps(pg, phy_mode, resp):
     hwp_count = len(pg.get_hw_ports())
     fp_count = len(pg.get_fp_ports())
     for mode in br_modes:
-        skip_ports = breakout_to_skip_port[mode]
+        skip_ports =  nas_comm.yang.get_value(mode, 'breakout-to-skip-port')
         for hw_speed in hwp_speeds:
             phy_npu_speed = fp.get_phy_npu_port_speed(mode, (hw_speed * hwp_count) / fp_count)
             if fp.verify_npu_supported_speed(phy_npu_speed) == False:
@@ -116,7 +101,7 @@ def create_and_add_pg_caps(pg, phy_mode, resp):
                 continue
 
             phy_speed = phy_npu_speed
-            if phy_mode == get_value(yang_phy_mode, 'fc'):
+            if phy_mode == nas_comm.yang.get_value('fc', 'yang-phy-mode'):
                 phy_speed = fp.get_fc_speed_frm_npu_speed(phy_npu_speed)
                 if phy_speed == 0:
                     continue
@@ -137,14 +122,14 @@ def _append_fc_br_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index):
     fc_caps = pg.get_fc_caps()
     for cap in fc_caps:
         mode = cap['breakout']
-        skip_ports = breakout_to_skip_port[mode]
+        skip_ports =  nas_comm.yang.get_tbl('breakout-to-skip-port')[mode]
         hw_speed = cap['hwp_speed']
         phy_npu_speed = fp.get_phy_npu_port_speed(mode, (hw_speed * hwp_count) / fp_count)
         if fp.verify_npu_supported_speed(phy_npu_speed) == False:
 #           don't add this entry of speed or breakout
             continue
         phy_fc_speed = cap['phy_fc_speed']
-        phy_speed = get_value(mbps_to_yang_speed,phy_fc_speed)        
+        phy_speed = nas_comm.yang.get_value(phy_fc_speed, 'mbps-to-yang-speed')
         cap_list[str(cap_index)] = {'phy-mode':phy_mode,
                                     'breakout-mode':mode,
                                     'port-speed':phy_speed,
@@ -154,7 +139,7 @@ def _append_fc_br_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index):
 
 
 def add_pg_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index = 0):
-    if phy_mode == get_value(yang_phy_mode, 'fc'):
+    if phy_mode == nas_comm.yang.get_value('fc', 'yang-phy-mode'):
         fc_caps = pg.get_fc_caps()
         if fc_caps is not None and len(fc_caps) != 0:
             return _append_fc_br_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index)
@@ -163,7 +148,7 @@ def add_pg_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index = 0):
     hwp_count = len(pg.get_hw_ports())
     fp_count = len(pg.get_fp_ports())
     for mode in br_modes:
-        skip_ports = breakout_to_skip_port[mode]
+        skip_ports =  nas_comm.yang.get_tbl('breakout-to-skip-port')[mode]
         for hw_speed in hwp_speeds:
             phy_npu_speed = fp.get_phy_npu_port_speed(mode, (hw_speed * hwp_count) / fp_count)
             if fp.verify_npu_supported_speed(phy_npu_speed) == False:
@@ -171,7 +156,7 @@ def add_pg_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index = 0):
                 continue
 
             phy_speed = phy_npu_speed
-            if phy_mode == get_value(yang_phy_mode, 'fc'):
+            if phy_mode == nas_comm.yang.get_value('fc', 'yang-phy-mode'):
                 phy_speed = fp.get_fc_speed_frm_npu_speed(phy_npu_speed)
                 if phy_speed == 0:
                     continue
@@ -187,18 +172,18 @@ def add_pg_caps_to_pg_obj(pg, phy_mode, cap_list, cap_index = 0):
 def add_all_pg_caps(pg, resp):
     if pg == None:
         return False
-    create_and_add_pg_caps(pg, yang_phy_mode_ether, resp)
+    create_and_add_pg_caps(pg, nas_comm.yang.get_value('ether', 'yang-phy-mode'), resp)
     if pg.is_fc_supported():
-        create_and_add_pg_caps(pg, yang_phy_mode_fc, resp)
+        create_and_add_pg_caps(pg, nas_comm.yang.get_value('fc', 'yang-phy-mode'), resp)
 
 # Add capability to port group as child list in the cps get request
 def add_all_pg_caps_to_pg_obj(pg, pg_obj):
     if pg == None:
         return False
     cap_list = {}
-    cap_index = add_pg_caps_to_pg_obj(pg, yang_phy_mode_ether, cap_list)
+    cap_index = add_pg_caps_to_pg_obj(pg, nas_comm.yang.get_value('ether', 'yang-phy-mode'), cap_list)
     if pg.is_fc_supported():
-        add_pg_caps_to_pg_obj(pg, yang_phy_mode_fc, cap_list, cap_index)
+        add_pg_caps_to_pg_obj(pg, nas_comm.yang.get_value('fc', 'yang-phy-mode'), cap_list, cap_index)
     pg_obj.add_attr(pg_state_attr('br-cap'), cap_list)
 
 # Get request for port group state object
@@ -279,8 +264,8 @@ def get_int_pg_cb(methods, params):
 
 # following is the mapping of breakout mode to valid front panel port offset
 sfp_pg_br_to_fp_map = {
-        yang_breakout['4x4']: [0, 1, 2, 3],
-        yang_breakout['2x4']: [0, 2],
+        nas_comm.yang.get_value('4x4', 'yang-breakout-mode'): [0, 1, 2, 3],
+        nas_comm.yang.get_value('2x4', 'yang-breakout-mode'): [0, 2],
         }
 
 # Set config handler for unified SFP port group type.
@@ -306,7 +291,7 @@ def set_sfp_port_group_config(pg, br_mode, port_speed, phy_mode):
     # set the HW port mapping based on the breakout mode
 
     # re-verify this case
-    hwp_count = breakout_to_hwp_count[br_mode]
+    hwp_count =  nas_comm.yang.get_tbl('breakout-to-hwp-count')[br_mode]
     hwp_list.sort()
     hwp_list.reverse()  # so that we can pop out from the end
     first_fp_port = fp_list[0]
@@ -372,7 +357,7 @@ def set_port_group_config(pg, phy_mode, br_mode, port_speed):
     if pg_type == "unified_sfp":
         set_sfp_port_group_config(pg, fp_br_mode, port_speed, phy_mode)
     # If any of the value is None then skip it
-    elif pg_type == 'unified_qsfp28' or pg_type == 'ethernet_qsfp' or pg_type == 'unified_qsfp':
+    elif pg_type == 'ethernet_sfp28' or pg_type == 'unified_qsfp28' or pg_type == 'ethernet_qsfp' or pg_type == 'unified_qsfp':
         rollback_list = []
         for port in fp_list:
             ret = fp_utils.set_fp_port_config(port, fp_br_mode, port_speed, phy_mode)
@@ -385,7 +370,7 @@ def set_port_group_config(pg, phy_mode, br_mode, port_speed):
                 return False
             rollback_list.append(port)
     elif pg_type == 'ethernet_ddqsfp28':
-        fp_br_mode = ddqsfp_2_qsfp_brmode[br_mode]
+        fp_br_mode = nas_comm.yang.get_value(br_mode, 'ddqsfp-2-qsfp-brmode')
         ret = set_qsfp28_port_group_config(pg, fp_br_mode, port_speed, phy_mode)
     elif pg_type == 'ethernet_qsfp28':
         ret = set_qsfp28_port_group_config(pg, fp_br_mode, port_speed, phy_mode)
@@ -460,6 +445,4 @@ def nas_pg_cps_register(handle):
     d['get'] = get_pg_cb
     d['transaction'] = set_pg_cb
     cps.obj_register(handle, _port_group_key, d)
-
-
 

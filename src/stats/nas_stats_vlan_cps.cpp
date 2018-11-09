@@ -134,6 +134,9 @@ static bool get_stats(hal_ifindex_t vlan_ifindex, cps_api_object_list_t list){
     }
 
     cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,time(NULL));
+    cps_api_object_attr_add_u32(obj,IF_INTERFACES_STATE_INTERFACE_IF_INDEX, vlan_ifindex);
+    if(strlen(intf_ctrl.if_name) != 0)
+        cps_api_object_attr_add(obj, IF_INTERFACES_STATE_INTERFACE_NAME, intf_ctrl.if_name, strlen(intf_ctrl.if_name) + 1);
 
     return true;
 }

@@ -30,6 +30,11 @@
 #include "nas_int_lag.h"
 #include "nas_int_lag_api.h"
 #include "nas_int_com_utils.h"
+#include "bridge/nas_interface_bridge_utils.h"
+#include "bridge/nas_interface_bridge_com.h"
+#include "interface/nas_interface_vlan.h"
+#include "interface/nas_interface_vxlan.h"
+#include "interface/nas_interface_utils.h"
 #include "nas_int_logical.h"
 #include "std_error_codes.h"
 #include "cps_api_object_category.h"
@@ -41,86 +46,335 @@
 #include "ietf-interfaces.h"
 #include "dell-base-common.h"
 #include "nas_if_utils.h"
+#include "dell-base-interface-common.h"
 #include "vrf-mgmt.h"
 
+#include "dell-base-l2-mac.h"
 #include "cps_api_object_key.h"
 #include "cps_api_operation.h"
 #include "ds_common_types.h"
 #include "cps_class_map.h"
 #include "std_mac_utils.h"
+#include "std_ip_utils.h"
+#include "bridge/nas_interface_bridge.h"
+#include "interface/nas_interface_cps.h"
+#include "interface/nas_interface_utils.h"
+#include "interface/nas_interface_mgmt_cps.h"
 
 #include <unordered_map>
 #include <string.h>
 
 
+#define INTERFACE_FILE_NAME "/usr/bin/nas_if_nocreate"
 
-// TODO can be moved into a utility file.
-static t_std_error get_port_list_by_ifindex(nas_port_list_t &port_list, cps_api_object_t obj, cps_api_attr_id_t attr_id)
-{
-    cps_api_object_it_t it;
-    cps_api_object_it_begin(obj, &it);
-    for (;cps_api_object_it_valid(&it) ; cps_api_object_it_next(&it) ) {
-        cps_api_attr_id_t id = cps_api_object_attr_id(it.attr);
-        if (id == attr_id ) {
-            hal_ifindex_t ifindex = cps_api_object_attr_data_u32(it.attr);
-            if(!nas_is_virtual_port(ifindex)){
-                port_list.insert(ifindex);
-            }
+static bool process_intf_os_event = true;
+
+/*  Check if netlink event needs processing.
+ *  In case of open edition, nas-interface module processes netlink event coming for interfaces.
+ *  Applications can make interface configuration changes using native linux command.
+ *  Currently open edition is determined based on the file nas_if_nocreate absence.
+ *  So if this file is present in then interface module will no monitor netlink event.
+ *  application will not be allowed to make change in the interface directly in the kernel via
+ *  native command of netlink interface.
+ *
+ * The ideal solution would be to not send unwanted OS events for interface. further optimization will be done in nas-os
+ * side to filter out os event which is result of its own configuration in the kernel.
+ *  */
+void init_intf_os_event_flag(void) {
+    if (FILE *file = fopen(INTERFACE_FILE_NAME, "r")) {
+        /*  If file present in the it is NOT open source  */
+        process_intf_os_event = false;
+        EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", "Processing of Interface netlink event is blocked");
+        fclose(file);
+        return;
+    }
+    /*  file may not be present which means it is open edition and hence allow netlink event processing */
+    EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", "Processing of Interface netlink event is allowed");
+}
+
+
+
+static bool nas_intf_cntrl_blk_register(cps_api_object_t obj, interface_ctrl_t *details) {
+
+    hal_intf_reg_op_type_t reg_op;
+
+    if (details == NULL) {
+        return false;
+    }
+    cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
+    cps_api_object_attr_t if_attr = cps_api_object_attr_get(obj,
+            DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+    cps_api_object_attr_t _addr = cps_api_object_attr_get(obj,DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS);
+
+    cps_api_object_attr_t if_name_attr = cps_api_object_attr_get(obj,
+            IF_INTERFACES_INTERFACE_NAME);
+
+    if (if_attr == nullptr || if_name_attr ==nullptr) {
+        EV_LOGGING(INTERFACE,INFO,"NAS-INT",
+              "if index or if name missing in the OS event ");
+        return false;
+    }
+
+    const char *name =  (const char*)cps_api_object_attr_data_bin(if_name_attr);
+    safestrncpy(details->if_name,name,sizeof(details->if_name));
+    details->if_index = cps_api_object_attr_data_u32(if_attr);
+    if (_addr != nullptr) {
+        const char *mac_addr =  (const char*)cps_api_object_attr_data_bin(_addr);
+        safestrncpy(details->mac_addr,mac_addr,sizeof(details->mac_addr));
+    }
+
+    if (op == cps_api_oper_CREATE) {
+        EV_LOGGING(INTERFACE,INFO,"NAS-INT", "interface register event for %s",
+            details->if_name);
+        reg_op = HAL_INTF_OP_REG;
+    } else if (op == cps_api_oper_DELETE) {
+        EV_LOGGING(INTERFACE,INFO,"NAS-INT", "interface de-register event for %s",
+            details->if_name);
+        reg_op = HAL_INTF_OP_DEREG;
+    } else {
+        return false;
+    }
+    if (dn_hal_if_register(reg_op,details) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,INFO,"NAS-INT",
+            "interface register Error %s - mapping error or interface already present",name);
+        return false;
+    }
+    return true;
+}
+/*  Handle VLAN sub interface Create/delete event */
+static void nas_vlansub_intf_ev_handler(cps_api_object_t obj) {
+    std_mutex_simple_lock_guard lock(get_vlan_mutex());
+    cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
+    cps_api_object_attr_t if_name_attr = cps_api_object_attr_get(obj,
+                IF_INTERFACES_INTERFACE_NAME);
+    cps_api_object_attr_t if_attr = cps_api_object_attr_get(obj,
+               DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+    if(!if_name_attr || !if_attr){
+        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-SUB-INTF","No interface name/index is passed "
+                "to create/delete vlan sub intf");
+        return;
+    }
+
+    std::string _if_name = std::string((const char *)cps_api_object_attr_data_bin(if_name_attr));
+    hal_ifindex_t ifindex = cps_api_object_attr_data_uint(if_attr);
+    /*  create VLAN sub interface object */
+    if (op == cps_api_oper_CREATE) {
+        EV_LOGGING(INTERFACE,INFO, "NAS-INTF", " VLAN Interface create name %s %d ",
+            _if_name.c_str(), ifindex);
+        uint32_t vlan_id;
+        cps_api_object_attr_t vlan_id_attr = cps_api_object_attr_get(obj, BASE_IF_VLAN_IF_INTERFACES_INTERFACE_ID);
+        cps_api_object_attr_t parent_attr = cps_api_object_attr_get(obj, DELL_IF_IF_INTERFACES_INTERFACE_PARENT_INTERFACE);
+        if ((vlan_id_attr == nullptr) || (parent_attr == nullptr)) {
+            EV_LOGGING(INTERFACE,INFO,"NAS-INT",
+              "VLAN interface OS create/delete event handling failed for %s: Parent intf  or vlan Id missing ", _if_name.c_str());
+            return;
+        }
+        vlan_id = cps_api_object_attr_data_u32(vlan_id_attr);
+        const char *parent_name =  (const char*)cps_api_object_attr_data_bin(parent_attr);
+        if (nas_interface_utils_vlan_create(_if_name,ifindex,
+                                            vlan_id, std::string (parent_name)) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-INT", "VLAN interface OS create event handling failed: obj creation ");
+            return;
+        }
+    } else if (op == cps_api_oper_DELETE) {
+        if (nas_interface_utils_vlan_delete(_if_name) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-INT", "VLAN interface OS delete event handling failed: obj creation ");
+            return;
+
         }
     }
-    return STD_ERR_OK;
+    interface_ctrl_t details;
+    memset(&details,0,sizeof(details));
+    details.int_type = nas_int_type_VLANSUB_INTF;
+
+    if ((op == cps_api_oper_CREATE) || (op == cps_api_oper_DELETE)) {
+        if (nas_intf_cntrl_blk_register(obj, &details) == false) {
+            EV_LOGGING(INTERFACE,INFO,"NAS-INT",
+              "VLAN sub interface OS create/delete event handling failed ");
+            return;
+        }
+    }
+    nas_interface_cps_publish_event(_if_name,nas_int_type_VLANSUB_INTF, op);
 }
 
 /*  Add or delete port in a bridge interface */
-static void nas_vlan_ev_handler(cps_api_object_t obj) {
+//static void nas_vlan_ev_handler(cps_api_object_t obj) {
+static void nas_l2_port_ev_handler(cps_api_object_t obj) {
+    /*  Now we have two set of DB for bridge for the 1st phase
+     *  1. for bridge created by CPS request and with VLAN inform
+     *  2. bridge created first in the OS and OPX receives netlink event and reaches here
+     *
+     *  check if the bridge exists in the VLAN DB if yes then ignore the processing since the
+     *  Processing is alerady done at the time of CPS request handling in the NAS-interface
+     *
+     *  If the bridge exist in the new bridge object map then handle  the member addition/removal
+     *  */
 
-    nas_port_list_t tag_port_list;
-    nas_port_list_t untag_port_list;
-     cps_api_object_attr_t _br_idx_attr = cps_api_object_attr_get(obj, BASE_IF_LINUX_IF_INTERFACES_INTERFACE_IF_MASTER);
-
+    /*  check the bridge existence  */
+    /*  TODO use bridge name instead of intf index  */
+    cps_api_object_attr_t _br_idx_attr = cps_api_object_attr_get(obj, BASE_IF_LINUX_IF_INTERFACES_INTERFACE_IF_MASTER);
     cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
-
     if (_br_idx_attr == nullptr) {
-        EV_LOGGING(INTERFACE,ERR, "NAS-Vlan", "VLAN event received without bridge and port info");
+        EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", "VLAN event received without bridge and port info");
         return;
     }
-    hal_ifindex_t br_ifindex = cps_api_object_attr_data_u32(_br_idx_attr);
+//    hal_ifindex_t br_ifindex = cps_api_object_attr_data_u32(_br_idx_attr);
+    /*  check if the bridge exists in the bridge object map */
+    /*  If yes then call member addition removal function of the bridge object */
 
-    get_port_list_by_ifindex(tag_port_list, obj, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS);
-    get_port_list_by_ifindex(untag_port_list, obj, DELL_IF_IF_INTERFACES_INTERFACE_UNTAGGED_PORTS);
-    if (tag_port_list.empty()  && untag_port_list.empty()) {
-        EV_LOGGING(INTERFACE,ERR, "NAS-Vlan", "VLAN event received without bridge and port info");
+    cps_api_object_attr_t if_name_attr = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_NAME);
+    const char *br_name =  (const char*)cps_api_object_attr_data_bin(if_name_attr);
+
+    cps_api_object_attr_t tagged_attr = cps_api_object_attr_get(obj, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS);
+    cps_api_object_attr_t untagged_attr = cps_api_object_attr_get(obj, DELL_IF_IF_INTERFACES_INTERFACE_UNTAGGED_PORTS);
+    EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge member add/remove event received %s ", br_name);
+    const char *mem_name = nullptr;
+    if (tagged_attr != nullptr) {
+        mem_name = (const char*)cps_api_object_attr_data_bin(tagged_attr);
+    } else if (untagged_attr !=nullptr) {
+        mem_name = (const char*)cps_api_object_attr_data_bin(untagged_attr);
+    } else {
+        EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " NAS OS L2 PORT Event: Missing member information for %s ", br_name);
+        return;
+    }
+    std_mutex_simple_lock_guard _lg(nas_bridge_mtx_lock());
+
+    /*  if the vlan bridge has parent bridge (virtual network) attached then ignore the  events */
+    std::string parent_bridge;
+    if (nas_bridge_utils_parent_bridge_get(br_name, parent_bridge ) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " Failed to get parent bridge for %s", br_name);
+        return;
+    }
+    if (!parent_bridge.empty()) {
+        EV_LOGGING(INTERFACE,NOTICE, "NAS-BRIDGE", " Ignore the OS event for vlan %s  with parent bridge %s",
+                         br_name, parent_bridge.c_str());
+        return;
     }
 
-    if (op == cps_api_oper_DELETE) {
-        // Delete a port from vlan
-        EV_LOGGING(INTERFACE,INFO, "NAS-Vlan",
-                    "Delete interface list from bridge Interface %d\n", br_ifindex);
-        if(!untag_port_list.empty()) {
-            nas_process_del_vlan_mem_from_os(br_ifindex, untag_port_list, NAS_PORT_UNTAGGED);
-        }
-        if(!tag_port_list.empty()) {
-            nas_process_del_vlan_mem_from_os(br_ifindex, tag_port_list, NAS_PORT_TAGGED);
-        }
+    nas_int_type_t mem_type;
+    if (nas_get_int_name_type(mem_name, &mem_type) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " NAS OS L2 PORT Event: Failed to get member type %s ", mem_name);
         return;
-    } else if (op == cps_api_oper_CREATE) {
-        hal_vlan_id_t vlan_id = 0;
+    }
+    /*  Handle member addition */
+    bool present = false;
+    if (op == cps_api_oper_CREATE) {
+        EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge member add event received %s ", br_name);
+        if((nas_bridge_utils_check_membership(br_name, mem_name, &present) == STD_ERR_OK) && (present)) {
+            EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge member %s already present in %s ", mem_name, br_name);
+            return;
 
-        cps_api_object_attr_t vlan_id_attr = cps_api_object_attr_get(obj, BASE_IF_VLAN_IF_INTERFACES_INTERFACE_ID);
-        if (vlan_id_attr != nullptr) {
-            vlan_id = cps_api_object_attr_data_u32(vlan_id_attr);
         }
-        if (vlan_id >IF_VLAN_MAX) {
-            EV_LOGGING(INTERFACE,ERR, "NAS-Vlan",
-                       "Invalid vlan %d to be added on bridge interface %d",
-                       vlan_id, br_ifindex);
+        if (nas_bridge_utils_npu_add_member(br_name, mem_type, mem_name) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " NAS OS L2 PORT Event: Failed to add member %s to bridge %s ",
+                                     mem_name, br_name);
             return;
         }
-        //TODO following function can be merged with the CPS handling function.
-        nas_process_add_vlan_mem_from_os(br_ifindex, untag_port_list, 0, NAS_PORT_UNTAGGED);
-        nas_process_add_vlan_mem_from_os(br_ifindex, tag_port_list, vlan_id, NAS_PORT_TAGGED);
+    } else if (op == cps_api_oper_DELETE) {
+        if((nas_bridge_utils_check_membership(br_name, mem_name, &present) == STD_ERR_OK) && (!present)) {
+            EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge member %s  not present in %s ", mem_name, br_name);
+            return;
+
+        }
+    /*  Handle Member removal  */
+        EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge member remove event received %s ", br_name);
+        if (nas_bridge_utils_npu_remove_member(br_name, mem_type, mem_name) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " NAS OS L2 PORT Event: Failed to remove member %s from bridge %s ",
+                                     mem_name, br_name);
+            return;
+        }
     }
-    return;
+    nas_bridge_utils_publish_member_event(std::string(br_name), std::string(mem_name),  op);
+}
+
+/*  Handles VXLAN interface create and delete event from nas-linux */
+void nas_vxlan_ev_handler(cps_api_object_t obj)
+{
+    std_mutex_simple_lock_guard lock(get_vxlan_mutex());
+    cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
+    cps_api_object_attr_t name_attr = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_NAME);
+    if(!name_attr){
+        EV_LOGGING(INTERFACE,ERR,"NAS-VXLAN-EVENET","No name passed for vxlan event");
+        return;
+    }
+    std::string _if_name = std::string((const char *)cps_api_object_attr_data_bin(name_attr));
+    BASE_CMN_AF_TYPE_t af_type;
+    /*  create/delete vxlan object and handle it */
+    if (op == cps_api_oper_CREATE) {
+        hal_ip_addr_t local_ip;
+        cps_api_object_attr_t vni_attr = cps_api_object_attr_get(obj, DELL_IF_IF_INTERFACES_INTERFACE_VNI);
+        cps_api_object_attr_t _ip_addr = cps_api_object_attr_get(obj, DELL_IF_IF_INTERFACES_INTERFACE_SOURCE_IP_ADDR);
+        cps_api_object_attr_t _af_type = cps_api_object_attr_get(obj, DELL_IF_IF_INTERFACES_INTERFACE_SOURCE_IP_ADDR_FAMILY);
+        cps_api_object_attr_t if_attr = cps_api_object_attr_get(obj,
+                    DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+        af_type = (BASE_CMN_AF_TYPE_t)cps_api_object_attr_data_u32(_af_type);
+        if(af_type == AF_INET) {
+             struct in_addr *inp = (struct in_addr *) cps_api_object_attr_data_bin(_ip_addr);
+             std_ip_from_inet(&local_ip,inp);
+        } else {
+            struct in6_addr *inp6 = (struct in6_addr *) cps_api_object_attr_data_bin(_ip_addr);
+            std_ip_from_inet6(&local_ip,inp6);
+        }
+        hal_ifindex_t ifindex = 0;
+        if(if_attr){
+            ifindex = cps_api_object_attr_data_uint(if_attr);
+        }
+        BASE_CMN_VNI_t vni = (BASE_CMN_VNI_t ) cps_api_object_attr_data_u32(vni_attr);
+        if (nas_interface_utils_vxlan_create(_if_name, ifindex, vni, local_ip)
+                != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,INFO,"NAS-INT",
+              "VXLAN interface OS create event handling failed %s", _if_name.c_str());
+            return;
+        }
+    } else if (op == cps_api_oper_DELETE) {
+
+        NAS_VXLAN_INTERFACE * vxlan_obj = dynamic_cast<NAS_VXLAN_INTERFACE *>(nas_interface_map_obj_get(_if_name));
+
+        if(vxlan_obj == nullptr){
+            EV_LOGGING(INTERFACE,ERR,"VXLAN","No entry for vxlan interface %s exist",_if_name.c_str());
+            return;
+        }
+
+        if(!vxlan_obj->create_in_os()){
+            if (nas_interface_utils_vxlan_delete(_if_name) != STD_ERR_OK) {
+                EV_LOGGING(INTERFACE,INFO,"NAS-INT",
+                        "VXLAN interface OS delete event handling failed %s", _if_name.c_str());
+                return;
+            }
+        }else{
+            EV_LOGGING(INTERFACE,INFO,"NAS-VXLAN-EVENT","Dont update vxlan object created via cps");
+            return;
+        }
+    } else {
+        /*  TODO Add support for set operation */
+        EV_LOGGING(INTERFACE,INFO,"NAS-INT", "Wrong operation for vxlan intf %s ",_if_name.c_str());
+        return;
+    }
+    interface_ctrl_t details;
+    memset(&details,0,sizeof(details));
+    details.int_type = nas_int_type_VXLAN;
+    if ((op == cps_api_oper_CREATE) || (op == cps_api_oper_DELETE)) {
+        if (nas_intf_cntrl_blk_register(obj, &details) == false) {
+            EV_LOGGING(INTERFACE,INFO,"NAS-INT",
+             "VXLAN interface OS create/delete event handling failed: ");
+            return;
+        }
+    }
+    nas_interface_cps_publish_event(_if_name,nas_int_type_VXLAN, op);
+}
+/*  Handles LAG interface create and delete event from nas-linux */
+static void nas_lag_ev_set_handler(hal_ifindex_t bond_idx, cps_api_object_t obj, bool create) {
+
+    /* config Admin and MAC attribute */
+    cps_api_object_attr_t _mac = cps_api_object_attr_get(obj,
+                                                DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS);
+    if (_mac != nullptr && create == false) {
+        nas_lag_set_mac(bond_idx, (const char *)cps_api_object_attr_data_bin(_mac));
+    }
+    cps_api_object_attr_t _enabled = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_ENABLED);
+    if (_enabled != nullptr) {
+        nas_lag_set_admin_status(bond_idx, (bool)cps_api_object_attr_data_u32(_enabled));
+    }
 }
 
 void nas_lag_ev_handler(cps_api_object_t obj) {
@@ -207,7 +461,6 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                      " Member port %s is virtual no need to do anything", mem_name);
              return;
         }
-            /* TODO Add function to set intf description on netlink message */
     }
 
     std_mutex_simple_lock_guard lock_t(nas_lag_mutex_lock());
@@ -280,16 +533,9 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                 }
             }
         }
-        /* config Admin and MAC attribute */
-        cps_api_object_attr_t _mac = cps_api_object_attr_get(obj,
-                                                    DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS);
-        if (_mac != nullptr && create == false) {
-            nas_lag_set_mac(bond_idx, (const char *)cps_api_object_attr_data_bin(_mac));
-        }
-        cps_api_object_attr_t _enabled = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_ENABLED);
-        if (_enabled != nullptr) {
-            nas_lag_set_admin_status(bond_idx, (bool)cps_api_object_attr_data_u32(_enabled));
-        }
+        // Handler attribute admin,MAC update
+        nas_lag_ev_set_handler(bond_idx, obj, create);
+
     } else if (op == cps_api_oper_DELETE) { /* If op is DELETE */
         if (_mem_attr != nullptr) {
             /*  delete the member from the lag */
@@ -326,6 +572,9 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
             if((nas_lag_master_delete(bond_idx) != STD_ERR_OK))
                 return ;
         }
+    } else if (op == cps_api_oper_SET) {
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-LAG", "LAG set event received for %d", bond_idx);
+        nas_lag_ev_set_handler(bond_idx, obj, create);
     }
     if (member_op == cps_api_oper_SET) {
         /*  Publish the Lag event with portlist in case of member addition/deletion */
@@ -340,51 +589,67 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
     }
 }
 
-
 // Bridge Event Handler
 static void nas_bridge_ev_handler(cps_api_object_t obj)
 {
-    bool create= false;
-    nas_bridge_t *b_node = NULL;
-
-    cps_api_object_attr_t _idx_attr = cps_api_object_attr_get(obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
     cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
-    cps_api_object_attr_t _name_attr = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_NAME);
-
-    if ((_idx_attr == nullptr) || (_name_attr == nullptr))  {
+    cps_api_object_attr_t if_name_attr = cps_api_object_attr_get(obj,
+            IF_INTERFACES_INTERFACE_NAME);
+    cps_api_object_attr_t if_attr = cps_api_object_attr_get(obj,
+            DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+    if ((if_name_attr ==nullptr) || (if_attr == nullptr)) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-INT", "if name missing in the OS event ");
         return;
     }
-    hal_ifindex_t if_index = cps_api_object_attr_data_u32(_idx_attr);
-    const char *name =  (const char*)cps_api_object_attr_data_bin(_name_attr);
+    const char *br_name =  (const char*)cps_api_object_attr_data_bin(if_name_attr);
 
-    EV_LOGGING(INTERFACE,INFO, "NAS-Br", "Bridge Interface %d, name %s, operation %d",
-                            if_index, name, op);
+    std_mutex_simple_lock_guard _lg(nas_bridge_mtx_lock());
 
-    if (op == cps_api_oper_DELETE) {
-        if (nas_intf_handle_intf_mode_change(name, BASE_IF_MODE_MODE_L2) == false) {
-            EV_LOGGING(INTERFACE, DEBUG, "NAS-BR",
-                    "Update to NAS-L3 about interface mode change failed(%d)", if_index);
-        }
-        if(nas_delete_bridge(if_index) != STD_ERR_OK)
-            return;
-    } else {
-        /* Moving the locks from the following function to here.
-         * In case of Dell CPS, often the netlink Rx processing kicks in before the
-         * netlink set returns the context back to caller function */
-        nas_bridge_lock();
-        b_node = nas_create_insert_bridge_node(if_index, name, create);
-        if (b_node == NULL) {
-            nas_bridge_unlock();
-            return;
-        }
-        if (create == true) {
-            if (nas_intf_handle_intf_mode_change(name, BASE_IF_MODE_MODE_NONE) == false) {
-                EV_LOGGING(INTERFACE, DEBUG, "NAS-BR",
-                        "Update to NAS-L3 about interface mode change failed(%d)", if_index);
-            }
-        }
-        nas_bridge_unlock();
+    hal_ifindex_t idx = cps_api_object_attr_data_u32(if_attr);
+    if ( op == cps_api_oper_SET) {
+        // TODO Handle Set MAc Learning operation other attribute.
+        return;
     }
+    EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge %s event received for %s ",
+                                 (op == cps_api_oper_CREATE) ? "CREATE ": "DELETE", br_name);
+    if ( op == cps_api_oper_CREATE) {
+
+        if( nas_bridge_utils_if_bridge_exists(br_name) == STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-INT", " Bridge obj already exists for bridge %s", br_name);
+            return;
+        }
+        /*  Else create newer bridge object
+         *  and save in the bridge name to bridge object map
+         *  */
+        EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge obj create ");
+        if (nas_bridge_utils_create_obj(br_name, BASE_IF_BRIDGE_MODE_1Q, idx) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-INT", " Bridge obj create failed ");
+            return;
+        }
+        if (nas_intf_handle_intf_mode_change(br_name, BASE_IF_MODE_MODE_NONE) == false) {
+            EV_LOGGING(INTERFACE, DEBUG, "NAS-BR",
+                    "Update to NAS-L3 about interface mode change failed(%s)", br_name);
+        }
+    } else if (op == cps_api_oper_DELETE) {
+        // TODO Assumption is that member list is already clean-up before processing the
+        // bridge delete event from NAS-OS.
+     /*     simply check in the new bridge object. */
+        if( nas_bridge_utils_if_bridge_exists(br_name) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-INT-EVT", " Bridge obj does not exists for bridge %s", br_name);
+            return;
+        }
+        EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge delete event received ");
+        if (nas_intf_handle_intf_mode_change(br_name, BASE_IF_MODE_MODE_L2) == false) {
+            EV_LOGGING(INTERFACE, DEBUG, "NAS-BR",
+                    "Update to NAS-L3 about interface mode change failed(%s)", br_name);
+        }
+        EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge delete ");
+        if (nas_bridge_utils_delete(br_name) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-INT", " Bridge obj already deleted or does not exist %s", br_name);
+            return;
+        }
+    }
+    nas_bridge_utils_publish_event(br_name, op);
     return;
 }
 
@@ -429,7 +694,6 @@ static void send_lpbk_intf_oper_event(cps_api_object_t obj)
     hal_interface_send_event(obj);
 
 }
-
 static void nas_loopback_ev_handler(cps_api_object_t obj)
 {
     interface_ctrl_t details;
@@ -461,34 +725,34 @@ static void nas_loopback_ev_handler(cps_api_object_t obj)
                                 name, strlen(name) + 1);
     }
 
+    reg_op = HAL_INTF_OP_REG;
     if (op == cps_api_oper_CREATE) {
         EV_LOGGING(INTERFACE,INFO,"NAS-INT", "interface register event for %s",name);
-        reg_op = HAL_INTF_OP_REG;
     } else if (op == cps_api_oper_DELETE) {
         EV_LOGGING(INTERFACE,INFO,"NAS-INT", "interface de-register event for %s",name);
         reg_op = HAL_INTF_OP_DEREG;
     } else {
-        return; // Nothing to do in case of set or other operations.
+        EV_LOGGING(INTERFACE,INFO,"NAS-INT", "interface Loopback set event for %s", name);
     }
-    if (dn_hal_if_register(reg_op,&details)!=STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,INFO,"NAS-INT",
+    if (op != cps_api_oper_SET) {
+        if (dn_hal_if_register(reg_op,&details)!=STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,INFO,"NAS-INT",
                 "interface register Error %s - mapping error or loopback interface already present",name);
+        }
     }
     send_lpbk_intf_oper_event(obj);
     return;
 }
 
-static void nas_macvlan_ev_handler(cps_api_object_t obj) {
-
-
+/*  Update the MACVLAN intf create/deletion in the intf control block */
+static void nas_macvlan_ev_handler(cps_api_object_t obj)
+{
     interface_ctrl_t details;
-    hal_intf_reg_op_type_t reg_op;
 
     memset(&details,0,sizeof(details));
     cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
     cps_api_object_attr_t if_attr = cps_api_object_attr_get(obj,
             DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
-    cps_api_object_attr_t _addr = cps_api_object_attr_get(obj,DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS);
 
     cps_api_object_attr_t if_name_attr = cps_api_object_attr_get(obj,
             IF_INTERFACES_INTERFACE_NAME);
@@ -503,7 +767,7 @@ static void nas_macvlan_ev_handler(cps_api_object_t obj) {
     if (op == cps_api_oper_DELETE) {
         interface_ctrl_t info;
         memset(&info, 0, sizeof(info));
-        safestrncpy(info.if_name, name, strlen(info.if_name)+1);
+        safestrncpy(info.if_name, name, sizeof(info.if_name));
         info.q_type = HAL_INTF_INFO_FROM_IF_NAME;
         if (dn_hal_get_interface_info(&info) == STD_ERR_OK) {
             if (info.vrf_id != NAS_DEFAULT_VRF_ID) {
@@ -523,28 +787,165 @@ static void nas_macvlan_ev_handler(cps_api_object_t obj) {
     safestrncpy(details.if_name,name,sizeof(details.if_name));
     details.if_index = cps_api_object_attr_data_u32(if_attr);
     details.int_type = nas_int_type_MACVLAN;
-    if (_addr != nullptr) {
-        const char *mac_addr =  (const char*)cps_api_object_attr_data_bin(_addr);
-        safestrncpy(details.mac_addr,mac_addr,sizeof(details.mac_addr));
+
+    if ((op == cps_api_oper_CREATE) || (op == cps_api_oper_DELETE)) {
+        if (nas_intf_cntrl_blk_register(obj, &details) == false) {
+            EV_LOGGING(INTERFACE,INFO,"NAS-INT",
+              "MCVLAN interface OS create/delete event handling failed ");
+            return;
+        }
     }
-
-
-    if (op == cps_api_oper_CREATE) {
-        EV_LOGGING(INTERFACE,INFO,"NAS-INT", "interface register event for %s",
-            details.if_name);
-        reg_op = HAL_INTF_OP_REG;
-    } else if (op == cps_api_oper_DELETE) {
-        EV_LOGGING(INTERFACE,INFO,"NAS-INT", "interface de-register event for %s",
-            details.if_name);
-        reg_op = HAL_INTF_OP_DEREG;
-    } else {
+}
+void send_mgmt_intf_oper_event (cps_api_object_t obj, cps_api_operation_types_t op)
+{
+    if (!cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
+                DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_OBJ,
+                cps_api_qualifier_OBSERVED)) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-MGMT-INTF","Could not translate to management interface key ");
         return;
     }
-    if (dn_hal_if_register(reg_op,&details) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,INFO,"NAS-INT",
-            "interface register Error %s - mapping error or macvlan  interface already present",name);
+    cps_api_object_set_type_operation(cps_api_object_key(obj), op);
+
+    hal_interface_send_event(obj);
+}
+
+extern bool mgmt_intf_cps_notify(cps_api_object_t obj, cps_api_operation_types_t op);
+
+void nas_mgmt_ev_handler (cps_api_object_t src_obj)
+{
+    cps_api_operation_types_t op = cps_api_oper_SET;
+    bool reg_req = false;
+    bool enabled = true;
+    interface_ctrl_t intf_ctrl;
+    memset(&intf_ctrl, 0, sizeof(interface_ctrl_t));
+    intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF_NAME;
+
+    cps_api_object_attr_t attr_id = cps_api_object_attr_get(src_obj, IF_INTERFACES_INTERFACE_NAME);
+    const char *name =  (const char*)cps_api_object_attr_data_bin(attr_id);
+    safestrncpy(intf_ctrl.if_name, name, sizeof(intf_ctrl.if_name));
+
+    attr_id = cps_api_object_attr_get(src_obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+    hal_ifindex_t src_ifidx = 0;
+    if (attr_id != NULL) {
+        src_ifidx = cps_api_object_attr_data_u32(attr_id);
+    }
+    std::string st_name = std::string(intf_ctrl.if_name);
+    if ((dn_hal_get_interface_info(&intf_ctrl)) != STD_ERR_OK) {
+        reg_req  = true;
+        op = cps_api_oper_CREATE;
+        if (nas_interface_util_mgmt_create(st_name, src_ifidx) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-MGMT-INTF",
+                    "Creating MGMT interface object failed (%s, %u)", st_name.c_str(), src_ifidx);
+        }
+    } else {
+        nas_interface_util_mgmt_enabled_get(st_name, &enabled);
     }
 
+
+    char vrf_name[NAS_VRF_NAME_SZ] = "";
+    attr_id = cps_api_object_attr_get(src_obj, NI_IF_INTERFACES_INTERFACE_BIND_NI_NAME);
+    if (attr_id != NULL) {
+        name = (const char*)cps_api_object_attr_data_bin(attr_id);
+        safestrncpy(vrf_name, name, sizeof(vrf_name));
+    }
+
+    attr_id = cps_api_object_attr_get(src_obj, VRF_MGMT_NI_IF_INTERFACES_INTERFACE_VRF_ID);
+    uint32_t src_vrfid = NAS_DEFAULT_VRF_ID;
+    if (attr_id != NULL) {
+        src_vrfid = cps_api_object_attr_data_u32(attr_id);
+    }
+    cps_api_operation_types_t src_op = cps_api_object_type_operation(cps_api_object_key(src_obj));
+
+    bool vrf_change = false;
+    if ((src_op == cps_api_oper_CREATE) || (src_op == cps_api_oper_SET)) {
+        if (reg_req == false) {
+            if ((intf_ctrl.vrf_id != src_vrfid) ||
+                    (intf_ctrl.if_index != src_ifidx)) {
+                reg_req = true;
+                vrf_change = true;
+                if (dn_hal_if_register(HAL_INTF_OP_DEREG,&intf_ctrl)!=STD_ERR_OK) {
+                    EV_LOGGING(INTERFACE, ERR, "NAS-MGMT-INTF",
+                            "interface deregister Error %s ", intf_ctrl.if_name);
+                }
+            }
+        }
+    }
+    EV_LOGGING(INTERFACE, ERR, "NAS-MGMT-INTF","MGMT event : %s, %d, %s, %u,op: %u",
+            intf_ctrl.if_name, src_ifidx, vrf_name, src_vrfid, src_op);
+
+    interface_ctrl_t details;
+    memset(&details,0,sizeof(details));
+    safestrncpy(details.if_name, intf_ctrl.if_name, sizeof(details.if_name));
+    details.if_index = src_ifidx;
+    details.int_type = nas_int_type_MGMT;
+
+    if (reg_req == true) {
+        if (strncmp(vrf_name, NAS_DEFAULT_VRF_NAME, sizeof(vrf_name)) == 0) {
+            safestrncpy(details.vrf_name, NAS_DEFAULT_VRF_NAME, sizeof(details.vrf_name));
+            details.vrf_id = NAS_DEFAULT_VRF_ID;
+        } else if (strncmp(vrf_name, NAS_MGMT_VRF_NAME, sizeof(vrf_name)) == 0) {
+            safestrncpy(details.vrf_name, NAS_MGMT_VRF_NAME, sizeof(details.vrf_name));
+            details.vrf_id = NAS_MGMT_VRF_ID;
+        } else {
+            safestrncpy(details.vrf_name, vrf_name, sizeof(details.vrf_name));
+            details.vrf_id = src_vrfid;
+        }
+        if (dn_hal_if_register(HAL_INTF_OP_REG,&details)!=STD_ERR_OK) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-MGMT-INTF",
+                    "interface register Error %s - already present", details.if_name);
+        }
+    }
+    if ((vrf_change == true) && (enabled == true)) {
+        nas_interface_mgmt_attr_up(src_obj, enabled);
+    }
+    cps_api_object_t clone = cps_api_object_create();
+    cps_api_object_clone(clone, src_obj);
+    nas_os_get_interface_ethtool_cmd_data(details.if_name, clone);
+    nas_os_get_interface_oper_status(details.if_name, clone);
+
+    cps_api_object_attr_t spattr = cps_api_object_attr_get(clone,
+                                          DELL_IF_IF_INTERFACES_INTERFACE_SPEED);
+    if (spattr != NULL) {
+        uint64_t state_speed = 0;
+        BASE_IF_SPEED_t speed = (BASE_IF_SPEED_t)cps_api_object_attr_data_u32(spattr);
+        if (nas_base_to_ietf_state_speed(speed, &state_speed) == true) {
+            cps_api_object_attr_add_u64(clone, IF_INTERFACES_STATE_INTERFACE_SPEED, state_speed);
+        }
+    }
+
+    cps_api_object_attr_t if_attr = cps_api_object_attr_get(clone, IF_INTERFACES_INTERFACE_NAME);
+    if (if_attr != NULL) {
+        const char *if_name = (const char *) cps_api_object_get_data(clone, IF_INTERFACES_INTERFACE_NAME);
+        cps_api_set_key_data(clone,IF_INTERFACES_STATE_INTERFACE_NAME,
+                cps_api_object_ATTR_T_BIN, if_name, strlen(if_name) + 1);
+        cps_api_object_attr_delete(clone, IF_INTERFACES_INTERFACE_NAME);
+    }
+    if_attr = cps_api_object_attr_get(clone, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+    if (if_attr != nullptr) {
+        hal_ifindex_t if_index = cps_api_object_attr_data_u32(if_attr);
+        cps_api_object_attr_add_u32(clone,IF_INTERFACES_STATE_INTERFACE_IF_INDEX,
+                if_index);
+        cps_api_object_attr_delete(clone, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+    }
+    if_attr = cps_api_object_attr_get(clone, IF_INTERFACES_INTERFACE_TYPE);
+    if (if_attr != NULL) {
+        const char *if_type = (const char *) cps_api_object_get_data(clone, IF_INTERFACES_INTERFACE_TYPE);
+        cps_api_object_attr_add(clone,IF_INTERFACES_STATE_INTERFACE_TYPE, (void *) if_type,
+                strlen(if_type) + 1);
+        cps_api_object_attr_delete(clone, IF_INTERFACES_INTERFACE_TYPE);
+    }
+
+    cps_api_object_attr_add(clone, DELL_IF_IF_INTERFACES_STATE_INTERFACE_BIND_NI_NAME,
+            vrf_name, strlen(vrf_name) + 1);
+    //TODO need to cleanup the cloned objects once mgmt yang gets deprecated
+    cps_api_object_t if_cmn_obj = cps_api_object_create();
+    if (if_cmn_obj != NULL) {
+        cps_api_object_clone(if_cmn_obj, clone);
+        send_mgmt_intf_oper_event(if_cmn_obj, op);
+        cps_api_object_delete(if_cmn_obj);
+    }
+    mgmt_intf_cps_notify(clone, op);
+    return;
 }
 
 void nas_int_ev_handler(cps_api_object_t obj) {
@@ -623,11 +1024,14 @@ static auto _int_ev_handlers = new std::unordered_map<BASE_CMN_INTERFACE_TYPE_t,
                                                 (cps_api_object_t), std::hash<int>>
 {
     { BASE_CMN_INTERFACE_TYPE_L3_PORT, nas_int_ev_handler},
-    { BASE_CMN_INTERFACE_TYPE_L2_PORT, nas_bridge_ev_handler},
-    { BASE_CMN_INTERFACE_TYPE_VLAN, nas_vlan_ev_handler},
+    { BASE_CMN_INTERFACE_TYPE_BRIDGE, nas_bridge_ev_handler},
+    { BASE_CMN_INTERFACE_TYPE_VLAN_SUBINTF, nas_vlansub_intf_ev_handler},
+    { BASE_CMN_INTERFACE_TYPE_VXLAN, nas_vxlan_ev_handler},
+    { BASE_CMN_INTERFACE_TYPE_L2_PORT, nas_l2_port_ev_handler},
     { BASE_CMN_INTERFACE_TYPE_LAG, nas_lag_ev_handler},
     { BASE_CMN_INTERFACE_TYPE_MACVLAN, nas_macvlan_ev_handler},
     { BASE_CMN_INTERFACE_TYPE_LOOPBACK, nas_loopback_ev_handler},
+    {BASE_CMN_INTERFACE_TYPE_MANAGEMENT, nas_mgmt_ev_handler},
 };
 
 bool nas_int_ev_handler_cb(cps_api_object_t obj, void *param) {
@@ -635,21 +1039,115 @@ bool nas_int_ev_handler_cb(cps_api_object_t obj, void *param) {
     cps_api_object_attr_t _type = cps_api_object_attr_get(obj,BASE_IF_LINUX_IF_INTERFACES_INTERFACE_DELL_TYPE);
     if (_type==nullptr) {
         EV_LOGGING(INTERFACE,ERR,"INTF-EV","Unknown Event or interface type not present");
-        return false;
+        return true;
     }
     EV_LOGGING(INTERFACE,INFO,"INTF-EV","OS event received for interface state change.");
     BASE_CMN_INTERFACE_TYPE_t if_type = (BASE_CMN_INTERFACE_TYPE_t) cps_api_object_attr_data_u32(_type);
     cps_api_object_attr_t _vrf_attr = cps_api_object_attr_get(obj, VRF_MGMT_NI_IF_INTERFACES_INTERFACE_VRF_ID);
-    if (_vrf_attr && (cps_api_object_attr_data_u32(_vrf_attr) != NAS_DEFAULT_VRF_ID)) {
+
+    /*  only in case of mgmt interface events are processed un-conditionally.
+     *  Otherwise in case of CPS only configuration for interface.
+     *  interface events are ignored.
+     *  Also non-default VRF events are ignored.
+     *  */
+    if (process_intf_os_event == false) {
+        /*  if type is not mgmt && not loopback && not macvlan then ignore it */
+        if ((if_type != BASE_CMN_INTERFACE_TYPE_MANAGEMENT) &&
+            (if_type != BASE_CMN_INTERFACE_TYPE_LOOPBACK) &&
+            (if_type != BASE_CMN_INTERFACE_TYPE_MACVLAN))
+        {
+            /* Ignore all interface events interface if this is not from non-default VRF */
+            return true;
+        }
+    }
+
+    if (_vrf_attr && (cps_api_object_attr_data_u32(_vrf_attr) != NAS_DEFAULT_VRF_ID)
+            && (if_type != BASE_CMN_INTERFACE_TYPE_MANAGEMENT)) {
         /* Ignore all interface events interface from non-default VRF */
+        EV_LOGGING(INTERFACE,ERR,"INTF-EV","Interface type %u", if_type);
         return true;
     }
+
     auto func = _int_ev_handlers->find(if_type);
     if (func != _int_ev_handlers->end()) {
         func->second(obj);
         return true;
     } else {
         EV_LOGGING(INTERFACE,ERR,"INTF-EV","Unknown interface type");
-        return false;
+        return true;
     }
+}
+
+
+static bool nas_vxlan_remote_endpoint_handler_cb(cps_api_object_t obj, void *param)
+{
+    cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
+    cps_api_object_attr_t _ip_addr = cps_api_object_attr_get(obj, BASE_MAC_TUNNEL_ENDPOINT_EVENT_IP_ADDR);
+    cps_api_object_attr_t _af_type = cps_api_object_attr_get(obj, BASE_MAC_TUNNEL_ENDPOINT_EVENT_IP_ADDR_FAMILY);
+    cps_api_object_attr_t _vxlan_if = cps_api_object_attr_get(obj, BASE_MAC_TUNNEL_ENDPOINT_EVENT_INTERFACE_NAME);
+    cps_api_object_attr_t _flooding_enable = cps_api_object_attr_get(obj, BASE_MAC_TUNNEL_ENDPOINT_EVENT_FLOODING_ENABLE);
+
+    if ((_ip_addr == nullptr) || (_af_type == nullptr) || (_vxlan_if == nullptr) || (_flooding_enable ==nullptr)) {
+        return true;
+    }
+
+    std_mutex_simple_lock_guard _lg(nas_bridge_mtx_lock());
+
+    const char *vxlan_if =  (const char*)cps_api_object_attr_data_bin(_vxlan_if);
+
+    remote_endpoint_t rem_ep;
+    rem_ep.flooding_enabled = (bool) cps_api_object_attr_data_u32(_flooding_enable);
+    rem_ep.remote_ip.af_index = (BASE_CMN_AF_TYPE_t)cps_api_object_attr_data_u32(_af_type);
+    if(rem_ep.remote_ip.af_index == AF_INET) {
+         memcpy(&rem_ep.remote_ip.u.ipv4,cps_api_object_attr_data_bin(_ip_addr),
+                 sizeof(rem_ep.remote_ip.u.ipv4));
+    } else {
+         memcpy(&rem_ep.remote_ip.u.ipv6,cps_api_object_attr_data_bin(_ip_addr),
+                         sizeof(rem_ep.remote_ip.u.ipv6));
+    }
+
+    if (op == cps_api_oper_CREATE) {
+        if(nas_bridge_utils_add_remote_endpoint(vxlan_if, rem_ep) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"INTF-EV","Failed to add remote endpoint");
+        }
+    } else if (op == cps_api_oper_DELETE) {
+        if(nas_bridge_utils_remove_remote_endpoint(vxlan_if, rem_ep) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"INTF-EV","Failed to add remote endpoint");
+        }
+    }else if(op == cps_api_oper_SET){
+        if(nas_bridge_utils_update_remote_endpoint(vxlan_if, rem_ep)!=STD_ERR_OK){
+            EV_LOGGING(INTERFACE,ERR,"INTF-EV","Failed to update remote endpoint");
+        }
+    }
+
+    return true;
+
+}
+
+t_std_error nas_vxlan_remote_endpoint_handler_register(void)
+{
+
+    cps_api_event_reg_t reg;
+    memset(&reg,0,sizeof(reg));
+    const uint_t NUM_EVENTS=1;
+
+    cps_api_key_t keys[NUM_EVENTS];
+
+    char buff[CPS_API_KEY_STR_MAX];
+
+    if (!cps_api_key_from_attr_with_qual(&keys[0],
+                BASE_MAC_TUNNEL_ENDPOINT_EVENT_OBJ, cps_api_qualifier_OBSERVED)) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Could not translate %d to key %s",
+            (int)(BASE_MAC_TUNNEL_ENDPOINT_EVENT_OBJ),cps_api_key_print(&keys[0],buff,sizeof(buff)-1));
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
+    EV_LOG(INFO, INTERFACE,0,"NAS-IF-REG", "Registered for interface events with key %s",
+                    cps_api_key_print(&keys[0],buff,sizeof(buff)-1));
+
+    reg.number_of_objects = NUM_EVENTS;
+    reg.objects = keys;
+    if (cps_api_event_thread_reg(&reg,nas_vxlan_remote_endpoint_handler_cb,NULL)!=cps_api_ret_code_OK) {
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
+    return STD_ERR_OK;
 }

@@ -25,7 +25,6 @@
 #include "iana-if-type.h"
 
 #include "std_error_codes.h"
-#include "std_utils.h"
 #include "cps_api_operation.h"
 #include "cps_api_object_key.h"
 
@@ -36,7 +35,6 @@
 
 #include "interface_obj.h"
 
-#include "hal_if_mapping.h"
 #include "nas_int_utils.h"
 
 typedef struct _intf_obj_handler_s {
@@ -160,9 +158,7 @@ static cps_api_return_code_t _if_gen_interface_get(obj_intf_cat_t obj_cat, void 
     cps_api_attr_id_t _type_attr_id = (obj_cat == obj_INTF) ?
                        (cps_api_attr_id_t) IF_INTERFACES_INTERFACE_TYPE :
                        (cps_api_attr_id_t) IF_INTERFACES_STATE_INTERFACE_TYPE ;
-
     cps_api_object_list_guard list(cps_api_object_list_create());
-
     if(list.get() == NULL) {
         EV_LOGGING(INTERFACE,ERR,"NAS-COM-INT-GET","Can't create CPS Object output list");
         return cps_api_ret_code_ERR;
@@ -243,10 +239,8 @@ static cps_api_return_code_t _if_gen_interface_get(obj_intf_cat_t obj_cat, void 
             }
           }
         }
-
         current_ifindex = &next_ifindex;
     } while(ret == STD_ERR_OK);
-
     return cps_api_ret_code_OK;
 }
 

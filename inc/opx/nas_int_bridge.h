@@ -39,17 +39,12 @@ extern "C" {
 
 #include "nas_int_list.h"
 #define SYSTEM_DEFAULT_VLAN 1
-
-typedef std::unordered_map<hal_ifindex_t,bool> nas_vlan_port_oper_status_t;
-
-typedef struct nas_bridge_s{
-    char mac_addr[MAC_STRING_SZ];  //MAC address of this bridge // TODO to be Deprecated
-    char name[HAL_IF_NAME_SZ]; //Just store it for now.
+typedef struct nas_bridge_S{
     hal_ifindex_t ifindex;      //Kernel ifindex of the bridge
     hal_vlan_id_t vlan_id;      //One bridge maps to one Vlan ID in the NPU
+    char mac_addr[MAC_STRING_SZ];  //MAC address of this bridge // TODO to be Deprecated
+    char name[HAL_IF_NAME_SZ]; //Just store it for now.
     IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_t admin_status;
-    IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t oper_status; // operation status of interface
-    nas_vlan_port_oper_status_t oper_list; //list of memberports operation states
     bool learning_disable;     //learning disable state.
     unsigned int int_sub_type; //vlan type (mgmt/data)
     nas_list_t untagged_list; //untagged vlan ports in this bridge
@@ -58,6 +53,7 @@ typedef struct nas_bridge_s{
     nas_list_t tagged_lag; //tagged LAG index to handle
     BASE_IF_MODE_t mode;
     uint32_t mtu;
+    std::string parent_bridge;
 }nas_bridge_t;
 
 /* For roll back of vlan/bridge */
@@ -141,12 +137,6 @@ bool nas_handle_vid_to_br(hal_vlan_id_t vlan_id, hal_ifindex_t if_index);
 
 t_std_error nas_cleanup_bridge(nas_bridge_t *p_bridge_node);
 
-void nas_port_update_vlan_oper_state_cb(npu_id_t npu, npu_port_t port,
-                        IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t status);
-void nas_lag_update_vlan_oper_state_cb(hal_ifindex_t if_idx,
-                        IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t oper_state);
-
-void nas_update_port_to_vlans_map(const hal_ifindex_t port_idx, const hal_ifindex_t vlan_idx, bool add);
 #ifdef __cplusplus
 }
 #endif

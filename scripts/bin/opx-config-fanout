@@ -20,7 +20,7 @@ import nas_os_if_utils as nas_if
 import cps_utils
 import time
 import base_qos_init
-from nas_common_header import *
+import nas_common_header as nas_comm
 
 _g_if_name = 'if/interfaces/interface/name'
 
@@ -34,11 +34,11 @@ if __name__ == '__main__':
         usage()
         sys.exit(0)
     br_mode = sys.argv[2].lower()
-    if not is_key_valid(yang_breakout, br_mode):
+    if br_mode not in nas_comm.yang.get_tbl('yang-breakout-mode'):
         print 'Invalid breakout mode %s' % br_mode
         sys.exit(0)
-    port_speed = sys.argv[3].upper()
-    if not is_key_valid(yang_speed, port_speed):
+    port_speed = sys.argv[3].lower()
+    if port_speed not in nas_comm.yang.get_tbl('yang-speed'):
         print 'Invalid port speed %s' % port_speed
         sys.exit(0)
 
@@ -59,12 +59,12 @@ if __name__ == '__main__':
         nas_fp_cache.print_keys()
         exit(0)
 
-    allowed_speed = get_value(breakout_allowed_speed, br_mode)
+    allowed_speed = nas_comm.yang.get_value(br_mode, 'breakout-allowed-speed')
     if port_speed not in allowed_speed:
         print 'Invalid break mode and port speed combination'
         sys.exit(0)
-    _speed = get_value(yang_speed, port_speed)
-    _mode = get_value(yang_breakout, br_mode)
+    _speed = nas_comm.yang.get_value(port_speed, 'yang-speed')
+    _mode = nas_comm.yang.get_value(br_mode, 'yang-breakout-mode')
 
     br_cap_list = fp_obj.get_attr_data('br-cap')
     breakout_cap = []

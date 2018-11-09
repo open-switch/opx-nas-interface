@@ -18,13 +18,7 @@ import cps
 import cps_object
 import cps_utils
 import nas_os_if_utils as nas_if
-
-_yang_breakout_4x1 = 2
-_yang_breakout_2x1 = 3
-_yang_breakout_1x1 = 4
-_yang_breakout_4x4 = 7
-_yang_breakout_2x4 = 8
-_yang_breakout_disabled = 1
+import nas_common_header as nas_comm
 
 # list of all phy port object indexed by phy port and hwport
 g_port_list = {}
@@ -136,24 +130,13 @@ def cps_create_nas_port(npu, hwports, speed, phy_mode, fr_port = None):
     port_obj  = cps_object.CPSObject(obj = data[0]['change'])
     return port_obj
 
-
-# breakout mode to number of hw ports per physical port mapping
-# TODO Ideally it should be passed as hwports num per phy port as argument instead of converting using map
-breakout_to_hwp_count = {_yang_breakout_1x1:4,
-                         _yang_breakout_2x1:2,
-                         _yang_breakout_4x1:1,
-                         _yang_breakout_4x4:1,
-                         _yang_breakout_2x4:2,
-                         _yang_breakout_disabled:0,
-                         }
-
 # Create npu ports (physical ports ) based on the breakout mode and port speed and returns newly created npu ports
 def create_nas_ports(npu, hwports, br_mode,speed, phy_mode, fr_port, created_phy_ports):
-    if br_mode not in breakout_to_hwp_count:
+    if br_mode not in nas_comm.yang.get_tbl('breakout-to-hwp-count'):
         nas_if.log_err('unsupported breakout mode %d' % br_mode)
         return False
 
-    hwp_count = breakout_to_hwp_count[br_mode]
+    hwp_count = nas_comm.yang.get_tbl('breakout-to-hwp-count')[br_mode]
     hwports.reverse()
 
     while len(hwports) != 0 and hwp_count != 0:

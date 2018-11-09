@@ -13,7 +13,7 @@ import nas_os_if_utils as nas_if
 import nas_fp_port_utils as fp_utils
 import nas_hybrid_group_utils as hg_utils
 import nas_port_group_utils as pg_utils
-import nas_common_header as common
+import nas_common_header as nas_comm
 import logging
 
 
@@ -148,7 +148,7 @@ def create_hg_state_cps_obj(hg_obj):
 
             cur_port_profile_name = str(hybrid_profile.get_port_profile(profile_mode))
             port.apply_port_profile(fp.get_port_profile(cur_port_profile_name))
-            
+
             obj.add_embed_attr([hg_utils.hg_state_attr('port'), str(fpp_idx), 'port-id'], str(fpp_num), 6)
             obj.add_embed_attr([hg_utils.hg_state_attr('port'), str(fpp_idx), 'profile', str(profile_mode_idx), 'name'], str(profile_mode), 8)
             obj.add_embed_attr([hg_utils.hg_state_attr('port'), str(fpp_idx), 'profile', str(profile_mode_idx), 'default-phy-mode'], str(port.get_def_phy_mode()), 8)
@@ -163,10 +163,10 @@ def create_hg_state_cps_obj(hg_obj):
                     if False is fp.verify_npu_supported_speed(phy_npu_speed):
                         continue
 
-                    obj.add_embed_attr([hg_utils.hg_state_attr('port'), str(fpp_idx), 'profile', str(profile_mode_idx), 'br-cap', str(cap_idx), 'phy-mode'], str(hg_utils.yang_phy_mode_ether), 10)
+                    obj.add_embed_attr([hg_utils.hg_state_attr('port'), str(fpp_idx), 'profile', str(profile_mode_idx), 'br-cap', str(cap_idx), 'phy-mode'], str(nas_comm.yang.get_value('ether', 'yang-phy-mode')), 10)
                     obj.add_embed_attr([hg_utils.hg_state_attr('port'), str(fpp_idx), 'profile', str(profile_mode_idx), 'br-cap', str(cap_idx), 'breakout-mode'], str(mode), 10)
                     obj.add_embed_attr([hg_utils.hg_state_attr('port'), str(fpp_idx), 'profile', str(profile_mode_idx), 'br-cap', str(cap_idx), 'port-speed'], str(phy_npu_speed), 10)
-                    obj.add_embed_attr([hg_utils.hg_state_attr('port'), str(fpp_idx), 'profile', str(profile_mode_idx), 'br-cap', str(cap_idx), 'skip-ports'], str(common.breakout_to_skip_port[mode]), 10)
+                    obj.add_embed_attr([hg_utils.hg_state_attr('port'), str(fpp_idx), 'profile', str(profile_mode_idx), 'br-cap', str(cap_idx), 'skip-ports'], str(nas_comm.yang.get_tbl('breakout-to-skip-port')[mode]), 10)
                     cap_idx += 1
 
         port.apply_port_profile(fp.get_port_profile(prev_port_profile_name))
@@ -196,7 +196,7 @@ def _service_set_hg(hg_name, obj, resp):
 
     '''Method to Service Hybrid Group Set Request'''
     hg_list = fp.get_hybrid_group_list()
-        
+
     if hg_name is None or hg_name not in hg_list:
         nas_if.log_err('Error in reading Hybrid Group Name')
         return False
@@ -204,7 +204,7 @@ def _service_set_hg(hg_name, obj, resp):
     if True is apply_cps_config_to_hg(obj, hg_list[hg_name]):
         resp = create_hg_cps_obj(hg_list[hg_name]).get()
         return True
-    
+
     return False
 
 
@@ -321,7 +321,7 @@ def _get_hg_state_hdlr(methods, params):
     if obj.get_key() == hg_utils.hg_state_key:
         hg_name = nas_if.get_cps_attr(obj, hg_utils.hg_state_attr('id'))
         return _service_get_hg_state(hg_name, resp)
-    
+
     nas_if.log_err("Key Error: Hybrid Group State Key issue")
     return False
 

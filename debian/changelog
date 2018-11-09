@@ -1,6 +1,57 @@
+opx-nas-interface (5.20.3) unstable; urgency=medium
+
+  * Feature: Add interface name and ifindex to the output list when querying for stats
+  * Feature: Adding QSA support for 1G SFP media
+  * Feature: Static L2 VxLAN Support
+  * Bugfix: Altered tap fd lock access to be called only after event add/del.
+  * Bugfix: Used the right mgmt VRF name macro to skip the VRF object creation in the SAI
+            for mgmt VRF.
+  * Bugfix: Avoid sending multiple set requests for speed to PAS
+  * Bugfix: Sending sequential hwport offset value from port group object to PAS
+            for setting media transciever
+  * Bugfix: Handle the mode change for LAG blocked port in netlink handler
+  * Bugfix: Get the port mode before adding port to LAG in kernel
+  * Bugfix: Remove the publish of oper state just after connecting interface to NPU port
+  * Bugfix: Using steady clock for providing independent timestamps
+  * Bugfix: Unable to delete/clear L2MC on removal of port channel as VLAN member
+  * Bugfix: MAC learn disable issue in VLAN
+  * Bugfix: The ability to set mac_lear_mode from CPS set for VXLAN
+  * Update: Exclude VLAN dir from compilation
+  * Update: Enabled default libevent lock mechanism for multi thread access of event base.
+  * Update: Setting transceiver enable/disable in PAS based on Admin State and not Oper State
+  * Update: Adding port-group breakout mode for ethernet qsfp28 ports
+  * Update: Allow ports to be added/removed from VLAN 1 in scaled VLAN mode
+  * Update: Re-apply admin state after membership changes
+  * Update: Consolidate remote endpoint event into a single event with tunnnel ID
+  * Update: Allow ports to be added/removed from VLAN 1 in scaled VLAN mode
+  * Update: Use separate service for mac address allocation
+  * Update: Avoid sending multiple set requests for speed to PAS
+  * Update: Set only ingress split horizon for pv subport
+  * Update: Split horizon changes
+  * Update: MAC learn mode for physical port, LAG
+  * Update: set_speed method changed to support QSA adaptor
+  * Update: Check profile type as DDQSFP28 for lane admin up
+  * Update: Publish VLAN sub interface event for regular VLAN interfaces as well
+  * Update: Support to do get on VXLAN type interface
+  * Update: Send VLAN sub interface transaction directly to base
+  * Update: Correctly handle bridge name when deleting VLAN
+  * Update: Enable/disable interface packet drop status based on its tagged/untagged membership
+  * Update: Send sequential hwport offset value from port group object to PAS for setting media transciever
+  * Update: Handle the mode change for LAG blocked port in netlink handler
+  * Update: Get the port mode before adding port to LAG in kernel
+  * Update: Ignore duplex failure during interface creation
+  * Update: Cache the default VLAN id use default VLAN id for vxlan in pv mode
+  * Update: Use VLAN id of 1q VLAN for untagged port when ports are being migrated to 1d bridge
+  * Update: Handle tunnel flood disable event and publish an event for the same
+  * Update: Move untagged VLAN to 1d bridge
+  * Update: VxLAN changes to program npu first and then kernel
+  * Update: Capitalize all instances of the word 'vlan' to 'VLAN' and 'lag' to 'LAG' in changelog
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Tue, 06 Nov 2018 17:17:56 -0800
+
 opx-nas-interface (5.18.0+opx13) unstable; urgency=medium
 
-  * Update: Remove intermediate shell script base_nas_fanout_init.sh 
+  * Update: Remove intermediate shell script base_nas_fanout_init.sh
 
  -- Dell EMC <ops-dev@lists.openswitch.net>  Fri, 02 Nov 2018  11:36:00 -0800
 
@@ -63,7 +114,7 @@ opx-nas-interface (5.18.0+opx5) unstable; urgency=medium
   * Update: Enabled default libevent lock mechanism for multi thread access of event base.
   * Update: Setting transceiver enable/disable in PAS based on Admin State and not Oper State
   * Update: Adding port-group breakout mode for ethernet qsfp28 ports
-  * Update: Allow ports to be added/removed from VLAN 1 in scaled vlan mode
+  * Update: Allow ports to be added/removed from VLAN 1 in scaled VLAN mode
   * Update: Re-apply admin state after membership changes
 
  -- Dell EMC <ops-dev@lists.openswitch.net>  Wed, 8 Aug 2018 17:17:56 -0800
@@ -93,7 +144,7 @@ opx-nas-interface (5.18.0+opx1) unstable; urgency=medium
 
   * Bugfix: Sending sequential hwport offset value from port group object to PAS
             for setting media transciever
-  * Bugfix: Handle the mode change for lag blocked port in netlink handler
+  * Bugfix: Handle the mode change for LAG blocked port in netlink handler
   * Bugfix: Get the port mode before adding port to LAG in kernel
   * Bugfix: Remove the publish of oper state just after connecting interface to NPU port
   * Bugfix: Using steady clock for providing independent timestamps
@@ -196,7 +247,7 @@ opx-nas-interface (5.10.1+opx6) unstable; urgency=medium
 opx-nas-interface (5.10.1+opx5) unstable; urgency=medium
 
   * Update: Optimize memory consumption- Delete each member of the VLAN in NPU before deleting the
-            vlan in NPU
+            VLAN in NPU
   * Update: Assigned mac address to interface when it is associated with front panel port
   * Update: Cleanup for not needed log and added log for set interface attribute handler
   * Update: Since sys-mgmt-intf module does not publish the interface info. with if-index when the
@@ -236,19 +287,19 @@ opx-nas-interface (5.10.1+opx1) unstable; urgency=medium
  -- Dell EMC <ops-dev@lists.openswitch.net>  Tue, 16 Jan 2018  14:47:07 -0800
 opx-nas-interface (5.10.1) unstable; urgency=medium
 
-  * Update: Remove tagged lag in bridge data ,when message comes from netlink.
+  * Update: Remove tagged LAG in bridge data ,when message comes from netlink.
   * Update: Add logging for failure cases
-  * Update: Add L2MC clean-up for LAG upon vlan membership removal
-  * Update: Add check for vlan membership before going ahead with adding bridge in masterlist.
-  * Update: Add provision for fetching vlan interfaces based on vlan ID
+  * Update: Add L2MC clean-up for LAG upon VLAN membership removal
+  * Update: Add check for VLAN membership before going ahead with adding bridge in masterlist.
+  * Update: Add provision for fetching VLAN interfaces based on VLAN ID
   * Update: Store MAC address inthe interface control block
   * Update: publish correct npu id when port disassication event is published
   * Update: Add non NPU port check API
   * Update: Fixed some LAG related issues brought in by nas-common data structure changes
   * Update: VRF object publish added.
   * Update: Implementation for HW Port Profile
-  * Update: Macvlan interface create/update/delete support
-  * Update: Use new API for LAG add/remove to a vlan
+  * Update: MacVLAN interface create/update/delete support
+  * Update: Use new API for LAG add/remove to a VLAN
   * Update: Re-defining base fanout script for supporting mode
   * Update: Addressing semmle comments: removing unused imports and using is for None comparision
   * Update: Adding error string into the return failure object and refining nas-common-header usage
@@ -263,19 +314,19 @@ opx-nas-interface (5.6.1+opx1) unstable; urgency=medium
 
 opx-nas-interface (5.6.1) unstable; urgency=medium
 
-  * Update: Updating master list for lag interface.
+  * Update: Updating master list for LAG interface.
   * Update: Added a check to update mode change for bridge interface creat
-  * Update: Handle mode changes status update to nas-l3 when linux commands are used to configure lag and valn's.
-  * Update: Handle the sequencing issue between nas-l3/nas-interface/nas-linux for adding/deleting port to vlan/lag.
+  * Update: Handle mode changes status update to nas-l3 when linux commands are used to configure LAG and valn's.
+  * Update: Handle the sequencing issue between nas-l3/nas-interface/nas-linux for adding/deleting port to VLAN/LAG.
   * Update: Fetch object with interface name instead of fetching allobjects
   * Update: Added npu-speed for interfaces of type fibreChannel
   * Update: Initialize default breakout mode for 10g profile
-  * Update: Handle lag to vlan changes when port asso/dis-asso occurs
-  * Update: Apply vlan config when port asso/dis-asso occurs
-  * Update: Apply/remove lag config based on port association/dis-association
-  * Update: Add/del master for lag and vlan to if class
-  * Update: Handle port mapping/unmapping event for vlan/lag
-  * Update: Skip npu config for lag and vlan for virtual port
+  * Update: Handle LAG to VLAN changes when port asso/dis-asso occurs
+  * Update: Apply VLAN config when port asso/dis-asso occurs
+  * Update: Apply/remove LAG config based on port association/dis-association
+  * Update: Add/del master for LAG and VLAN to if class
+  * Update: Handle port mapping/unmapping event for VLAN/LAG
+  * Update: Skip npu config for LAG and VLAN for virtual port
   * Update: Disabled physical port when it was un-mapped
   * Update: Fix for opx-ethtool for FC interfaces
   * Update: Initialize npu and port with None
@@ -286,8 +337,8 @@ opx-nas-interface (5.6.1) unstable; urgency=medium
   * Update: Get supported breakout capabilities and current fanout mode from front panel port instead of physical port
   * Update: Replace ASSERT with error check and return failure instead of crash.
   * Update: Updated usage/help message for cps_config_vlan.py utility.
-  * Update: Move lag global static to heap, move stat global static to heap
-  * Update: Move vlan global static to heap
+  * Update: Move LAG global static to heap, move stat global static to heap
+  * Update: Move VLAN global static to heap
   * Update: Used phy/fp port count pair instead of decimal ratio number
   * Update: Changed function of phy port speed calculation
   * Update: Added rollback handling port-group breakout mode change
@@ -295,8 +346,8 @@ opx-nas-interface (5.6.1) unstable; urgency=medium
   * Update: Add FC MTU and BB credit to state object
   * Feature: Adding breakout mode only if port is not part of port-group
   * Feature: Added support to read Front panel port identification led control config from PAS.
-  * Feature: Added support for management vlan stats, reading management vlan stats from OS.
-  * Feature: Handle lag mtu set for tagged vlan members
+  * Feature: Added support for management VLAN stats, reading management VLAN stats from OS.
+  * Feature: Handle LAG mtu set for tagged VLAN members
   * Feature: NAS support for DDQSFP, fetching 2 FP from one media id
   * Feature: Destination mac match support for packet filtering
   * Bugfix: Miscellaneous bug fixes

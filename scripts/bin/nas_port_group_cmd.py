@@ -14,14 +14,13 @@
 # permissions and limitations under the License.
 
 import nas_port_group_utils as pg_utils
-from nas_common_header import *
+import nas_common_header as nas_comm
 import argparse
 from subprocess import call
-
+import nas_media_config as media_config
 
 _pg_key = 'base-pg/dell-pg/port-groups/port-group'
 _pg_state_key = 'base-pg/dell-pg/port-groups-state/port-group-state'
-
 
 def show_port_group(args):
     if args.pg_name == 'all':
@@ -34,9 +33,9 @@ def config_port_group(args):
     if args.pg_name == None or args.Breakout == None or args.PHY_Mode == None or args.Port_Speed == None:
        return False
 
-    br_mode = get_value(yang_breakout, args.Breakout)
-    phy_mode= get_value(yang_phy_mode, args.PHY_Mode)
-    port_speed = get_value(yang_speed, args.Port_Speed)
+    br_mode = nas_comm.yang.get_value(args.Breakout, 'yang-breakout-mode')
+    phy_mode= nas_comm.yang.get_value(args.PHY_Mode, 'yang-phy-mode')
+    port_speed = nas_comm.yang.get_value(args.Port_Speed, 'yang-speed')
 
     call(["cps_set_oid.py", "-qua", "target", "-oper", "set", _pg_key, pg_utils.pg_attr('id') + '=' + args.pg_name,
                                                       pg_utils.pg_attr('breakout-mode') + '=' + str(br_mode),
@@ -47,9 +46,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--Set", action="store_true", help=" Set Port group config")
     parser.add_argument("pg_name", help=" Port Group Name or all to get all port groups info")
-    parser.add_argument("-b", "--Breakout", choices=yang_breakout, default="1x1", help=" Breakout Mode")
-    parser.add_argument("-p", "--PHY_Mode", choices=yang_phy_mode, default="ether", help=" Physical Layer Ethernet or Fibre channel")
-    parser.add_argument("-S", "--Port_Speed", choices=yang_speed, default="40G", help=" Physical Port Speed")
+    parser.add_argument("-b", "--Breakout", choices=nas_comm.yang.get_tbl('yang-breakout-mode'), default="1x1", help=" Breakout Mode")
+    parser.add_argument("-p", "--PHY_Mode", choices=nas_comm.yang.get_tbl('yang-phy-mode'), default="ether", help=" Physical Layer Ethernet or Fibre channel")
+    parser.add_argument("-S", "--Port_Speed", choices=nas_comm.yang.get_tbl('yang-speed'), default="40G", help=" Physical Port Speed")
 
 
 

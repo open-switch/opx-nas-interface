@@ -70,7 +70,7 @@ static bool get_fc_stats(hal_ifindex_t ifindex, cps_api_object_list_t list){
     cps_api_object_t obj = cps_api_object_list_create_obj_and_append(list);
 
     if (obj == NULL) {
-        EV_LOGGING(INTERFACE, ERR,"NAS-FC-STAT", "Failed to create/append new object to list");
+        EV_LOGGING (NAS_INT_STATS,  ERR,"NAS-FC-STAT", "Failed to create/append new object to list");
         return false;
     }
 
@@ -81,7 +81,7 @@ static bool get_fc_stats(hal_ifindex_t ifindex, cps_api_object_list_t list){
     intf_ctrl.if_index = ifindex;
 
     if (dn_hal_get_interface_info(&intf_ctrl) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-FC-STAT","Interface %d has NO slot %d, port %d",
+        EV_LOGGING (NAS_INT_STATS, ERR,"NAS-FC-STAT","Interface %d has NO slot %d, port %d",
                intf_ctrl.if_index, intf_ctrl.npu_id, intf_ctrl.port_id);
         return false;
     }
@@ -93,7 +93,7 @@ static bool get_fc_stats(hal_ifindex_t ifindex, cps_api_object_list_t list){
     if(ndi_port_fc_stats_get(intf_ctrl.npu_id, intf_ctrl.port_id,
                         (nas_fc_if_stat_id_t *)&nas_fc_if_stat_ids[0],
                         nas_fc_stat_values,max_port_stat_id) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-FC-STAT","Unable to get FC stats for if index %d port %d",
+        EV_LOGGING (NAS_INT_STATS, ERR,"NAS-FC-STAT","Unable to get FC stats for if index %d port %d",
                     intf_ctrl.if_index, intf_ctrl.port_id);
         return false;
     }
@@ -105,6 +105,10 @@ static bool get_fc_stats(hal_ifindex_t ifindex, cps_api_object_list_t list){
     cps_api_object_attr_add_u32(obj,
         DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,
         time(NULL));
+    cps_api_object_attr_add_u32(obj,IF_INTERFACES_STATE_INTERFACE_IF_INDEX, ifindex);
+    if(strlen(intf_ctrl.if_name) != 0)
+        cps_api_object_attr_add(obj, IF_INTERFACES_STATE_INTERFACE_NAME, intf_ctrl.if_name, strlen(intf_ctrl.if_name) + 1);
+
 
     return true;
 }
@@ -129,7 +133,7 @@ static cps_api_return_code_t if_fc_stats_get (void * context, cps_api_get_params
 static cps_api_return_code_t if_fc_stats_set (void * context, cps_api_transaction_params_t * param,
                                            size_t ix) {
 
-    EV_LOGGING(INTERFACE,DEBUG,"NAS-FC-STAT","Clear specific FC counter not supported");
+    EV_LOGGING (NAS_INT_STATS, DEBUG,"NAS-FC-STAT","Clear specific FC counter not supported");
 
     return cps_api_ret_code_OK;
 }
@@ -141,7 +145,7 @@ extern "C" cps_api_return_code_t nas_if_fc_stats_clear (void * context, cps_api_
     cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
 
     if (op != cps_api_oper_ACTION) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-FC-STAT","Invalid operation %d for clearing stat",op);
+        EV_LOGGING (NAS_INT_STATS, ERR,"NAS-FC-STAT","Invalid operation %d for clearing stat",op);
         return STD_ERR(INTERFACE,PARAM,0);
     }
 
@@ -157,7 +161,7 @@ extern "C" cps_api_return_code_t nas_if_fc_stats_clear (void * context, cps_api_
     intf_ctrl.if_index = ifindex;
 
     if (dn_hal_get_interface_info(&intf_ctrl) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,DEBUG,"NAS-FC-STAT","Interface %d has NO slot %d, port %d",
+        EV_LOGGING (NAS_INT_STATS, DEBUG,"NAS-FC-STAT","Interface %d has NO slot %d, port %d",
                intf_ctrl.if_index, intf_ctrl.npu_id, intf_ctrl.port_id);
         return STD_ERR(INTERFACE,FAIL,0);
     }
@@ -167,7 +171,7 @@ extern "C" cps_api_return_code_t nas_if_fc_stats_clear (void * context, cps_api_
     if(ndi_port_fc_stats_clear(intf_ctrl.npu_id,intf_ctrl.port_id,
                             (nas_fc_if_stat_id_t *)&nas_fc_if_stat_ids[0],
                             max_port_stat_id) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-FC-STAT","Unable to clear FC stats for if index %d port %d",
+        EV_LOGGING (NAS_INT_STATS, ERR,"NAS-FC-STAT","Unable to clear FC stats for if index %d port %d",
                     intf_ctrl.if_index, intf_ctrl.port_id);
         return STD_ERR(INTERFACE,FAIL,0);
     }
@@ -179,7 +183,7 @@ extern "C" t_std_error nas_stats_fc_if_init(cps_api_operation_handle_t handle) {
 
     if (intf_obj_handler_registration(obj_INTF_STATISTICS, nas_int_type_FC,
                                       if_fc_stats_get, if_fc_stats_set) != STD_ERR_OK) {
-        EV_LOGGING (INTERFACE,DEBUG,"NAS-FC-STATS-INIT", "Failed to register FC interface stats CPS handler");
+        EV_LOGGING (NAS_INT_STATS, DEBUG,"NAS-FC-STATS-INIT", "Failed to register FC interface stats CPS handler");
         return STD_ERR(INTERFACE,FAIL,0);
     }
 

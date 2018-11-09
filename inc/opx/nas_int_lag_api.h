@@ -173,10 +173,5 @@ cps_api_return_code_t lag_object_publish(nas_lag_master_info_t *nas_lag_entry,ha
 t_std_error nas_lag_get_ndi_lag_id(hal_ifindex_t lag_index, ndi_obj_id_t *ndi_lag_id);
 
 
-typedef void (*lag_oper_state_handler_t) (hal_ifindex_t if_idx, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t oper_state);
-
-void nas_lag_oper_state_register_cb(lag_oper_state_handler_t oper_state_cb);
-void nas_lag_update_master_oper_state(nas_lag_master_info_t *nas_lag_entry, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t oper_state);
-
 #endif /* NAS_INTF_LAG_API_H__ */
 

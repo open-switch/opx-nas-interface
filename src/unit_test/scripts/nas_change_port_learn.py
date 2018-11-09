@@ -17,7 +17,7 @@ import cps_object
 import nas_os_if_utils
 import sys
 from ifindex_utils import *
-import nas_ut_framework as nas_ut
+import nas_common_utils as nas_common
 
 mac_learn_modes = {
     "drop": "1",
@@ -32,7 +32,7 @@ def nas_port_learn_op(op, data_dict):
     obj = cps_object.CPSObject(
         module=nas_os_if_utils.get_if_keys()[0],
         data=data_dict)
-    nas_ut.get_cb_method(op)(obj)
+    nas_common.get_cb_method(op)(obj)
 
 
 def usage():

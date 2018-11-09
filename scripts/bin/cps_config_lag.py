@@ -17,7 +17,7 @@ import sys
 import getopt
 import cps
 import cps_object
-import nas_ut_framework as nas_ut
+import nas_common_utils as nas_common
 
 intf_rpc_key_id = 'dell-base-if-cmn/set-interface'
 intf_rpc_op_attr_id = 'dell-base-if-cmn/set-interface/input/operation'
@@ -42,11 +42,10 @@ def nas_lag_op(op, data_dict,commit=True):
         op = 'rpc'
     obj.add_attr("if/interfaces/interface/type","ianaift:ieee8023adLag")
     if commit:
-        nas_ut.get_cb_method(op)(obj)
+        nas_common.get_cb_method(op)(obj)
     else:
         return (obj, op)
     return None
-
 
 def usage():
     ''' This is the Usage Method '''
@@ -154,7 +153,7 @@ def main(argv):
                 l[1]=str(index)
                 index = index +1
                 obj.add_embed_attr(l,i)
-            nas_ut.get_cb_method(op)(obj)
+            nas_common.get_cb_method(op)(obj)
             if frwd_enable != '':
                 cmd_data["dell-if/if/interfaces/interface/member-ports/name"] = port_list
                 # Member ports are unblocked by default
@@ -206,7 +205,7 @@ def main(argv):
             l[1]=str(index)
             index = index +1
             obj.add_embed_attr(l,i)
-        nas_ut.get_cb_method(op)(obj)
+        nas_common.get_cb_method(op)(obj)
 
     elif choice == 'set' and mac_addr != '' and lag_name != '':
         nas_lag_op(

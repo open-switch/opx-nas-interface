@@ -555,4 +555,3 @@ cps_api_return_code_t nas_intf_bind_vrf_rpc_handler (void *context, cps_api_tran
     return cps_api_ret_code_OK;
 }
 
-

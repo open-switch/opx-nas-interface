@@ -133,6 +133,14 @@ void nas_send_admin_state_event(hal_ifindex_t if_index, IF_INTERFACES_STATE_INTE
 typedef void (*oper_state_handler_t) (npu_id_t npu, npu_port_t port, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t oper_state);
 
 void nas_int_oper_state_register_cb(oper_state_handler_t oper_state_cb);
+/**
+ * Handles remote endpoint addition and deletion to a vxlan interface
+ * */
+t_std_error nas_vxlan_remote_endpoint_handler_register(void);
+/*
+ *  Initialize os event processing flag
+ *  */
+void init_intf_os_event_flag(void);
 #ifdef __cplusplus
 }
 #endif

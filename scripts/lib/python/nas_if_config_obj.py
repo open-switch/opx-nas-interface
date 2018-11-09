@@ -16,8 +16,7 @@
 import cps
 import cps_object
 import nas_os_if_utils as nas_if
-from nas_common_header import *
-
+import nas_common_header as nas_comm
 
 # if_config is caching interface specific configuration.
 intf_list = {}
@@ -27,18 +26,17 @@ class IF_CONFIG:
     def __init__ (self, if_name, ietf_intf_type):
         self.name = if_name
         self.ietf_intf_type = ietf_intf_type
-
-        self.media_type = None
         self.breakout_mode = None
         self.negotiation = None
         self.speed = None
+        self.enabled = None  # new element
         self.cfg_speed = None
         self.duplex = None
         self.fec = None
         self.npu = None
         self.port = None
         self.hw_profile = None
-
+        self.media_obj = None
         self.media_supported = True
 
     def get_npu_port(self):
@@ -48,14 +46,28 @@ class IF_CONFIG:
         self.npu = npu
         self.port = port
 
-    def get_media_type(self):
-        return(self.media_type)
+    def get_media_obj(self):
+        return self.media_obj
+
+    def set_media_obj(self, media_obj):
+        if media_obj is None:
+            return False
+        self.media_obj = media_obj
+
+    def get_media_cable_type(self):
+        try:
+            return self.media_obj.get_attr_data('base-pas/media/cable-type')
+        except:
+            return None
+
+    def get_media_category(self):
+        try:
+            return self.media_obj.get_attr_data('base-pas/media/category')
+        except:
+            return None
 
     def get_is_media_supported(self):
         return (self.media_supported)
-
-    def set_media_type(self, media_type):
-        self.media_type = media_type
 
     def set_is_media_supported(self, supported):
         self.media_supported = supported
@@ -120,11 +132,11 @@ class IF_CONFIG:
                      ('Duplex', 'duplex'),
                      ('NPU ID', 'npu'),
                      ('Port ID', 'port'),
-                     ('Media', 'media_type'),
                      ('Hw Profile', 'hw_profile'),
                      ('Breakout', 'breakout_mode'),
                      ('Front Panel Port', 'fp_port'),
                      ('Subport ID', 'subport_id'),
+                     ('Media Support', 'media_supported'),
                      ('FEC mode', 'fec')]
         for attr_desc, attr_name in attr_list:
             if attr_name not in self.__dict__ or self.__dict__[attr_name] == None:
@@ -164,27 +176,20 @@ def if_config_add(if_name, config_obj):
     return True
 
 def get_intf_type(cps_obj):
-    if_type_map = {'ianaift:ethernetCsmacd': 'front-panel',
-                   'ianaift:fibreChannel': 'front-panel',
-                   'ianaift:l2vlan': 'vlan',
-                   'ianaift:ieee8023adLag': 'lag',
-                   'ianaift:softwareLoopback': 'loopback',
-                   'base-if:management': 'management',
-                   'base-if:macvlan': 'macvlan'}
     try:
         obj_if_type = cps_obj.get_attr_data('if/interfaces/interface/type')
     except:
         return None
-    if not obj_if_type in if_type_map:
+    if not obj_if_type in nas_comm.yang.get_tbl('if_type_map'):
         nas_if.log_err('Unknown if type: '+str(obj_if_type))
         return None
-    return if_type_map[obj_if_type]
+    return nas_comm.yang.get_value(obj_if_type, 'if_type_map')
 
 def get_intf_phy_mode(cps_obj):
     try:
         obj_if_type = cps_obj.get_attr_data('if/interfaces/interface/type')
     except:
         return None
-    if not is_key_valid(ietf_type_2_phy_mode, obj_if_type):
+    if obj_if_type not in nas_comm.yang.get_tbl('ietf-type-2-phy-mode'):
         return None
-    return get_value(ietf_type_2_phy_mode, obj_if_type)
+    return nas_comm.yang.get_value(obj_if_type, 'ietf-type-2-phy-mode')

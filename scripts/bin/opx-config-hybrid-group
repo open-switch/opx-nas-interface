@@ -15,7 +15,7 @@
 
 import argparse
 import nas_hybrid_group_utils as hg_utils
-import nas_common_header as common
+import nas_common_header as nas_comm
 import cps_object
 import cps_utils
 from argparse import ArgumentParser
@@ -37,13 +37,13 @@ def _parse_args(args):
 
     elif args.command == 'set':
         if args.subcommand == 'hybrid-group':
-            
+
             if args.config == 'profile':
                 return hg_utils.set_hg(hg_name=args.name, profile=args.profile)
-            
+
             if args.config == 'port':
-                br_mode,port_speed = common.get_value(common.yang_breakout_port_speed, args.breakout)
-                return hg_utils.set_hg(hg_name=args.name, port_id=args.port_id, br_mode=br_mode, port_speed=port_speed, phy_mode=common.yang_phy_mode[args.phy_mode])
+                br_mode,port_speed = nas_comm.yang.get_value(args._breakout, 'yang-breakout-port-speed')
+                return hg_utils.set_hg(hg_name=args.name, port_id=args.port_id, br_mode=br_mode, port_speed=port_speed, phy_mode=nas_comm.yang.get_tbl('yang-phy-mode')[args.phy_mode])
         return
 
 if __name__ == '__main__':
@@ -68,7 +68,7 @@ if __name__ == '__main__':
     # Get Hybrid State Group
     get_hybrid_group_state_parser = get_subparsers.add_parser('hybrid-group-state', help='Get Hybrid Group State Object')
     get_hybrid_group_state_parser.add_argument('--name', dest='name', required=False, action='store', type=str, help='Name of the Hybrid Group')
-    
+
     # Set Hybrid Group
     set_parser = subparsers.add_parser('set', help='Set Hybrid Group Object')
     set_subparsers = set_parser.add_subparsers(help='subcommand', title="subcommand", dest="subcommand")
@@ -76,17 +76,17 @@ if __name__ == '__main__':
     # Set Hybrid Group
     set_hybrid_group_parser = set_subparsers.add_parser('hybrid-group', help='Set Hybrid Group Object')
     set_hybrid_group_subparser = set_hybrid_group_parser.add_subparsers(help='config', title="config", dest="config")
-    
+
     set_hybrid_group_profile_parser = set_hybrid_group_subparser.add_parser('profile', help='Set Hybrid Group Profile')
     set_hybrid_group_profile_parser.add_argument('--name', dest='name', required=True, action='store', type=str, help='Name of the Hybrid Group')
     set_hybrid_group_profile_parser.add_argument('--profile', dest='profile', choices=["restricted", "unrestricted"], required=True, action='store', type=str, help='Profile-mode to be configured on hybrid-group')
-    
+
     set_hybrid_group_port_parser = set_hybrid_group_subparser.add_parser('port', help='Set Hybrid Group Port')
     set_hybrid_group_port_parser.add_argument('--name', dest='name', required=True, action='store', type=str, help='Name of the Hybrid Group')
     set_hybrid_group_port_parser.add_argument('--port-id', dest='port_id', required=True, action='store', type=str, help='Port ID of the Hybrid Group')
-    set_hybrid_group_port_parser.add_argument('--breakout', choices=common.yang_breakout_port_speed.keys(), dest='breakout',required=True, action='store', type=str, help='Breakout options for hybrid-group port')
+    set_hybrid_group_port_parser.add_argument('--breakout', choices=nas_comm.yang.get_tbl('yang-breakout-port-speed').keys(), dest='breakout',required=True, action='store', type=str, help='Breakout options for hybrid-group port')
     set_hybrid_group_port_parser.add_argument('--phy-mode', choices=['ether', 'fc'], default='ether', dest='phy_mode', required=False, action='store', type=str, help='Phy Mode to configure on the Port of the Hybrid Group')
 
     args = parser.parse_args()
     print(args)
-    _parse_args(args)                       
+    _parse_args(args)

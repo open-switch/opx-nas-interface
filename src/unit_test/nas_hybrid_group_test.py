@@ -4,7 +4,7 @@ import cps_object
 import cps_utils
 import cps
 import nas_hybrid_group_utils as hg_utils
-import nas_common_header as common
+import nas_common_header as nas_comm
 import nas_os_if_utils as nas_if
 
 def prRed(prt): print("\033[91m {}\033[00m".format(prt))
@@ -42,7 +42,6 @@ def _check_hg_support_on_platform():
 
 def _configure_hg_profile(hybrid_group_name, profile_name):
     exec_shell("opx-config-hybrid-group set hybrid-group profile --name " + str(hybrid_group_name) + " --profile " + str(profile_name))
-    
 
 def _check_hg_profile(hybrid_group_name, profile_name):
     #Get Hybrid Group Object
@@ -80,16 +79,16 @@ def _check_hg_port_breakout(hybrid_group_name, port_id, br_mode):
     port_list = nas_if.get_cps_attr(obj, hg_utils.hg_attr('port'))
     for port_idx in port_list:
         port = port_list[port_idx]
-        pr_id = port['port-id'] 
+        pr_id = port['port-id']
         if str(pr_id) == str(port_id):
-            phy_mode = port['phy-mode'] 
-            breakout_mode = port['breakout-mode'] 
-            port_speed = port['port-speed'] 
+            phy_mode = port['phy-mode']
+            breakout_mode = port['breakout-mode']
+            port_speed = port['port-speed']
             breakout_option = (breakout_mode, port_speed)
-            breakout = common.get_key(common.yang_breakout_port_speed, breakout_option)
+            breakout = nas_comm.yang.get_key(breakout_option, 'yang-breakout-port-speed')
             assert str(breakout) == str(br_mode)
             break
-    
+
 
 def cps_attr_get(cps_data, attr):
     try:
@@ -99,10 +98,10 @@ def cps_attr_get(cps_data, attr):
 
 
 def z9264_test_1():
-    
+
     #Description
     prGreen("Test Description: CONFIGURE 'hybrid-group-32' to 'unrestricted' mode & check for default breakouts")
-    
+
     #Test Prep
     if False == _check_hg_support_on_platform():
         return True
@@ -111,7 +110,7 @@ def z9264_test_1():
 
     #Apply Hybrid Group Profile as 'unrestricted' & Default Breakouts
     _configure_hg_profile("hybrid-group-32", "unrestricted")
-    
+
     #Check Hybrid Group Profile as 'unrestricted' & Default Breakouts
     _check_hg_profile("hybrid-group-32", "unrestricted")
     _check_hg_port_breakout("hybrid-group-32", "63", "100gx1")
@@ -126,10 +125,10 @@ def z9264_test_1():
 
 
 def z9264_test_2():
-    
+
     #Description
     prGreen("Test Description: CONFIGURE 'hybrid-group-32' to 'restricted' mode & check for default breakouts")
-    
+
     #Test Prep
     if False == _check_hg_support_on_platform():
         return True
@@ -138,7 +137,7 @@ def z9264_test_2():
 
     #Apply Hybrid Group Profile as 'restricted' & Default Breakouts
     _configure_hg_profile("hybrid-group-32", "restricted")
-    
+
     #Check Hybrid Group Profile as 'restricted' & Default Breakouts
     _check_hg_profile("hybrid-group-32", "restricted")
     _check_hg_port_breakout("hybrid-group-32", "63", "100gx1")
@@ -154,10 +153,10 @@ def z9264_test_2():
 
 
 def z9264_test_3():
-    
+
     #Description
     prGreen("Test Description: CONFIGURE 'hybrid-group-32' to 'restricted' mode, configure 25gx4 on Port 1, disabled on port 2")
-    
+
     #Test Prep
     if False == _check_hg_support_on_platform():
         return True
@@ -166,7 +165,7 @@ def z9264_test_3():
 
     #Apply Hybrid Group Profile as 'restricted' & Default Breakouts
     _configure_hg_profile("hybrid-group-32", "restricted")
-    
+
     #Check Hybrid Group Profile as 'restricted' & Default Breakouts
     _check_hg_profile("hybrid-group-32", "restricted")
     _check_hg_port_breakout("hybrid-group-32", "63", "100gx1")
@@ -175,7 +174,7 @@ def z9264_test_3():
     #Configure 25gx4 Breakouts
     _configure_hg_port_breakout("hybrid-group-32", "63", "25gx4")
     _configure_hg_port_breakout("hybrid-group-32", "64", "disabled")
-    
+
     #Check 25gx4 Breakouts
     _check_hg_port_breakout("hybrid-group-32", "63", "25gx4")
     _check_hg_port_breakout("hybrid-group-32", "64", "disabled")
@@ -190,10 +189,10 @@ def z9264_test_3():
 
 
 def z9264_test_4():
-    
+
     #Description
     prGreen("Test Description: CONFIGURE 'hybrid-group-32' to 'restricted' mode, configure 10gx4 on Port 1, disabled on port 2")
-    
+
     #Test Prep
     if False == _check_hg_support_on_platform():
         return True
@@ -202,7 +201,7 @@ def z9264_test_4():
 
     #Apply Hybrid Group Profile as 'restricted' & Default Breakouts
     _configure_hg_profile("hybrid-group-32", "restricted")
-    
+
     #Check Hybrid Group Profile as 'restricted' & Default Breakouts
     _check_hg_profile("hybrid-group-32", "restricted")
     _check_hg_port_breakout("hybrid-group-32", "63", "100gx1")
@@ -211,7 +210,7 @@ def z9264_test_4():
     #Configure 10gx4 Breakouts
     _configure_hg_port_breakout("hybrid-group-32", "63", "10gx4")
     _configure_hg_port_breakout("hybrid-group-32", "64", "disabled")
-    
+
     #Check 10gx4 Breakouts
     _check_hg_port_breakout("hybrid-group-32", "63", "10gx4")
     _check_hg_port_breakout("hybrid-group-32", "64", "disabled")
@@ -226,10 +225,10 @@ def z9264_test_4():
 
 
 def z9264_test_5():
-    
+
     #Description
     prGreen("Test Description: CONFIGURE 'hybrid-group-32' to 'unrestricted' mode, configure 50gx2 on port 1, 50gx2 on port 2")
-    
+
     #Test Prep
     if False == _check_hg_support_on_platform():
         return True
@@ -238,7 +237,7 @@ def z9264_test_5():
 
     #Apply Hybrid Group Profile as 'unrestricted' & Default Breakouts
     _configure_hg_profile("hybrid-group-32", "unrestricted")
-    
+
     #Check Hybrid Group Profile as 'unrestricted' & Default Breakouts
     _check_hg_profile("hybrid-group-32", "unrestricted")
     _check_hg_port_breakout("hybrid-group-32", "63", "100gx1")
@@ -247,7 +246,7 @@ def z9264_test_5():
     #Configure 10gx4 Breakouts
     _configure_hg_port_breakout("hybrid-group-32", "63", "50gx2")
     _configure_hg_port_breakout("hybrid-group-32", "64", "50gx2")
-    
+
     #Check 10gx4 Breakouts
     _check_hg_port_breakout("hybrid-group-32", "63", "50gx2")
     _check_hg_port_breakout("hybrid-group-32", "64", "50gx2")
@@ -282,9 +281,9 @@ test_suites = {
 def test_all():
     #Get platform type from PAS and run appropriate test suite
     d = []
-    cps.get([cps.key_from_name('observed','base-pas/chassis')], d)  
+    cps.get([cps.key_from_name('observed','base-pas/chassis')], d)
     product_name = cps_attr_get(d[0]['data'], 'base-pas/chassis/product-name')
-    
+
     if product_name not in test_suites:
         prGreen("Hybrid Group is not supported on platform " + str(product_name) + ", Bypass the test for this platform")
         return True
@@ -300,4 +299,4 @@ def test_all():
 
 if __name__ == '__main__':
     test_all()
-    
+

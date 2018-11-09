@@ -74,8 +74,13 @@ def ethtool_show_interface(argv):
     media_info = media.get_media_info(media_id)
     for i in media_info:
         obj = cps_object.CPSObject(obj=i)
-        _media_type = obj.get_attr_data('type')
-        if _media_type == 1:
+
+        try:
+            _media_type = obj.get_attr_data('base-pas/media/display-string')
+        except:
+            _media_type = None
+
+        if _media_type is None:
             print '\n Media not present or not accessible \n'
         else:
             _vendor_pn = obj.get_attr_data('base-pas/media/vendor-pn')
@@ -119,7 +124,7 @@ def ethtool_show_interface(argv):
             print '    Channel ID:  %2s' %(_channel_id)
             print '    Transceiver Status: ' + _transceiver_status
 
-    print '    Media Type: ' + media.get_media_str(_media_type)
+    print '    Media Type: ' + str(_media_type)
     print '    Part Number: ' + _vendor_pn
     print '    Serial Number: ' + _serial_no
     print '    Qualified: '  + _qualified

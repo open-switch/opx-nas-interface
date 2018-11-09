@@ -15,14 +15,9 @@
 
 import cps_object
 import cps
-import nas_common_header as common
+import nas_common_header as nas_comm
 import nas_os_if_utils as nas_if
 
-yang_breakout_reverse = dict((v, k) for k, v in common.yang_breakout.iteritems())
-yang_phy_mode_reverse = dict((v, k) for k, v in common.yang_phy_mode.iteritems())
-yang_speed_reverse = dict((v, k) for k, v in common.yang_speed.iteritems())
-yang_phy_mode_ether = 1
-yang_phy_mode_fc = 2
 
 hg_state_key = cps.key_from_name('observed', 'base-pg/dell-pg/port-groups-state/hybrid-group-state')
 hg_key = cps.key_from_name('target', 'base-pg/dell-pg/port-groups/hybrid-group')
@@ -47,7 +42,7 @@ def base_hg_state_attr(t):
 def print_hg_cps_obj(o):
     if o is None:
         return None
-                                        
+
     obj = cps_object.CPSObject(obj=o)
     hg_name = nas_if.get_cps_attr(obj, hg_attr('id'))
     hg_profile = nas_if.get_cps_attr(obj, hg_attr('profile'))
@@ -56,14 +51,14 @@ def print_hg_cps_obj(o):
 
     for port_idx in port_list:
         port = port_list[port_idx]
-        port_id = port['port-id'] 
-        phy_mode = port['phy-mode'] 
-        breakout_mode = port['breakout-mode'] 
-        port_speed = port['port-speed'] 
+        port_id = port['port-id']
+        phy_mode = port['phy-mode']
+        breakout_mode = port['breakout-mode']
+        port_speed = port['port-speed']
         breakout_option = (breakout_mode,port_speed)
-        breakout = common.get_key(common.yang_breakout_port_speed,breakout_option)
+        breakout = nas_comm.yang.get_key(breakout_option, 'yang-breakout-port-speed')
         print("Port ID: %s Phy-mode: %s Breakout-mode: %s " % (str(port_id),
-                                                               str(yang_phy_mode_reverse[phy_mode]),
+                                                               str(nas_comm.yang.get_key(phy_mode, 'yang-phy-mode')),
                                                                str(breakout)))
 
 
@@ -94,11 +89,11 @@ def set_hg(hg_name, profile=None, port_id=None, br_mode=None, port_speed=None, p
 
     if profile is not None:
         cps_obj.add_attr(hg_attr('profile'), profile)
-    
+
     if port_id is not None and br_mode is not None and port_speed is not None and phy_mode is not None:
         cps_obj.add_embed_attr([hg_attr('port'), "0", "port-id"], str(port_id), 4)
         cps_obj.add_embed_attr([hg_attr('port'), "0", "breakout-mode"], br_mode, 4)
         cps_obj.add_embed_attr([hg_attr('port'), "0", "port-speed"], port_speed, 4)
         cps_obj.add_embed_attr([hg_attr('port'), "0", "phy-mode"], phy_mode, 4)
-    
+
     cps.transaction([{"operation": "set", "change": cps_obj.get()}])

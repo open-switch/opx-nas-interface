@@ -112,17 +112,17 @@ void swp_util_tap_descr_init(swp_util_tap_descr p) {
 void swp_util_print_tap(swp_util_tap_descr tap) {
     int ix = 0;
     int mx = sizeof(tap->fds)/sizeof(*(tap->fds));
-    EV_LOGGING(INTERFACE,DEBUG, "PKT-IO", "Dev : %s, Queues: %d,",
+    EV_LOGGING (NAS_PKT_IO, DEBUG, "PKT-IO", "Dev : %s, Queues: %d,",
                      tap->devname,tap->queues);
     for ( ; ix < mx ; ++ix ) {
-        EV_LOGGING(INTERFACE,DEBUG, "PKT-IO", "FD: %d", tap->fds[ix]);
+        EV_LOGGING (NAS_PKT_IO, DEBUG, "PKT-IO", "FD: %d", tap->fds[ix]);
     }
 }
 
 int swp_util_set_persist(swp_util_tap_descr tap, int how) {
     if ( (tap->fds[0]==SWP_UTIL_INV_FD) ||
          (ioctl(tap->fds[0],TUNSETPERSIST,how==0 ? 0 : 1)< 0) ) {
-        EV_LOGGING(INTERFACE,ERR,"TAP-PERSIST", "Can't persist tap device %s",
+        EV_LOGGING (NAS_PKT_IO, ERR,"TAP-PERSIST", "Can't persist tap device %s",
                                 tap->devname);
         return STD_ERR(INTERFACE,FAIL,0);
     }
@@ -161,14 +161,14 @@ t_std_error swp_util_tap_operation(const char * name, int type, bool create) {
             sizeof(ifr.ifr_ifrn.ifrn_name)-1);
 
     if ((fd=open("/dev/net/tun",O_RDWR))<0) {
-        EV_LOGGING(INTERFACE,ERR,"TAP-PERSIST", "Can't open /dev/net/tun");
+        EV_LOGGING (NAS_PKT_IO, ERR,"TAP-PERSIST", "Can't open /dev/net/tun");
         return STD_ERR(INTERFACE,FAIL,errno);
     }
     t_std_error rc = STD_ERR_OK;
     do {
         err = ioctl(fd,TUNSETIFF,(void*)&ifr);
         if (err) {
-            EV_LOGGING(INTERFACE,ERR,"TAP-OP", "Can't associate tap device %s to FD err:%d",name,
+            EV_LOGGING (NAS_PKT_IO, ERR,"TAP-OP", "Can't associate tap device %s to FD err:%d",name,
                     err);
             rc = STD_ERR(INTERFACE,FAIL,err);
             break;
@@ -177,11 +177,11 @@ t_std_error swp_util_tap_operation(const char * name, int type, bool create) {
         if(create){
             int tqlen_fd;
             if((tqlen_fd = socket(AF_INET, SOCK_DGRAM, 0))<0){
-                EV_LOGGING(INTERFACE,ERR,"TAP-OP", "Can't open fd to set txqlen");
+                EV_LOGGING (NAS_PKT_IO, ERR,"TAP-OP", "Can't open fd to set txqlen");
             }else{
                 ifr.ifr_qlen = SWP_UTIL_TAP_TXQLEN;
                 if ((err = ioctl(tqlen_fd, SIOCSIFTXQLEN, &ifr)) < 0) {
-                    EV_LOGGING(INTERFACE,ERR,"TAP-OP", "Can't set txqlen for %s to %d FD err:%d",name,
+                    EV_LOGGING (NAS_PKT_IO, ERR,"TAP-OP", "Can't set txqlen for %s to %d FD err:%d",name,
                         SWP_UTIL_TAP_TXQLEN,err);
                 }
                 close(tqlen_fd);
@@ -189,7 +189,7 @@ t_std_error swp_util_tap_operation(const char * name, int type, bool create) {
         }
 
         if (ioctl(fd,TUNSETPERSIST,(create) ? 1 : 0)< 0) {
-            EV_LOGGING(INTERFACE,ERR,"TAP-OP", "Can't change persist state for %s to %d",
+            EV_LOGGING (NAS_PKT_IO, ERR,"TAP-OP", "Can't change persist state for %s to %d",
                     name,create);
             rc = STD_ERR(INTERFACE,FAIL,err);
         }
@@ -227,13 +227,13 @@ t_std_error swp_util_alloc_tap(swp_util_tap_descr tap, int type) {
     for ( i = 0; i < tap->queues ; ++i) {
         if ((fd=open("/dev/net/tun",O_RDWR))<0) {
             swp_util_close_fds(tap);
-            EV_LOGGING(INTERFACE,ERR,"TAP-ALLOC", "Can't open /dev/net/tun ");
+            EV_LOGGING (NAS_PKT_IO, ERR,"TAP-ALLOC", "Can't open /dev/net/tun ");
             return STD_ERR(INTERFACE,FAIL,err);
         }
 
         err = ioctl(fd,TUNSETIFF,(void*)&ifr);
         if (err) {
-            EV_LOGGING(INTERFACE,ERR,"TAP-ALLOC", "Can't associate file descriptor for tap (%s:%s) :%d",
+            EV_LOGGING (NAS_PKT_IO, ERR,"TAP-ALLOC", "Can't associate file descriptor for tap (%s:%s) :%d",
                     tap->devname,ifr.ifr_ifrn.ifrn_name,err);
             close(fd);
             swp_util_close_fds(tap);
@@ -242,7 +242,7 @@ t_std_error swp_util_alloc_tap(swp_util_tap_descr tap, int type) {
         tap->fds[i]=fd;
         err = std_sock_set_nonblock(fd, 1);
         if (err != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"TAP-ALLOC", "Can't set non-blocking to tap fd for interface:%s: %d",
+            EV_LOGGING (NAS_PKT_IO, ERR,"TAP-ALLOC", "Can't set non-blocking to tap fd for interface:%s: %d",
                        ifr.ifr_ifrn.ifrn_name,err);
             close(fd);
             swp_util_close_fds(tap);

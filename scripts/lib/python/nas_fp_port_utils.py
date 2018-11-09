@@ -20,7 +20,7 @@ import event_log as ev
 import nas_front_panel_map as fp
 import nas_os_if_utils as nas_if
 import nas_phy_port_utils as port_utils
-from nas_common_header import *
+import nas_common_header as nas_comm
 import logging
 
 import time
@@ -44,9 +44,9 @@ def create_and_add_fp_caps(fp_port, resp):
     br_modes = fp_port.get_breakout_caps()
     hw_speeds = fp_port.get_hwport_speed_caps()
     hwp_count = len(fp_port.get_hwports())
-    phy_mode = get_value(yang_phy_mode, 'ether') # FP port does not support FC capability directly. it is on the port group
+    phy_mode = nas_comm.yang.get_value('ether', 'yang-phy-mode') # FP port does not support FC capability directly. it is on the port group
     for mode in br_modes:
-        skip_ports = breakout_to_skip_port[mode]
+        skip_ports = nas_comm.yang.get_tbl('breakout-to-skip-port')[mode]
         for speed in hw_speeds:
             phy_speed = fp.get_phy_npu_port_speed(mode, speed * hwp_count)
             if fp.verify_npu_supported_speed(phy_speed) == False:
@@ -68,11 +68,11 @@ def add_fp_caps_to_fp_obj(fp_port, fp_obj):
     br_modes = fp_port.get_breakout_caps()
     hw_speeds = fp_port.get_hwport_speed_caps()
     hwp_count = len(fp_port.get_hwports())
-    phy_mode = get_value(yang_phy_mode, 'ether') # FP port does not support FC capability directly. it is on the port group
+    phy_mode = nas_comm.yang.get_value('ether', 'yang-phy-mode') # FP port does not support FC capability directly. it is on the port group
     cap_index = 0
     cap_list = {}
     for mode in br_modes:
-        skip_ports = breakout_to_skip_port[mode]
+        skip_ports = nas_comm.yang.get_tbl('breakout-to-skip-port')[mode]
         for speed in hw_speeds:
             phy_speed = fp.get_phy_npu_port_speed(mode, speed * hwp_count)
             if fp.verify_npu_supported_speed(phy_speed) == False:
@@ -88,7 +88,7 @@ def add_fp_caps_to_fp_obj(fp_port, fp_obj):
     fp_obj.add_attr('br-cap', cap_list)
 
 # Generate FP ports object list
-def _gen_fp_port_list(obj, resp):
+def gen_fp_port_list(obj, resp):
 
     for npu in fp.get_npu_list():
 
@@ -129,7 +129,6 @@ def _gen_fp_port_list(obj, resp):
 # Generate HW port obj list
 def _gen_npu_lanes(obj, resp):
 
-    port_list = port_utils.get_phy_port_list()
     for npu in fp.get_npu_list():
         key_dict = {_lane_attr('npu-id'): npu.id
                      }
@@ -156,7 +155,6 @@ def _gen_npu_lanes(obj, resp):
                                             })
                 nas_if.log_info(str(elem.get()))
                 resp.append(elem.get())
-
 
 # publish FP object update
 def send_fp_event(port):
@@ -185,7 +183,7 @@ def set_fp_port_config(fr_port, br_mode, phy_port_speed, phy_mode):
 
     npu = fp_port_obj.npu
     if phy_mode == None:
-        phy_mode = get_value(yang_phy_mode, 'ether')
+        phy_mode = nas_comm.yang.get_value('ether', 'yang-phy-mode')
 
 
     #Check if breakout mode is same as current breakout mode
@@ -319,9 +317,9 @@ def get_cb(methods, params):
     resp = params['list']
 
     try:
-        if obj.get_key() == get_value(keys_id, 'fp_key'):
-            _gen_fp_port_list(obj, resp)
-        elif obj.get_key() == get_value(keys_id, 'npu_lane_key'):
+        if obj.get_key() == nas_comm.yang.get_tbl('keys_id')['fp_key']:
+            gen_fp_port_list(obj, resp)
+        elif obj.get_key() == nas_comm.yang.get_tbl('keys_id')['npu_lane_key']:
             _gen_npu_lanes(obj, resp)
         else:
             return False
@@ -336,9 +334,9 @@ def nas_fp_cps_register(handle):
     d['get'] = get_cb
     d['transaction'] = set_fp_cb
 
-    cps.obj_register(handle, get_value(keys_id, 'fp_key'), d)
-    cps.obj_register(handle, get_value(keys_id, 'npu_lane_key'), d)
-    cps.obj_register(handle, get_value(keys_id, 'breakout_key'), d)
+    cps.obj_register(handle, nas_comm.yang.get_tbl('keys_id')['fp_key'], d)
+    cps.obj_register(handle, nas_comm.yang.get_tbl('keys_id')['npu_lane_key'], d)
+    cps.obj_register(handle, nas_comm.yang.get_tbl('keys_id')['breakout_key'], d)
 
 def get_npu_port_from_fp(fp_port, sub_port):
     nas_if.log_info('Trying to get npu port based on front-panel %d subport %d' % (
@@ -348,7 +346,7 @@ def get_npu_port_from_fp(fp_port, sub_port):
         raise ValueError('Front-panel-port %d not found in cache' % fp_port)
     br_mode = port_obj.get_breakout_mode()
     nas_if.log_info('Cached breakout mode of front panel port %s is %s' % (str(fp_port), str(br_mode)))
-    lane_id = subport_to_lane(br_mode, sub_port)
+    lane_id = nas_comm.subport_to_lane(br_mode, sub_port)
     if lane_id == None:
         raise ValueError('Failed to get lane id from br_mode %d subport %d' % (
                          br_mode, sub_port))
@@ -365,9 +363,39 @@ def get_npu_port_from_fp(fp_port, sub_port):
                          hw_port, sub_port))
     return (npu_id, port_id, hw_port)
 
+def get_mac_offset_from_fp(fp_port, sub_port, fp_cache = None):
+    nas_if.log_info('Trying to get npu port based on front-panel %d subport %d' % (
+                    fp_port, sub_port))
+    if fp_cache is None:
+        # Use local front-panel-port db
+        port_obj = fp.find_front_panel_port(fp_port)
+        if port_obj is None:
+            raise ValueError('Front-panel-port %d not found in cache' % fp_port)
+        br_mode = port_obj.get_breakout_mode()
+        mac_offset = port_obj.mac_offset
+    else:
+        cps_port_obj = fp_cache.get(fp_port)
+        if cps_port_obj is None:
+            raise ValueError('Front-panel-port %d not found in cps cache' % fp_port)
+        br_mode = nas_if.get_cps_attr(cps_port_obj, _fp_attr('breakout-mode'))
+        mac_offset = nas_if.get_cps_attr(cps_port_obj, _fp_attr('mac-offset'))
+        if br_mode is None or mac_offset is None:
+            raise ValueError('Mandatory attributes not found in cps object')
+
+    nas_if.log_info('Cached breakout mode of front panel port %d is %d' % (fp_port, br_mode))
+    lane_id = nas_comm.subport_to_lane(br_mode, sub_port)
+    if lane_id is None:
+        raise ValueError('Failed to get lane id from br_mode %d subport %d' % (
+                         br_mode, sub_port))
+    if isinstance(lane_id, tuple):
+        lane_id, flag = lane_id
+        nas_if.log_info('Get lane id %d with extended condition %s' % (lane_id, flag))
+
+    return mac_offset + lane_id
+
 def init_profile():
 
-     while cps.enabled(get_value(keys_id, 'switch_key'))  == False:
+     while cps.enabled(nas_comm.yang.get_tbl('keys_id')['switch_key'])  == False:
         nas_if.log_err('Switch profile service not yet ready')
         time.sleep(1)
 
@@ -396,3 +424,4 @@ def init():
     if init_profile() == False:
         nas_if.log_info('Using original file for profile')
         fp.init('/etc/opx/base_port_physical_mapping_table.xml')
+

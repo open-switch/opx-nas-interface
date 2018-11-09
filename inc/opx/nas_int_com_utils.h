@@ -25,6 +25,7 @@
 #include "hal_interface_defaults.h"
 #include "hal_if_mapping.h"
 #include "dell-base-interface-common.h"
+#include "interface_obj.h"
 
 #include <stdlib.h>
 #include <string>
@@ -42,14 +43,21 @@ typedef struct _if_master_info {
 }if_master_info_t;
 
 bool nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info);
+bool nas_intf_add_master(hal_ifindex_t ifx, if_master_info_t m_info, BASE_IF_MODE_t *new_mode, bool *mode_change);
 bool nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info);
+bool nas_intf_del_master(hal_ifindex_t ifx, if_master_info_t m_info, BASE_IF_MODE_t *new_mode, bool *mode_change);
 void nas_intf_master_callback(hal_ifindex_t ifx, std::function< void (if_master_info_t)> fn);
 std::list<if_master_info_t> nas_intf_get_master(hal_ifindex_t ifx);
 BASE_IF_MODE_t nas_intf_get_mode(hal_ifindex_t ifx);
 bool nas_intf_handle_intf_mode_change(hal_ifindex_t ifx, BASE_IF_MODE_t mode);
 bool nas_intf_handle_intf_mode_change (const char *if_name, BASE_IF_MODE_t mode);
+/* Gets untag and tag count in a pair */
+std::pair<int,int> nas_intf_untag_tag_count(hal_ifindex_t ifx);
 
 t_std_error nas_intf_db_obj_get(const char * intf_name,cps_api_attr_id_t id, cps_api_qualifier_t cat,
                             cps_api_object_t  obj);
 bool nas_intf_cleanup_l2mc_config (hal_ifindex_t ifx,  hal_vlan_id_t vlan_id=0);
+
+bool if_data_from_obj(obj_intf_cat_t obj_cat, cps_api_object_t o, interface_ctrl_t& i);
+bool nas_base_to_ietf_state_speed(BASE_IF_SPEED_t speed, uint64_t *ietf_speed);
 #endif //NAS_INT_COM_UTILS_H_
