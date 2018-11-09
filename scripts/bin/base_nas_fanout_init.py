@@ -13,60 +13,43 @@
 #
 # See the Apache Version 2.0 License for specific language governing
 # permissions and limitations under the License.
-import cps_object
-from xml.dom import minidom
 import event_log as ev
 from time import sleep
 import os
-import sys
 import subprocess
-import cps
+import shlex
 import nas_os_if_utils as nas_if
 
-fanout_config_file = "/etc/opx/dn_nas_fanout_init_config.xml"
+fanout_config_file = "/etc/opx/startup/config-interfaces"
 nocreate_file = "/etc/opx/nas_if_nocreate"
 
-def parse_intf_config(intf_list):
-    """parse the fanout config from xml and
-       create fanned out interfaces based on that
-       @intf_list - xml tag list of fanout config
-    """
-    try:
-        for i in intf_list:
-            interface = i.attributes["name"].value
-            fanout_mode = i.attributes["fanout"].value
-            speed = i.attributes["speed"].value
-            subprocess.call(["/usr/bin/python",
-                             "/usr/bin/opx-config-fanout",interface,fanout_mode,speed])
-    except Exception as ex:
-        nas_if.log_err(str(ex))
-
-
-def parse_config_file():
-    """parse the xml file which has the config for
+def config_fanout():
+    """parse the fanout_config_file, which has the configs for
        fanout interfaces
     """
+
     if not os.path.isfile(fanout_config_file):
         nas_if.log_err(str(fanout_config_file)+" does not exist")
-    try:
-        config_xml_handle = minidom.parse(fanout_config_file)
-    except Exception:
-        nas_if.log_err(str(fanout_config_file)+" Is not a valid xml file")
 
-    try:
-        intf_list = config_xml_handle.getElementsByTagName("interface")
-        parse_intf_config(intf_list)
-    except Exception as ex:
-        nas_if.log_err(str(ex))
+    with open(fanout_config_file, 'r') as f:
+        for line in f:
+            command = line.strip('\t\n\r')
+            if command.startswith('#') or len(command) == 0:
+                continue
+            try:
+                p = subprocess.Popen(shlex.split(command),stdout=subprocess.PIPE, stderr=subprocess.PIPE,shell=False, universal_newlines=True)
+                (stdoutdata, stderrdata) = p.communicate()
+            except Exception as e:
+                nas_if.log_err('File: "%s", line: "%s" - EXCEPTION: %s' % (fanout_config_file,line,e))
 
 
 if __name__ == '__main__':
 
     if os.path.isfile(nocreate_file):
-            sys.exit(0)
+        sys.exit(0)
 
     # Wait till interface service is ready
     while nas_if.nas_os_if_list() == None:
         sleep(1)
 
-    parse_config_file()
+    config_fanout()
