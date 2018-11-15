@@ -16,11 +16,30 @@
 import argparse
 import nas_hybrid_group_utils as hg_utils
 import nas_common_header as nas_comm
+import nas_intf_set as nas_if
 import cps_object
 import cps_utils
 from argparse import ArgumentParser
 
 OPX_HYBRID_GROUP_CONFIG_TOOL_VERSION = 1.0
+
+'''
+Extract the ports associated with a hybrid group.  Hybrid group names have the format
+'hybrid-group-8'
+'''
+def get_port_id_from_hg(hg_name):
+    l = [int(s) for s in hg_name.split('-') if s.isdigit()]
+    even_port_id = 2*l[0]
+    odd_port_id = even_port_id - 1
+    return odd_port_id, even_port_id
+
+'''
+Extract the subport count associated with a breakout operation. breakout format
+'25gx4'
+'''
+def get_subport_from_breakout(breakout):
+    l = [int(s) for s in breakout.split('x') if s.isdigit()]
+    return l[0]
 
 def _parse_args(args):
     if args.command == 'get':
@@ -39,11 +58,18 @@ def _parse_args(args):
         if args.subcommand == 'hybrid-group':
 
             if args.config == 'profile':
+                odd_port_id, even_port_id = get_port_id_from_hg(args.name)
+                nas_if.delete_intf(odd_port_id)
+                nas_if.delete_intf(even_port_id)
                 return hg_utils.set_hg(hg_name=args.name, profile=args.profile)
 
             if args.config == 'port':
                 br_mode,port_speed = nas_comm.yang.get_value(args._breakout, 'yang-breakout-port-speed')
-                return hg_utils.set_hg(hg_name=args.name, port_id=args.port_id, br_mode=br_mode, port_speed=port_speed, phy_mode=nas_comm.yang.get_tbl('yang-phy-mode')[args.phy_mode])
+                hg_utils.set_hg(hg_name=args.name, port_id=args.port_id, br_mode=br_mode, port_speed=port_speed, phy_mode=nas_comm.yang.get_tbl('yang-phy-mode')[args.phy_mode])
+                subport_count = get_subport_from_breakout(args.breakout)
+                for subport_id in range(1,subport_count+1):
+                    nas_if.create_intf(int(args.port_id), subport_id)
+                return
         return
 
 if __name__ == '__main__':

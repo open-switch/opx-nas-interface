@@ -41,6 +41,41 @@ def show_intf(args):
     else:
         call(["cps_get_oid.py", "target/"+intf_key, intf_name_key + '=' + args.intf_name])
 
+'''
+Form an ethernet interface name string, based on port id and subport id. eg- e101-001-0
+'''
+def ether_if_name(port_id, subport_id):
+    if (port_id <= 9):
+        intf_name = 'e101-00' + str(port_id) + '-' + str(subport_id)
+    else:
+        intf_name = 'e101-0' + str(port_id) + '-' + str(subport_id)
+    print intf_name
+    return intf_name
+
+
+'''
+Delete an ethernet interface
+'''
+
+def delete_intf(port_id, subport_id=0):
+    intf_name = ether_if_name(port_id, subport_id):
+    call(["cps_set_oid.py", "-qua", "target", "-oper", "action", set_intf_key, 
+       oper_key + '=' + oper_type['delete'], 
+       intf_type_key+'='+intf_types['ether'], intf_name_key+'='+ intf_name, 
+       fp_port_key+'='+str(port_id), subport_id_key+'='+str(subport_id)])
+
+
+'''
+Create an ethernet interface
+'''
+
+def create_intf(port_id, subport_id=0):
+    intf_name = ether_if_name(port_id, subport_id):
+    call(["cps_set_oid.py", "-qua", "target", "-oper", "action", set_intf_key, 
+       oper_key + '=' + oper_type['create'], 
+       intf_type_key+'='+intf_types['ether'], intf_name_key+'='+ intf_name, 
+       fp_port_key+'='+str(port_id), subport_id_key+'='+str(subport_id)])
+
 
 def config_intf(args):
 
