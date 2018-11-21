@@ -239,7 +239,7 @@ t_std_error nas_interface_utils_set_port_mac_learn_mode(std::string intf_name, n
     NAS_INTERFACE *i_obj = nullptr;
     if((i_obj = nas_interface_map_obj_get(intf_name)) != nullptr){
         i_obj->set_mac_learn_mode(learn_mode);
-        /*  Check if this is 1Q bridge member or 1D bridge member  */
+        /*  Check if this 1D bridge member  */
         if (i_obj->nas_is_1d_br_member()) {
 
             /*  set untagged subport learn mode  */
@@ -251,13 +251,6 @@ t_std_error nas_interface_utils_set_port_mac_learn_mode(std::string intf_name, n
                     STD_ERR_OK) {
                 EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to update MAC learn mode for subport %s ",
                         intf_name.c_str());
-                return STD_ERR(INTERFACE, FAIL, 0);
-            }
-        } else if (i_obj->nas_is_1q_br_member()) {
-            EV_LOGGING(INTERFACE,DEBUG,"NAS-IF-REG","Update MAC Learn mode to %d for 1Q port of %s ", mode, intf_name.c_str());
-            if (ndi_port_mac_learn_mode_set(npu,port,mode)!=STD_ERR_OK) {
-                EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to update MAC Learn mode to %d for %s ",
-                        mode, intf_name.c_str());
                 return STD_ERR(INTERFACE, FAIL, 0);
             }
         }
@@ -279,6 +272,11 @@ t_std_error nas_interface_utils_set_lag_mac_learn_mode(std::string intf_name, np
     EV_LOGGING(INTERFACE,DEBUG,"NAS-IF-REG","Update MAC Learn mode to %d for %s ", mode, intf_name.c_str());
     BASE_IF_MAC_LEARN_MODE_t learn_mode = nas_common_learn_mode(mode);
     NAS_INTERFACE *i_obj = nullptr;
+    if((rc = ndi_set_lag_learn_mode(0, lag_id, learn_mode)) != STD_ERR_OK){
+        EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to update MAC Learn mode to %d for "
+                        "npu %d lag_id %llx",mode,npu,lag_id);
+    }
+
     if((i_obj = nas_interface_map_obj_get(intf_name)) != nullptr){
         i_obj->set_mac_learn_mode(learn_mode);
         /*  Check if this is 1Q bridge member or 1D bridge member  */
@@ -290,11 +288,6 @@ t_std_error nas_interface_utils_set_lag_mac_learn_mode(std::string intf_name, np
             valu.val = &learn_mode;
             EV_LOGGING(INTERFACE,DEBUG,"NAS-IF-REG","Update MAC Learn mode to %d for 1D subport of %s ", mode, intf_name.c_str());
             ndi_bridge_sub_port_attr_set(npu, lag_id, ndi_port_type_LAG,i_obj->untagged_vlan_id_get(),&valu,1);
-        } else if (i_obj->nas_is_1q_br_member()) {
-            EV_LOGGING(INTERFACE,DEBUG,"NAS-IF-REG","Update MAC Learn mode to %d for 1Q port of %s ", mode, intf_name.c_str());
-            if((rc = ndi_set_lag_learn_mode(0, lag_id, learn_mode))!=STD_ERR_OK){
-                return rc;
-            }
         }
         /*  now set for all 1D bridge tagged members if present */
         nas_com_id_value_t attr;

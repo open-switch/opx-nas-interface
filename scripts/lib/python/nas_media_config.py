@@ -91,7 +91,7 @@ def _get_setting(cps_obj, param_str, param_type):
         except:
             nas_if.log_info(str(k) + ': ' + str(v) + ' not found in ' + config_path + param_str + '/' + param_type + '/config.json file')
             if err_str != '':
-                nas_if.log_info('Media: ' + err_str + ' not found in ' + config_path + param_str + '/' + param_type + '/config.json file')
+                nas_if.log_err('Media: ' + err_str + ' not found in ' + config_path + param_str + '/' + param_type + '/config.json file')
             return None
     p = profiles[config[0]]
 

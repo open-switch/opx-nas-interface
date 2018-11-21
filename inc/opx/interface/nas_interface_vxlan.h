@@ -39,6 +39,8 @@
 
 struct remote_endpoint_t {
     hal_ip_addr_t remote_ip;
+    bool rem_membership; /*  will be set only if remote endpoint IP is explicitly added by vxlan
+                             interface object. */
     bool flooding_enabled;
     bool uc_flooding_enabled;
     bool mc_flooding_enabled;
@@ -48,6 +50,7 @@ struct remote_endpoint_t {
 
     remote_endpoint_t(){
         memset(&remote_ip,0,sizeof(remote_ip));
+        rem_membership = false;
         flooding_enabled = true;
         uc_flooding_enabled = true;
         mc_flooding_enabled = true;

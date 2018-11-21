@@ -197,7 +197,7 @@ void NAS_VXLAN_INTERFACE::nas_interface_publish_remote_endpoint_event(remote_end
 
     if (tunnel_event) {
         /*  Add tunnel ID  */
-        ndi_obj_id_t tunnel_id = (op == cps_api_oper_DELETE) ? 0 : remote_endpoint->tunnel_id;
+        ndi_obj_id_t tunnel_id = remote_endpoint->tunnel_id;
         cps_api_object_attr_add(og.get(), DELL_IF_IF_INTERFACES_INTERFACE_REMOTE_ENDPOINT_TUNNEL_ID,
                                                     (void *)&tunnel_id, sizeof(tunnel_id));
     }

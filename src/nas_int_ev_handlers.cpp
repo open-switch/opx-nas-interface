@@ -65,7 +65,7 @@
 #include <string.h>
 
 
-#define INTERFACE_FILE_NAME "/usr/bin/nas_if_nocreate"
+#define INTERFACE_FILE_NAME "/etc/opx/nas_if_nocreate"
 
 static bool process_intf_os_event = true;
 
@@ -1096,7 +1096,9 @@ static bool nas_vxlan_remote_endpoint_handler_cb(cps_api_object_t obj, void *par
     const char *vxlan_if =  (const char*)cps_api_object_attr_data_bin(_vxlan_if);
 
     remote_endpoint_t rem_ep;
-    rem_ep.flooding_enabled = (bool) cps_api_object_attr_data_u32(_flooding_enable);
+    rem_ep.mac_learn_mode = BASE_IF_MAC_LEARN_MODE_DISABLE;
+    rem_ep.flooding_enabled = rem_ep.uc_flooding_enabled =rem_ep.mc_flooding_enabled  = rem_ep.bc_flooding_enabled =
+                                 (bool) cps_api_object_attr_data_u32(_flooding_enable);
     rem_ep.remote_ip.af_index = (BASE_CMN_AF_TYPE_t)cps_api_object_attr_data_u32(_af_type);
     if(rem_ep.remote_ip.af_index == AF_INET) {
          memcpy(&rem_ep.remote_ip.u.ipv4,cps_api_object_attr_data_bin(_ip_addr),

@@ -185,11 +185,11 @@ def set_if_speed(speed, config, obj):
 
     # Add attribute to CPS object
     if speed is not None and verify_intf_supported_speed(config, speed) == True:
-        obj.add_attr(nas_comm.yang.get_value('speed', 'attr_name'), speed)
+        if fp.is_qsfp28_cap_supported(config.get_fp_port()) != True:
+            obj.add_attr(nas_comm.yang.get_value('speed', 'attr_name'), speed)
 
     config.get_media_obj().add_attr(nas_comm.yang.get_value('speed', 'attr_name'), speed)
     return True
-
 
 def check_if_media_supported(config):
     ''' Method to check if media is supported in platform '''

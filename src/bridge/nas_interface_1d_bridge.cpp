@@ -768,6 +768,10 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_remove_remote_endpoint(BASE_CMN_VNI_t v
     EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Remove remote endpoint to the l2mc group %s", bridge_name.c_str());
     if (rm_endpoint == nullptr)  { return STD_ERR(INTERFACE, FAIL, 0); }
 
+    char buff[HAL_INET6_TEXT_LEN + 1];
+    std_ip_to_string((const hal_ip_addr_t*) &rm_endpoint->remote_ip, buff, HAL_INET6_TEXT_LEN);
+    EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Remove remote endpoint :br %s, remote ip-address %s", bridge_name.c_str(), buff);
+
     if(uc_l2mc_members.find(rm_endpoint->tunnel_id) != uc_l2mc_members.end()){
         rc =  ndi_l2mc_handle_tunnel_member(npu_id, uc_l2mc_group_id, rm_endpoint->tunnel_id, NULL, false);
         if (rc != STD_ERR_OK) {

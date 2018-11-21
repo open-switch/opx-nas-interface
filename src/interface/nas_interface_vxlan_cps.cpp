@@ -334,7 +334,7 @@ static bool _nas_vxlan_handle_remote_endpoints(const std::string & vxlan_name,
         if(bc_flood_attr){
             cur_ep.bc_flooding_enabled = cps_api_object_attr_data_uint(bc_flood_attr);
         }
-
+        cur_ep.rem_membership = true;
         _rem_ep_list.push_back(cur_ep);
     }
 

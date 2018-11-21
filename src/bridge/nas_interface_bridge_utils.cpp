@@ -971,6 +971,9 @@ static t_std_error nas_bridge_utils_set_remote_endpoint_attr(NAS_VXLAN_INTERFACE
 
     t_std_error rc = STD_ERR(INTERFACE, FAIL, 0);
 
+    /*  Copy tunnel Id  */
+    new_rem_ep.tunnel_id = cur_rem_ep.tunnel_id;
+
     if(cur_rem_ep.mac_learn_mode != new_rem_ep.mac_learn_mode){
         if((rc = vxlan_obj->nas_interface_set_mac_learn_remote_endpt(&new_rem_ep))!=STD_ERR_OK){
             return rc;
@@ -1027,6 +1030,12 @@ t_std_error nas_bridge_utils_add_remote_endpoint(const char *vxlan_intf_name,rem
         }
     }
 
+    /*  Case where remote endpoint is created by interface object but further add is coming from an event
+     *  from NAS-MAC then simply return */
+    if ((entry_exist) && ((remote_endpoint_entry.rem_membership) && (!rem_ep.rem_membership))) {
+        EV_LOGGING(INTERFACE,INFO ,"NAS-BRIDGE", " remote member is added by interface object and add is from MAC event.");
+        return STD_ERR_OK;
+    }
     std::string bridge_name = vxlan_obj->get_bridge_name();
     bool tunnel_created = false;
     if (bridge_name.empty()) {
@@ -1104,6 +1113,12 @@ t_std_error nas_bridge_utils_update_remote_endpoint(const char *vxlan_intf_name,
         return rc;
     }
 
+    /*  Case where remote endpoint is created by interface object but further add is coming from an event
+     *  from NAS-MAC then simply return */
+    if ((cur_rem_ep.rem_membership) && (!rem_ep.rem_membership)) {
+        EV_LOGGING(INTERFACE,INFO ,"NAS-BRIDGE", " remote member is added by interface object but update is from MAC event.");
+        return STD_ERR_OK;
+    }
     if (vxlan_obj->bridge_name.empty()) {
         EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE","Vxlan interface %s is not part of any bridge",vxlan_intf_name);
         return rc;
@@ -1129,10 +1144,25 @@ t_std_error nas_bridge_utils_remove_remote_endpoint(const char *vxlan_intf_name,
     std::string _if_name = std::string(vxlan_intf_name);
     NAS_VXLAN_INTERFACE *vxlan_obj = (NAS_VXLAN_INTERFACE *)nas_interface_map_obj_get(_if_name);
     if (vxlan_obj == nullptr) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Bridge mmber addition failed  vxlan interface not found");
+        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " remote enpoint removal failed  vxlan interface not found %s", vxlan_intf_name);
         return rc;
     }
 
+    char buff[HAL_INET6_TEXT_LEN + 1];
+    std_ip_to_string((const hal_ip_addr_t*) &rem_ep.remote_ip, buff, HAL_INET6_TEXT_LEN);
+    EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Remove remote endpoint :vxlan_intf %s, remote ip-address %s", vxlan_intf_name, buff);
+    remote_endpoint_t cur_rem_ep;
+    cur_rem_ep.remote_ip = rem_ep.remote_ip;
+    if (vxlan_obj->nas_interface_get_remote_endpoint(&cur_rem_ep) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Remove remote endpoint : not present vxlan_intf %s, remote ip-address %s", vxlan_intf_name, buff);
+        return STD_ERR_OK;
+    }
+    /*  Case where remote endpoint is created by interface object but remove is coming from an event
+     *  from NAS-MAC upon final remote MAC deletion then do not delete the remote mac simply return */
+    if ((cur_rem_ep.rem_membership) && (!rem_ep.rem_membership)) {
+        EV_LOGGING(INTERFACE,INFO ,"NAS-BRIDGE", " remote member is added by interface object but delete is from MAC event.");
+        return STD_ERR_OK;
+    }
     vxlan_obj->nas_interface_remove_remote_endpoint(&rem_ep);
 
     /*  Check if vxlan has 1d bridge associated */

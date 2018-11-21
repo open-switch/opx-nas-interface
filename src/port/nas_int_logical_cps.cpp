@@ -865,6 +865,14 @@ static cps_api_return_code_t _set_mac_learn_mode(npu_id_t npu, port_t port, cps_
     BASE_IF_PHY_MAC_LEARN_MODE_t mode = (BASE_IF_PHY_MAC_LEARN_MODE_t)
                                        cps_api_object_attr_data_u32(mac_learn_mode);
 
+    if (ndi_port_mac_learn_mode_set(npu,port,mode)!=STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to update MAC Learn mode to %d for "
+               "npu %d port %d",mode,npu,port);
+    } else {
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-IF-REG","Updated MAC Learn mode to %d for "
+               "npu %d port %d",mode,npu,port);
+
+    }
     cps_api_object_attr_t _ifix = cps_api_object_attr_get(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
     cps_api_object_attr_t _name = cps_api_get_key_data(obj,IF_INTERFACES_INTERFACE_NAME);
     if(_ifix){

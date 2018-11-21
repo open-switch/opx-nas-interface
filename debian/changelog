@@ -1,12 +1,21 @@
+opx-nas-interface (5.20.3+opx3) unstable; urgency=medium
+
+  * Bugfix: OOM and FCoE sessions flaps
+  * Bugfix: None of the remote MACs are present in log output
+  * Bugfix: Remote endpoint failed for few of the VNs when the remote VTEP came
+            back after a reload
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Sun, 18 Nov 2018  11:36:00 -0800
+
 opx-nas-interface (5.20.3+opx2) unstable; urgency=medium
 
-  * Update: integrate interface create/del with fanout config for Z9264 
+  * Update: integrate interface create/del with fanout config for Z9264
 
  -- Dell EMC <ops-dev@lists.openswitch.net>  Wed, 14 Nov 2018  11:36:00 -0800
 
 opx-nas-interface (5.20.3+opx1) unstable; urgency=medium
 
-  * Update: fanout config persistency 
+  * Update: fanout config persistency
 
  -- Dell EMC <ops-dev@lists.openswitch.net>  Fri, 02 Nov 2018  11:36:00 -0800
 
