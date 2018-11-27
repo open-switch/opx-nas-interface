@@ -1,5 +1,12 @@
 opx-nas-interface (5.20.3+opx3) unstable; urgency=medium
 
+  * Bugfix: Fix opx-create-interface service so interface settings get properly
+            applied
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 25 Nov 2018  11:36:00 -0800
+
+opx-nas-interface (5.20.3+opx3) unstable; urgency=medium
+
   * Bugfix: OOM and FCoE sessions flaps
   * Bugfix: None of the remote MACs are present in log output
   * Bugfix: Remote endpoint failed for few of the VNs when the remote VTEP came
