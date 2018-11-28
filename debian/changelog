@@ -1,4 +1,13 @@
-opx-nas-interface (5.20.3+opx3) unstable; urgency=medium
+opx-nas-interface (5.20.3+opx5) unstable; urgency=medium
+
+  * Bugfix: Bring down all interfaces (excluding system loopback) before Networking
+            service restarts to ensure all interface settings in /etc/network/interfaces
+            are properly programmed into the NPU via NetLink messages
+  * Update: Correct debian/changelog version number
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Tue, 27 Nov 2018  11:36:00 -0800
+
+opx-nas-interface (5.20.3+opx4) unstable; urgency=medium
 
   * Bugfix: Fix opx-create-interface service so interface settings get properly
             applied
