@@ -1,3 +1,9 @@
+opx-nas-interface (5.20.3+opx6) unstable; urgency=medium
+
+  * Bugfix: fix fanout doesn't work in z9264 issue 
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Fri, 30 Nov 2018  11:36:00 -0800
+
 opx-nas-interface (5.20.3+opx5) unstable; urgency=medium
 
   * Bugfix: Bring down all interfaces (excluding system loopback) before Networking

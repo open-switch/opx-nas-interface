@@ -64,7 +64,7 @@ def _parse_args(args):
                 return hg_utils.set_hg(hg_name=args.name, profile=args.profile)
 
             if args.config == 'port':
-                br_mode,port_speed = nas_comm.yang.get_value(args._breakout, 'yang-breakout-port-speed')
+                br_mode,port_speed = nas_comm.yang.get_value(args.breakout, 'yang-breakout-port-speed')
                 hg_utils.set_hg(hg_name=args.name, port_id=args.port_id, br_mode=br_mode, port_speed=port_speed, phy_mode=nas_comm.yang.get_tbl('yang-phy-mode')[args.phy_mode])
                 subport_count = get_subport_from_breakout(args.breakout)
                 for subport_id in range(1,subport_count+1):
