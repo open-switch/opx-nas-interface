@@ -1,6 +1,12 @@
+opx-nas-interface (5.20.3+opx7) unstable; urgency=medium
+
+  * Update: Copyright information
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 10 Dec 2018  11:36:00 -0800
+
 opx-nas-interface (5.20.3+opx6) unstable; urgency=medium
 
-  * Bugfix: fix fanout doesn't work in z9264 issue 
+  * Bugfix: fix fanout doesn't work in z9264 issue
 
  -- Dell EMC <ops-dev@lists.openswitch.net>  Fri, 30 Nov 2018  11:36:00 -0800
 
