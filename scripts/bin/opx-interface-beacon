@@ -1,3 +1,4 @@
+#!/usr/bin/python
 #
 # Copyright (c) 2018 Dell Inc.
 #
@@ -14,7 +15,6 @@
 # permissions and limitations under the License.
 #
 
-#!/usr/bin/python
 
 import sys
 import cps

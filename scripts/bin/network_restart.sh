@@ -1,3 +1,4 @@
+#!/bin/sh
 #
 # Copyright (c) 2018 Dell Inc.
 #
@@ -14,7 +15,6 @@
 # permissions and limitations under the License.
 #
 
-#!/bin/sh
 
 # Bring down all interfaces (except system loopback) before restarting Networking service
 # to ensure that all interface settings gets programmed into the NPU
