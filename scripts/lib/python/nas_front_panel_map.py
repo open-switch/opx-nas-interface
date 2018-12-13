@@ -189,10 +189,7 @@ class PortProfile(object):
         return self.phy_mode_caps[:]
 
     def is_fc_supported(self):
-        if nas_comm.yang.get_value('fc', 'yang-phy-mode') in self.phy_mode_caps:
-            return True
-        else:
-            return False
+        return nas_comm.yang.get_value('fc', 'yang-phy-mode') in self.phy_mode_caps
 
     def get_hwp_speed(self):
         return self.hwp_speed
@@ -416,16 +413,10 @@ class Port(PortProfile):
         self.hybrid_profile = hybrid_profile
 
     def is_hg_member(self):
-        if self.hybrid_group_id is None:
-            return False
-        else:
-            return True
+        return not (self.hybrid_group_id is None)
 
     def is_pg_member(self):
-        if self.port_group_id is None:
-            return False
-        else:
-            return True
+        return not (self.port_group_id is None)
 
     def control_port(self):
         if self.hwports is None or len(self.hwports) == 0:

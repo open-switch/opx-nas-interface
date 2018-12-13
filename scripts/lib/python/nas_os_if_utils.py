@@ -707,17 +707,22 @@ def get_breakoutCap_currentMode_mode(if_index):
 
 def get_port_breakoutCap_currentMode_mode(fp_port):
     fp_list = nas_os_fp_list(d={'front-panel-port':fp_port})
-    if fp_list == None or len(fp_list) == 0:
+    if fp_list is None or len(fp_list) == 0:
         log_err('failed to get object of front panel port %d' % fp_port)
         return None
     fp_port_obj = cps_object.CPSObject(obj=fp_list[0])
 
     br_cap_list = fp_port_obj.get_attr_data('br-cap')
     breakout_cap = []
-    for cap_key,cap_item in br_cap_list.items():
-        br_mode = cap_item['breakout-mode']
-        if br_mode not in breakout_cap:
-            breakout_cap.append(br_mode)
+
+    for cap_items in br_cap_list.values():
+        for cap_item_key in cap_items.keys():
+            if 'breakout-mode' in cap_item_key:
+                br_mode = cap_items[cap_item_key]
+                if br_mode not in breakout_cap:
+                    breakout_cap.append(br_mode)
+                break
+
     current_mode = fp_port_obj.get_attr_data('breakout-mode')
     return (breakout_cap,current_mode)
 

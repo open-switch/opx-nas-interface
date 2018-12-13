@@ -395,7 +395,7 @@ def get_mac_offset_from_fp(fp_port, sub_port, fp_cache = None):
 
 def init_profile():
 
-     while cps.enabled(nas_comm.yang.get_tbl('keys_id')['switch_key'])  == False:
+     while cps.enabled(nas_comm.yang.get_tbl('keys_id')['switch_key']) is False:
         nas_if.log_err('Switch profile service not yet ready')
         time.sleep(1)
 

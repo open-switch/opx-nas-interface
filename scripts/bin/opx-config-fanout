@@ -69,11 +69,18 @@ if __name__ == '__main__':
     br_cap_list = fp_obj.get_attr_data('br-cap')
     breakout_cap = []
     port_speed_cap = []
-    for cap_key,cap_item in br_cap_list.items():
-        br_cap = cap_item['breakout-mode']
-        if br_cap not in breakout_cap:
-            breakout_cap.append(br_cap)
-            port_speed_cap.append(cap_item['port-speed'])
+    br_mode = None
+    br_port_speed = None
+
+    for cap_items in br_cap_list.values():
+        for cap_item_key in cap_items.keys():
+            if 'breakout-mode' in cap_item_key:
+                br_mode = cap_items[cap_item_key]
+            if 'port-speed' in cap_item_key:
+                br_port_speed = cap_items[cap_item_key]
+        if br_mode not in breakout_cap:
+            breakout_cap.append(br_mode)
+            port_speed_cap.append(br_port_speed)
 
     if _mode not in breakout_cap:
         print 'breakout mode %d not supported on this port' % _mode
