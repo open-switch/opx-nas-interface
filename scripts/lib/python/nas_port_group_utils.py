@@ -271,10 +271,10 @@ def get_int_pg_cb(methods, params):
     return True
 
 # following is the mapping of breakout mode to valid front panel port offset
-sfp_pg_br_to_fp_map = {
-        nas_comm.yang.get_value('4x4', 'yang-breakout-mode'): [0, 1, 2, 3],
-        nas_comm.yang.get_value('2x4', 'yang-breakout-mode'): [0, 2],
-        }
+#sfp_pg_br_to_fp_map = {
+#        nas_comm.yang.get_value('4x4', 'yang-breakout-mode'): [0, 1, 2, 3],
+#        nas_comm.yang.get_value('2x4', 'yang-breakout-mode'): [0, 2],
+#        }
 
 # Set config handler for unified SFP port group type.
 def set_sfp_port_group_config(pg, br_mode, port_speed, phy_mode):

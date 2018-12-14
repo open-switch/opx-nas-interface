@@ -1,3 +1,11 @@
+opx-nas-interface (5.20.3+opx11) unstable; urgency=medium
+
+  * Update: add changes to support port groups
+  * Fix: fix opx-ethtool and opx-config-fanout in s5248 and s5296
+  * Update: add 4x4 breakout mode allowed speed
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 13 Dec 2018  18:36:00 -0800
+
 opx-nas-interface (5.20.3+opx10) unstable; urgency=medium
 
   * Update: Move opx-config-vrf to opx-tool repo

@@ -216,7 +216,9 @@ class YangValues(object):
                 'breakout-allowed-speed' : {
                     '1x1' : ('40g', '100g'),
                     '2x1' : ('20g', '50g'),
-                    '4x1' : ('10g', '25g')
+                    '4x1' : ('10g', '25g'),
+                    '4x4' : ('10g', '25g')
+					
                 }
             }
             yang_values.update(extra_values)

@@ -19,6 +19,9 @@ import cps_object
 import bytearray_utils
 import event_log as ev
 
+import nas_fp_port_utils as fp_utils
+import nas_front_panel_map as fp
+import nas_port_group_utils as nas_pg
 import nas_common_header as nas_comm
 import nas_media_config as media_config
 import nas_yang_values as yv
@@ -28,7 +31,9 @@ nas_os_if_keys = {'interface': 'dell-base-if-cmn/if/interfaces/interface',
         'interface-state': 'dell-base-if-cmn/if/interfaces-state/interface',
         'physical': 'base-if-phy/physical',
         'hardware-port' : 'base-if-phy/hardware-port',
-        'front-panel-port' : 'base-if-phy/front-panel-port' }
+        'front-panel-port' : 'base-if-phy/front-panel-port',
+        'port-group-state' : 'base-pg/dell-pg/port-groups-state/port-group-state',
+        'port-group' : 'base-pg/dell-pg/port-groups/port-group' }
 
 default_chassis_id = 1
 default_slot_id = 1
@@ -61,6 +66,12 @@ def get_if_key():
 def get_if_state_key():
     return nas_os_if_keys['interface-state']
 
+def get_pg_state_key():
+    return nas_os_if_keys['port-group-state']
+
+def get_pg_key():
+    return nas_os_if_keys['port-group']
+
 def get_physical_key():
     return nas_os_if_keys['physical']
 
@@ -78,21 +89,23 @@ cps_utils.add_attr_type('dell-if/if/interfaces/interface/phys-address', 'string'
 def set_obj_val(obj, key, val):
     obj.add_attr(key, val)
 
-
 def make_if_obj(d={}):
     return cps_object.CPSObject(module=get_if_key(), data=d)
 
 def make_if_state_obj(d={}):
     return cps_object.CPSObject(module=get_if_state_key(),qual='observed', data=d)
 
+def make_pg_state_obj(d={}):
+    return cps_object.CPSObject(module=get_pg_state_key(),qual='observed', data=d)
+
+def make_pg_obj(d={}):
+    return cps_object.CPSObject(module=get_pg_key(), data=d)
 
 def make_phy_obj(d={}):
     return cps_object.CPSObject(module=get_physical_key(), data=d)
 
-
 def make_hwport_obj(d={}):
     return cps_object.CPSObject(module=get_hw_key(), data=d)
-
 
 def make_fp_obj(d={}):
     return cps_object.CPSObject(module=get_fp_key(), data=d)
@@ -133,6 +146,21 @@ def nas_os_if_state_list(d={}):
         return l
     return None
 
+def nas_os_pg_state_list(d={}):
+    l = []
+    filt = make_pg_state_obj(d)
+    cps_utils.print_obj(filt.get(),show_key=False)
+    if cps.get([filt.get()], l):
+        return l
+    return None
+
+def nas_os_pg_list(d={}):
+    l = []
+    filt = make_pg_obj(d)
+    cps_utils.print_obj(filt.get(),show_key=False)
+    if cps.get([filt.get()], l):
+	return l
+    return None
 
 def nas_os_phy_list(d={}):
     l = []
@@ -398,7 +426,6 @@ def create_interface_set_obj(if_name, attr_list):
 def physical_ports_for_front_panel_port(fp_obj):
     # replace with object get attr data
     ports = fp_obj.get()['data']['base-if-phy/front-panel-port/port']
-
     npu = fp_obj.get_attr_data('npu-id')
     fp_port = fp_obj.get_attr_data('front-panel-port')
 
@@ -409,6 +436,7 @@ def physical_ports_for_front_panel_port(fp_obj):
     for i in ports:
         try:
             _port = cps_object.types.from_data('base-if-phy/front-panel-port/port', i)
+            print "_port",_port 
             phy_port = phy_port_cache.get_by_hw_port(npu, _port)
             if phy_port is None:
                 continue
@@ -705,14 +733,35 @@ def get_breakoutCap_currentMode_mode(if_index):
         return None
     return (get_port_breakoutCap_currentMode_mode(fp_port))
 
-def get_port_breakoutCap_currentMode_mode(fp_port):
-    fp_list = nas_os_fp_list(d={'front-panel-port':fp_port})
-    if fp_list is None or len(fp_list) == 0:
-        log_err('failed to get object of front panel port %d' % fp_port)
-        return None
-    fp_port_obj = cps_object.CPSObject(obj=fp_list[0])
+def get_pg_br_cap_list(pg_id):
+    pg_list = nas_os_pg_state_list(d={'dell-pg/port-groups-state/port-group-state/id':pg_id})
+    pg_port_obj = cps_object.CPSObject(obj=pg_list[0])
+    br_cap_list = pg_port_obj.get_attr_data('br-cap')
+    return br_cap_list
 
-    br_cap_list = fp_port_obj.get_attr_data('br-cap')
+def get_port_breakoutCap_currentMode_mode(fp_port):
+    fp_utils.init()
+    fp_details = fp.find_front_panel_port(fp_port)
+    if fp_details.is_pg_member() is True:
+        pg_name_list=fp.get_port_group_list()
+        pg_id = fp_details.get_port_group_id()	
+        pg = pg_name_list[pg_id]
+        print "Port-group profile type:", pg.get_profile_type()
+        br_cap_list = get_pg_br_cap_list(pg_id) 
+        pg_data_list = nas_os_pg_list(d={'dell-pg/port-groups/port-group/id':pg_id})
+        obj=cps_object.CPSObject(obj=pg_data_list[0])
+        current_mode = obj.get_attr_data(nas_pg.pg_attr('breakout-mode'))
+        print "Current breakout-mode:", current_mode
+        current_speed = obj.get_attr_data(nas_pg.pg_attr('port-speed'))
+        print "Current port-speed:", current_speed
+    else:            
+        fp_list = nas_os_fp_list(d={'front-panel-port':fp_port})
+        if fp_list is None or len(fp_list) == 0:
+                log_err('failed to get object of front panel port %d' % fp_port)
+                return None
+        fp_port_obj = cps_object.CPSObject(obj=fp_list[0])
+        br_cap_list = fp_port_obj.get_attr_data('br-cap')
+        current_mode = fp_port_obj.get_attr_data('breakout-mode')
     breakout_cap = []
 
     for cap_items in br_cap_list.values():
@@ -723,7 +772,6 @@ def get_port_breakoutCap_currentMode_mode(fp_port):
                     breakout_cap.append(br_mode)
                 break
 
-    current_mode = fp_port_obj.get_attr_data('breakout-mode')
     return (breakout_cap,current_mode)
 
 def get_cps_attr(obj,attr_name):
@@ -733,5 +781,4 @@ def get_cps_attr(obj,attr_name):
     except:
         return None
     return attr
-
 
