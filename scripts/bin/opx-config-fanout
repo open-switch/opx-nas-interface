@@ -40,7 +40,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.pg_name and args.port:
-        print "Enter either the port-group or port"
+        print "Specify --port or --pg_name, but not both"
         sys.exit(0)
 
     pg_id = args.pg_name     
@@ -77,8 +77,8 @@ if __name__ == '__main__':
         port = fp.find_front_panel_port(fp_port_id)
         if port.is_pg_member() is True:
             pg_id = port.get_port_group_id()
-            print "port grp exists on platform, enter port group"
-            print "For port:",fp_port_id,",port-group is:",pg_id
+            print "Port groups exist on platform, specify --pg_name"
+            print "For given port:",fp_port_id,",port-group is:",pg_id
             sys.exit(0)
         fp_obj = nas_fp_cache.get(front_port[0])
         if fp_obj is None:
@@ -94,7 +94,7 @@ if __name__ == '__main__':
     if args.pg_name:
         pg_name_list=fp.get_port_group_list()
         if pg_id in pg_name_list:
-            print "given port group name is valid"
+            print "Given port group name is valid"
         else:
             print "Given Port Group does not exist"
             sys.exit(0)
@@ -146,7 +146,7 @@ if __name__ == '__main__':
             if if_port is None:
                 continue
             if_name = if_port.get_attr_data(_g_if_name)
-            print "Deleting.. %s" % if_name
+            print "Deleting... %s" % if_name
             cps_obj = cps_object.CPSObject(module = 'dell-base-if-cmn/set-interface',
                                            data = {'dell-base-if-cmn/set-interface/input/operation': 2,
                                                    _g_if_name: if_name})
@@ -154,8 +154,6 @@ if __name__ == '__main__':
     
         tr = cps_utils.CPSTransaction(l)
         tr.commit()
-        print "tr.commit() status"
-        print "done deleting"
         obj = cps_object.CPSObject(module='base-if-phy/breakout',
                                    data={
                                    'base-if-phy/breakout/input/front-panel-port':
@@ -167,7 +165,7 @@ if __name__ == '__main__':
         tr = cps_utils.CPSTransaction([('rpc', obj.get())])
 
         if tr.commit() == False:
-            print "Failed........."
+            print "Failed..."
 
             # revert ports delete
             l = []
@@ -184,16 +182,16 @@ if __name__ == '__main__':
             if tr.commit() == False:
                 print "Failed to create interfaces"
             else:
-                print "Successfully created interfaces..."
+                print "Successfully created interfaces"
         else:
-            print "Completed.............."
+            print "Completed..."
 
             # look at thephysical port and determine the number of hardware ports
             # that exist
             target_number_of_ports = len(
                     fp_obj.get()['data']['base-if-phy/front-panel-port/port'])
+
             # if the mode is breakin... then need to create one port only
-            print "mode is",_mode
             if _mode == 4:  # 1x1
                 target_number_of_ports = 1
             elif _mode == 3: # 2x1
@@ -208,8 +206,6 @@ if __name__ == '__main__':
             # wait for all of the physical ports to appear - depends on timing
                 time.sleep(1)
                 phy_port_list = nas_if.physical_ports_for_front_panel_port(fp_obj)
-                print "len list",len(phy_port_list)
-                print "phy_port_list",phy_port_list
 
             l = []
             ifnames = []
@@ -230,10 +226,10 @@ if __name__ == '__main__':
             if tr.commit() == False:
                 print "Failed to create interfaces for breakout operation"
             else:
-                print "Successfully created interfaces..."
+                print "Successfully created interfaces"
 
             # init qos default
             base_qos_init.init_interfaces(ifnames)
     if pg_id:
-        print "change port-group breakout mode and port speed configuration"
+        print "Change port-group breakout mode and port speed configuration"
         call(["nas_port_group_cmd.py", '-s', pg_id, '-b', br_mode, '-S', port_speed])

@@ -44,7 +44,6 @@ def base_pg_state_attr(t):
 
 
 
-
 # Return Phy port Speed( Yang enum value)  based on Breakout mode , hwport speed( in Mbps), Phy mode
 
 # Returns hwp port speed in the Ethernet Mbps ( 10000 Mbps or 25000 Mbps)
@@ -270,11 +269,6 @@ def get_int_pg_cb(methods, params):
         return False
     return True
 
-# following is the mapping of breakout mode to valid front panel port offset
-#sfp_pg_br_to_fp_map = {
-#        nas_comm.yang.get_value('4x4', 'yang-breakout-mode'): [0, 1, 2, 3],
-#        nas_comm.yang.get_value('2x4', 'yang-breakout-mode'): [0, 2],
-#        }
 
 # Set config handler for unified SFP port group type.
 def set_sfp_port_group_config(pg, br_mode, port_speed, phy_mode):
