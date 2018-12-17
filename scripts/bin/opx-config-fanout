@@ -36,19 +36,19 @@ if __name__ == '__main__':
     parser.add_argument("--mode",  help="Set Port group config", required=True)
     parser.add_argument("--speed",  help="Set Port group config", required=True)
     parser.add_argument("--pg_name", help="Port Group Name")
-    
+
     args = parser.parse_args()
 
     if args.pg_name and args.port:
         print "Specify --port or --pg_name, but not both"
         sys.exit(0)
 
-    pg_id = args.pg_name     
+    pg_id = args.pg_name
     br_mode = args.mode
     if br_mode not in nas_comm.yang.get_tbl('yang-breakout-mode'):
         print 'Invalid breakout mode %s' % br_mode
         sys.exit(0)
-    port_speed = args.speed    
+    port_speed = args.speed
     if port_speed not in nas_comm.yang.get_tbl('yang-speed'):
         print 'Invalid port speed %s' % port_speed
         sys.exit(0)
@@ -98,16 +98,16 @@ if __name__ == '__main__':
         else:
             print "Given Port Group does not exist"
             sys.exit(0)
-        br_cap_list = nas_if.get_pg_br_cap_list(pg_id)      
-        pg = pg_name_list[pg_id]	#port-group obj	
-        print "Port-group profile type:", pg.get_profile_type() 
+        br_cap_list = nas_if.get_pg_br_cap_list(pg_id)
+        pg = pg_name_list[pg_id]	#port-group obj
+        print "Port-group profile type:", pg.get_profile_type()
         l=nas_if.nas_os_pg_list(d={'dell-pg/port-groups/port-group/id':pg_id})
         obj=cps_object.CPSObject(obj=l[0])
         current_mode = obj.get_attr_data(nas_pg.pg_attr('breakout-mode'))
         print "Current breakout-mode:", current_mode
         current_speed = obj.get_attr_data(nas_pg.pg_attr('port-speed'))
         print "Current port-speed:", current_speed
-        fp_list = pg.get_fp_ports() 
+        fp_list = pg.get_fp_ports()
         print "List of ports in port group:", fp_list
 
     if current_mode == _mode and current_speed == _speed:
@@ -135,7 +135,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     for fp in fp_list:
-        fp_obj = nas_fp_cache.get(int(fp))
+        fp_obj = nas_fp_cache.get(int(fp[0]))
         l = []
         npu = fp_obj.get_attr_data('npu-id')
         phy_port_list = nas_if.physical_ports_for_front_panel_port(fp_obj)
@@ -151,7 +151,7 @@ if __name__ == '__main__':
                                            data = {'dell-base-if-cmn/set-interface/input/operation': 2,
                                                    _g_if_name: if_name})
             l.append(('rpc', cps_obj.get()))
-    
+
         tr = cps_utils.CPSTransaction(l)
         tr.commit()
         obj = cps_object.CPSObject(module='base-if-phy/breakout',
@@ -196,8 +196,8 @@ if __name__ == '__main__':
                 target_number_of_ports = 1
             elif _mode == 3: # 2x1
                 target_number_of_ports = 2
-            elif _mode == 7: # 4x4 
-                target_number_of_ports = 1 
+            elif _mode == 7: # 4x4
+                target_number_of_ports = 1
             else: # 4x1
                 target_number_of_ports = 4
 
