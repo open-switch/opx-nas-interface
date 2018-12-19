@@ -135,7 +135,9 @@ if __name__ == '__main__':
         sys.exit(1)
 
     for fp in fp_list:
-        fp_obj = nas_fp_cache.get(int(fp[0]))
+        if isinstance(fp, tuple):
+            fp = fp[0]
+        fp_obj = nas_fp_cache.get(int(fp))
         l = []
         npu = fp_obj.get_attr_data('npu-id')
         phy_port_list = nas_if.physical_ports_for_front_panel_port(fp_obj)
