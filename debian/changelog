@@ -1,3 +1,10 @@
+opx-nas-interface (5.20.3+opx15) unstable; urgency=medium
+
+  * Bugfix: resolve issue in opx-config-fanout when interface index 
+            given as argument instead of interface name, github issue #85
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Thu, 20 Dec 2018  08:36:00 -0800
+
 opx-nas-interface (5.20.3+opx14) unstable; urgency=medium
 
   * Bugfix: opx-config-fanout traceback on s5248

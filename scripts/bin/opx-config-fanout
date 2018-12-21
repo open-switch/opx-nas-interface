@@ -80,7 +80,7 @@ if __name__ == '__main__':
             print "Port groups exist on platform, specify --pg_name"
             print "For given port:",fp_port_id,",port-group is:",pg_id
             sys.exit(0)
-        fp_obj = nas_fp_cache.get(front_port[0])
+        fp_obj = nas_fp_cache.get(fp_port_id)
         if fp_obj is None:
             print "Invalid front panel port specified..."
             print "Please choose from one of the following..."
@@ -89,7 +89,7 @@ if __name__ == '__main__':
         br_cap_list = fp_obj.get_attr_data('br-cap')
         current_mode = fp_obj.get_attr_data('breakout-mode')
         current_speed = fp_obj.get_attr_data('port-speed')
-        fp_list = [front_port]
+        fp_list = [fp_port_id]
 
     if args.pg_name:
         pg_name_list=fp.get_port_group_list()
