@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -41,13 +41,14 @@
 #include "nas_ndi_lag.h"
 #include "nas_ndi_port.h"
 
-#include <stdint.h>
 #include <iostream>
 #include <vector>
 #include <string>
 #include <stdlib.h>
 #include <algorithm>
 #include <unordered_set>
+
+#define NAS_BRIDGE_INTF_DEFAULT_MTU 1532
 
 typedef std::unordered_set<std::string> memberlist_t;
 
@@ -60,23 +61,11 @@ typedef enum {
 class NAS_BRIDGE {
 
     public:
-        std::string           mac_addr;
-        bool                   learning_disable;
-        BASE_IF_MAC_LEARN_MODE_t  learning_mode;
 
         bool source_cps;
-        bool                  admin_status;
-
-        uint32_t              mtu;
         uint64_t              type;
         model_type_t          model_type; // VLAN bridge can be created either by using interface yang model
                                           // with intf type vlan or Bridge Yang model
-
-
-        BASE_IF_MODE_t   l3_mode;  // In case of L3 scale mode sub interfaces are created inthe kernel for
-                                        // and added in the bridge. Otherwise it is just updated inthe NPU.
-                                        // in Case of non-L3 mode , there is not need to allocate resources in the
-                                        // kernel for sub-interfaces.
 
         hal_ifindex_t         if_index;
         npu_id_t              npu_id;
@@ -98,8 +87,9 @@ class NAS_BRIDGE {
             npu_id             = 0;
             if_index           = idx;
             model_type         = BRIDGE_MODEL;
-            l3_mode            = BASE_IF_MODE_MODE_L3;
             source_cps = false;
+            learning_mode = BASE_IF_MAC_LEARN_MODE_HW;
+            mtu = NAS_BRIDGE_INTF_DEFAULT_MTU;
         }
 
         virtual ~NAS_BRIDGE() {}
@@ -111,6 +101,7 @@ class NAS_BRIDGE {
         virtual t_std_error nas_bridge_intf_cntrl_block_register(hal_intf_reg_op_type_t op) = 0;
         virtual cps_api_return_code_t nas_bridge_fill_info(cps_api_object_t obj) = 0;
         virtual t_std_error nas_bridge_associate_npu_port(std::string &mem_name, ndi_port_t *port, nas_port_mode_t port_mode, bool associate) = 0;
+        virtual bool nas_add_sub_interface() = 0;
         void nas_bridge_for_each_member(std::function <void (std::string mem_name, nas_port_mode_t port_mode)> fn);
         bool nas_bridge_multiple_vlans_present(void);
         bool nas_bridge_tagged_member_present(void);
@@ -132,7 +123,6 @@ class NAS_BRIDGE {
         t_std_error nas_bridge_set_lag_tag_untag_drop(npu_id_t npu_id, ndi_obj_id_t lag_id ,hal_ifindex_t ifx);
         cps_api_return_code_t nas_bridge_fill_com_info(cps_api_object_t obj);
 
-
         bool is_source_cps (void) { return source_cps;}
         void set_source_cps (void) {source_cps = true;}
         hal_ifindex_t get_bridge_intf_index(void) { return if_index;}
@@ -141,8 +131,6 @@ class NAS_BRIDGE {
         void set_bridge_model(model_type_t _type) { model_type = _type;}
         void set_bridge_mac_learn_mode(BASE_IF_MAC_LEARN_MODE_t mode) { learning_mode = mode;}
         BASE_IF_MAC_LEARN_MODE_t get_bridge_mac_learn_mode(void) { return learning_mode; }
-        BASE_IF_MODE_t bridge_l3_mode_get(void) { return l3_mode;}
-        void bridge_l3_mode_set(BASE_IF_MODE_t mode) { l3_mode = mode;}
         std::string bridge_parent_bridge_get(void) { return parent_bridge;}
         void bridge_parent_bridge_set(std::string &p_bridge) { parent_bridge = p_bridge;}
         void bridge_parent_bridge_clear(void) { parent_bridge.clear();}
@@ -167,13 +155,30 @@ class NAS_BRIDGE {
         t_std_error nas_bridge_set_attribute(cps_api_object_t obj,cps_api_object_it_t & it);
         t_std_error nas_bridge_os_add_remove_member(std::string & mem_name, nas_port_mode_t port_mode, bool add);
         t_std_error nas_bridge_os_add_remove_memberlist(memberlist_t & memlist, nas_port_mode_t port_mode, bool add);
+        std::string get_bridge_mac(void) {return mac_addr;}
+        void nas_bridge_os_set_mtu (void);
+        void nas_bridge_set_mtu (void);
+        void nas_bridge_set_mac_address(
+                std::string &mac_addr_string) { mac_addr.assign(mac_addr_string); }
 
-    private:
+    protected:
+        uint32_t nas_bridge_get_mtu(void) { return(mtu); }
+        virtual t_std_error nas_bridge_set_mtu(cps_api_object_t obj, cps_api_object_it_t & it);
         t_std_error nas_bridge_set_admin_status(cps_api_object_t obj, cps_api_object_it_t & it);
         t_std_error nas_bridge_set_mac_address(cps_api_object_t obj, cps_api_object_it_t & it);
-        t_std_error nas_bridge_set_mtu(cps_api_object_t obj, cps_api_object_it_t & it);
+        void nas_bridge_com_set_learning_disable(bool disable);
+
+    private:
+        std::string               mac_addr;
+        bool                      learning_disable;
+        BASE_IF_MAC_LEARN_MODE_t  learning_mode;
+        bool                      admin_status;
+        uint32_t                  mtu;
+
         cps_api_return_code_t nas_bridge_fill_bridge_model_com_info(cps_api_object_t obj);
         cps_api_return_code_t nas_bridge_fill_vlan_intf_model_com_info(cps_api_object_t obj);
+        bool get_bridge_enabled(void) { return admin_status; }
+        uint32_t get_bridge_mtu(void) { return mtu; }
 
 };
 

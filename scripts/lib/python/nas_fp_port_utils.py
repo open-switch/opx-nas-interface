@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -116,7 +116,8 @@ def gen_fp_port_list(obj, resp):
                                         'port-speed':port.get_port_speed(),
                                         'default-phy-mode':port.get_def_phy_mode(),
                                         'default-breakout-mode':port.get_def_breakout(),
-                                        'default-port-speed':port.get_default_phy_port_speed()
+                                        'default-port-speed':port.get_default_phy_port_speed(),
+                                        'profile-type':port.get_profile_type()
                                         })
             if port.is_pg_member() == False:
                 breakout_mode = port.get_breakout_mode()
@@ -125,6 +126,8 @@ def gen_fp_port_list(obj, resp):
             resp.append(elem.get())
             if port.is_pg_member() == False:
                 create_and_add_fp_caps(port, resp)
+            elif port.is_pg_member() == True:
+                elem.add_attr('port-group',port.get_port_group_id())
 
 # Generate HW port obj list
 def _gen_npu_lanes(obj, resp):

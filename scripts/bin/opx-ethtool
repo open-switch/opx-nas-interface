@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -21,7 +21,6 @@ import cps_utils
 import cps_object
 import nas_os_utils
 import nas_os_if_utils as nas_if
-import nas_front_panel_map as fp
 import nas_phy_media as media
 import nas_stat_utils as stat
 from sys import argv
@@ -81,7 +80,7 @@ def ethtool_show_interface(argv):
             _media_type = None
 
         if _media_type is None:
-            print '\n Media not present or not accessible \n'
+            print '\nMedia not present or not accessible \n'
         else:
             _vendor_pn = obj.get_attr_data('base-pas/media/vendor-pn')
             _serial_no = obj.get_attr_data('base-pas/media/serial-number')
@@ -96,7 +95,34 @@ def ethtool_show_interface(argv):
     media_channel_info = media.get_media_channel_info(media_id)
     _transceiver_status = ''
     _mode=2 #This parameter shows that port has not been fanned out and it is breakout mode
-    breakout_cap,current_mode = nas_if.get_breakoutCap_currentMode_mode(if_index)
+
+
+    nas_fp_cache = nas_if.FpPortCache()
+    fp_port = nas_if.get_front_port_from_name(if_name)[0]
+    fp_obj = nas_fp_cache.get(fp_port)
+    pg_id= nas_if.get_cps_attr(fp_obj, 'port-group')
+    if pg_id:
+        print '\n    Port Group:',pg_id
+        pg_data_list = nas_if.nas_os_pg_list(d={'dell-pg/port-groups/port-group/id':pg_id})
+        obj=cps_object.CPSObject(obj=pg_data_list[0])
+        current_mode = obj.get_attr_data('breakout-mode')
+        l=nas_if.nas_os_pg_state_list(d={'dell-pg/port-groups-state/port-group-state/id':pg_id})
+        obj=cps_object.CPSObject(obj=l[0])
+        br_cap_list = obj.get_attr_data('br-cap')
+    else:
+        br_cap_list = fp_obj.get_attr_data('br-cap')
+        current_mode = fp_obj.get_attr_data('breakout-mode')
+
+    breakout_cap = []
+    br_cap = None
+
+    for cap_items in br_cap_list.values():
+        for cap_item_key in cap_items.keys():
+            if 'breakout-mode' in cap_item_key:
+                br_cap = cap_items[cap_item_key]
+                breakout_cap.append(br_cap)
+    breakout_cap=list(set(breakout_cap))
+
     if (_mode not in breakout_cap) or (current_mode == _mode):
         (unit_slot, port, sub_port) = if_name.split('-')
         for i in media_channel_info:

@@ -1,6 +1,6 @@
 
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -96,7 +96,13 @@ def phy_port_to_first_hwport(port_list, npu, port):
     else:
         return -1
 
-
+# obtain the supported speed list for an npu, port
+def phy_port_supported_speed_get(npu, port):
+    supported_speed = []
+    port_obj = get_phy_port_by_hw_port(g_port_list, npu, port)
+    if port_obj != None:
+        supported_speed = port_obj.get_attr_data('supported-speed')
+    return supported_speed
 
 def print_port_obj(port_obj):
     cps_utils.print_obj(port_obj.get())

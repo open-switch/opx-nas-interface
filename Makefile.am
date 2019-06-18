@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -31,7 +31,7 @@ AM_CXXFLAGS=-std=c++11
 AM_LDFLAGS=-shared -version-info 1:1:0 -levent
 
 libopx_nas_interface_la_SOURCES=src/swp_util_tap.c src/nas_int_main.cpp \
-         src/nas_int_common_obj.cpp src/nas_int_list.c \
+         src/nas_int_common_obj.cpp \
          src/nas_int_ev_handlers.cpp src/nas_int_base_if.cpp \
          src/lag/nas_int_lag.c src/lag/nas_int_lag_api.cpp src/lag/nas_int_lag_cps.cpp \
          src/port/hal_int_utils.c src/port/nas_int_logical_cps.cpp \
@@ -45,6 +45,7 @@ libopx_nas_interface_la_SOURCES=src/swp_util_tap.c src/nas_int_main.cpp \
          src/stats/nas_stats_tunnel.cpp \
          src/stats/nas_stats_vlan_subintf.cpp \
          src/stats/nas_stats_vxlan.cpp \
+	 src/stats/nas_stats_virtual_ntwrk.cpp \
          src/bridge/nas_interface_1d_bridge.cpp \
          src/bridge/nas_interface_1q_bridge.cpp \
          src/bridge/nas_interface_bridge_com.cpp \
@@ -53,6 +54,7 @@ libopx_nas_interface_la_SOURCES=src/swp_util_tap.c src/nas_int_main.cpp \
          src/bridge/nas_interface_bridge_map.cpp \
          src/bridge/nas_interface_bridge_utils.cpp \
          src/bridge/nas_vlan_bridge_cps.cpp \
+	 src/bridge/nas_vxlan_bridge_cps.cpp \
          src/interface/nas_interface.cpp \
          src/interface/nas_interface_cps.cpp \
          src/interface/nas_interface_map.cpp \
@@ -62,7 +64,7 @@ libopx_nas_interface_la_SOURCES=src/swp_util_tap.c src/nas_int_main.cpp \
          src/interface/nas_interface_vxlan.cpp \
          src/interface/nas_interface_vxlan_cps.cpp
 
-libopx_nas_interface_la_LIBADD=-lopx_common -lopx_nas_common -lopx_nas_ndi -lopx_cps_api_common -lopx_logging -lopx_nas_linux -lpthread -levent -levent_pthreads
+libopx_nas_interface_la_LIBADD=-lopx_common -lopx_nas_common -lopx_cps_api_common -lopx_logging -lopx_nas_linux -lpthread -levent -levent_pthreads
 
 libopx_nas_meta_packet_la_SOURCES=src/packet/nas_packet_meta.c
 libopx_nas_meta_packet_la_LIBADD=-lopx_common -lopx_logging

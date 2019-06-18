@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -38,21 +38,40 @@ def get_mac_rpc_cb(methods, params):
         return False
     cps_obj = cps_object.CPSObject(obj = params['change'])
 
-    if_type = if_config.get_intf_type(cps_obj)
-    if if_type == 'loopback' or if_type == 'management':
-        nas_if.log_err('Interface type %s not supported' % if_type)
-        return False
-    with fp_lock:
-        param_list = ma.get_alloc_mac_addr_params(if_type, cps_obj, fp_cache)
-        if param_list is None:
-            nas_if.log_err('No enough attributes in input object to get mac address')
-            return False
+    try:
+        appl_name = cps_obj.get_attr_data('dell-base-if-cmn/get-mac-address/input/application')
+        type_name = cps_obj.get_attr_data('dell-base-if-cmn/get-mac-address/input/type')
+        nas_if.log_info('Get MAC address for application %s and type %s' % (appl_name, type_name))
+    except ValueError:
+        appl_name = 'interface'
+        type_name = ''
+        nas_if.log_info('Use interface as default application')
+    try:
+        offset = cps_obj.get_attr_data('dell-base-if-cmn/get-mac-address/input/offset')
+        nas_if.log_info('MAC address offset %d' % offset)
+    except ValueError:
+        offset = 0
+        nas_if.log_info('Use 0 as default offset')
 
-    mac_addr = ma.if_get_mac_addr(**param_list)
-    if mac_addr is None or len(mac_addr) == 0:
+    if appl_name == 'interface':
+        if_type = if_config.get_intf_type(cps_obj)
+        if if_type == 'loopback' or if_type == 'management':
+            nas_if.log_err('Interface type %s not supported' % if_type)
+            return False
+        with fp_lock:
+            mac_addr_info = ma.get_intf_mac_addr(if_type, cps_obj, fp_cache)
+    else:
+        mac_addr_info = ma.get_appl_mac_addr(appl_name, type_name, offset)
+
+    if mac_addr_info is None:
         nas_if.log_err('Failed to get mac address')
         return False
+    mac_addr, addr_num = mac_addr_info
+    if mac_addr is None or len(mac_addr) == 0:
+        nas_if.log_err('Invaid mac address got')
+        return False
     cps_obj.add_attr(mac_attr_name, mac_addr)
+    cps_obj.add_attr('dell-base-if-cmn/get-mac-address/output/number-of-mac-addresses', addr_num)
 
     params['change'] = cps_obj.get()
     return True

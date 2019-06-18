@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -39,6 +39,7 @@ cps_api_return_code_t nas_cps_delete_fc_port(npu_id_t npu_id, port_t port);
 
 void nas_fc_fill_speed_autoneg_state(npu_id_t npu, port_t port, cps_api_object_t obj);
 void nas_fc_fill_supported_speed(npu_id_t npu, port_t port, cps_api_object_t obj);
+void nas_fc_phy_fill_supported_speed(npu_id_t npu, port_t port, cps_api_object_t obj);
 void nas_fc_fill_intf_attr(npu_id_t npu, port_t port, cps_api_object_t obj);
 void nas_fc_fill_misc_state(npu_id_t npu, port_t port, cps_api_object_t obj);
 #endif /* NAS_INTF_FC_H_ */

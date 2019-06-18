@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -47,43 +47,6 @@
 #include <unordered_map>
 #include <mutex>
 
-static bool _crt_vxlan_intf = true;
-static std::mutex _m;
-static hal_ifindex_t default_ifindex = 0;
-
-
-static void _set_vxlan_create_inf(bool create){
-    std::lock_guard<std::mutex> l(_m);
-    _crt_vxlan_intf = create;
-}
-
-static inline bool _create_vxlan_intf(){
-    std::lock_guard<std::mutex> l(_m);
-    return _crt_vxlan_intf == true;
-}
-
-static bool _register_vxlan_intf(const std::string & name, const hal_ifindex_t & ifindex, bool add) {
-
-    hal_intf_reg_op_type_t reg_op;
-
-    interface_ctrl_t reg_block;
-    memset(&reg_block,0,sizeof(reg_block));
-
-    strncpy(reg_block.if_name,name.c_str(),sizeof(reg_block.if_name));
-    reg_block.if_index = ifindex;
-    reg_block.int_type = nas_int_type_VXLAN;
-    reg_op = add ? HAL_INTF_OP_REG : HAL_INTF_OP_DEREG;
-    EV_LOGGING(INTERFACE,INFO,"NAS-VXLAN", "%s vxlan interface %s with ifindex %d",add ?
-                "Register" : "Deregister",reg_block.if_name,ifindex);
-
-    if (dn_hal_if_register(reg_op,&reg_block) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-VXLAN",
-            "interface register Error %s - mapping error or interface already present",reg_block.if_name);
-        return false;
-    }
-
-    return true;
-}
 
 static cps_api_return_code_t _vxlan_create(cps_api_object_t obj){
 
@@ -108,22 +71,7 @@ static cps_api_return_code_t _vxlan_create(cps_api_object_t obj){
         return cps_api_ret_code_ERR;
     }
 
-    hal_ifindex_t ifindex = default_ifindex;
-
-    if(_create_vxlan_intf()){
-        if(nas_os_create_vxlan_interface(obj)!=STD_ERR_OK){
-            EV_LOGGING(INTERFACE,ERR,"VXLAN","Failed creating vxlan interface in the os");
-        }
-        cps_api_object_attr_t ifindex_attr = cps_api_object_attr_get(obj,
-                                        DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
-        if(ifindex_attr){
-            ifindex = cps_api_object_attr_data_uint(ifindex_attr);
-        }
-
-        cps_api_object_attr_add_u32(obj,IF_INTERFACES_INTERFACE_ENABLED,true);
-
-        nas_os_interface_set_attribute(obj,IF_INTERFACES_INTERFACE_ENABLED);
-    }
+    hal_ifindex_t ifindex = NAS_IF_INDEX_INVALID;
 
     BASE_CMN_AF_TYPE_t af_type;
     hal_ip_addr_t local_ip;
@@ -139,6 +87,9 @@ static cps_api_return_code_t _vxlan_create(cps_api_object_t obj){
     }
     BASE_CMN_VNI_t vni = (BASE_CMN_VNI_t ) cps_api_object_attr_data_u32(vni_attr);
 
+    /* VTEP is not created in OS . It is just saved in the interface_map. It will be created in OS only
+     * if it gets added to L3  VN bridge later.
+     */
     if (nas_interface_utils_vxlan_create(vxlan_name, ifindex, vni, local_ip,&vxlan_obj) != STD_ERR_OK) {
         /*
          * This shouldn't fail. If this fails think about rollback if the interface
@@ -147,14 +98,7 @@ static cps_api_return_code_t _vxlan_create(cps_api_object_t obj){
         EV_LOGGING(INTERFACE,INFO,"NAS-INT","Failed to create vxlan cache entry");
         return cps_api_ret_code_ERR;
     }
-
-    if(!_create_vxlan_intf()){
-        vxlan_obj->set_create_in_os(false);
-    }
-
-    if(!_register_vxlan_intf(vxlan_name,ifindex,true)){
-        return cps_api_ret_code_ERR;
-    }
+    vxlan_obj->set_create_in_os(false);
 
     nas_interface_cps_publish_event(vxlan_name,nas_int_type_VXLAN, cps_api_oper_CREATE);
 
@@ -165,7 +109,7 @@ static cps_api_return_code_t _vxlan_create(cps_api_object_t obj){
 
 static cps_api_return_code_t _vxlan_delete(cps_api_object_t obj){
 
-    std::lock_guard<std::mutex> (get_vxlan_mutex());
+    std_mutex_simple_lock_guard lock(get_vxlan_mutex());
     EV_LOGGING(INTERFACE,DEBUG,"VXLAN","Vxlan delete");
 
     cps_api_object_attr_t name_attr = cps_api_get_key_data(obj, IF_INTERFACES_INTERFACE_NAME);
@@ -182,23 +126,19 @@ static cps_api_return_code_t _vxlan_delete(cps_api_object_t obj){
         EV_LOGGING(INTERFACE,ERR,"VXLAN","No entry for vxlan interface %s exist",vxlan_name.c_str());
         return cps_api_ret_code_ERR;
     }
-
-    if(vxlan_obj->create_in_os()){
-        if(nas_os_del_interface(vxlan_obj->get_ifindex())!=STD_ERR_OK){
-            EV_LOGGING(INTERFACE,ERR,"VXLAN","Failed deleting vxlan interface in the os");
-            return cps_api_ret_code_ERR;
-        }
+    hal_ifindex_t ifindex =  vxlan_obj->get_ifindex();
+    if(ifindex != NAS_IF_INDEX_INVALID){
+       if (vxlan_obj->nas_vxlan_del_in_os() != STD_ERR_OK) {
+           EV_LOGGING(INTERFACE,ERR,"VXLAN","Failed deleting vxlan interface in the os");
+           return cps_api_ret_code_ERR;
+       }
     }
 
-    if (nas_interface_utils_vxlan_delete(vxlan_name) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,INFO,"NAS-INT","Failed to create vxlan cache entry");
-        return cps_api_ret_code_ERR;
-    }
-
-    if(!_register_vxlan_intf(vxlan_name,vxlan_obj->get_ifindex(),false)){
-        return cps_api_ret_code_ERR;
-    }
     nas_interface_cps_publish_event(vxlan_name,nas_int_type_VXLAN, cps_api_oper_DELETE);
+    if (nas_interface_utils_vxlan_delete(vxlan_name) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,INFO,"NAS-INT","Failed to delete vxlan cache entry");
+        return cps_api_ret_code_ERR;
+    }
 
     return cps_api_ret_code_OK;
 }
@@ -218,7 +158,7 @@ static t_std_error nas_add_mac_learn_mode_to_remote_endpt (const std::string &vx
     }
 
     remote_endpoint_t rem_endpt;
-    memset(&rem_endpt,0, sizeof(remote_endpoint_t));
+    memset(static_cast<void *>(&rem_endpt),0, sizeof(remote_endpoint_t));
     rem_endpt.remote_ip = remote_ip;
 
     std_ip_to_string((const hal_ip_addr_t*) &rem_endpt.remote_ip, buff, HAL_INET6_TEXT_LEN);
@@ -251,11 +191,15 @@ static t_std_error nas_add_mac_learn_mode_to_remote_endpt (const std::string &vx
 
 }
 
-static bool _nas_vxlan_handle_remote_endpoints(const std::string & vxlan_name,
+static t_std_error  _nas_vxlan_handle_remote_endpoints(const std::string & vxlan_name,
                                                 cps_api_object_t obj,const cps_api_object_it_t & it){
 
     cps_api_object_attr_t member_op_attr = cps_api_object_attr_get(obj,DELL_BASE_IF_CMN_SET_INTERFACE_INPUT_MEMBER_OP);
-
+    if(member_op_attr == nullptr) {
+        return STD_ERR_OK;
+    }
+    DELL_BASE_IF_CMN_UPDATE_TYPE_t member_op = (DELL_BASE_IF_CMN_UPDATE_TYPE_t)
+                                                    cps_api_object_attr_data_uint(member_op_attr);
 
     size_t index = 0;
 
@@ -283,21 +227,14 @@ static bool _nas_vxlan_handle_remote_endpoints(const std::string & vxlan_name,
         ids[2] = DELL_IF_IF_INTERFACES_INTERFACE_REMOTE_ENDPOINT_MAC_LEARNING_MODE;
         cps_api_object_attr_t mac_lrn_mode_attr = cps_api_object_e_get(obj,ids,ids_len);
 
-        ids[2] = DELL_IF_IF_INTERFACES_INTERFACE_REMOTE_ENDPOINT_UNICAST_FLOODING_ENABLED;
-        cps_api_object_attr_t uc_flood_attr = cps_api_object_e_get(obj,ids,ids_len);
-
-        ids[2] = DELL_IF_IF_INTERFACES_INTERFACE_REMOTE_ENDPOINT_MULTICAST_FLOODING_ENABLED;
-        cps_api_object_attr_t mc_flood_attr = cps_api_object_e_get(obj,ids,ids_len);
-
-        ids[2] = DELL_IF_IF_INTERFACES_INTERFACE_REMOTE_ENDPOINT_BROADCAST_FLOODING_ENABLED;
-        cps_api_object_attr_t bc_flood_attr = cps_api_object_e_get(obj,ids,ids_len);
+        ids[2] = DELL_IF_IF_INTERFACES_INTERFACE_REMOTE_ENDPOINT_FLOODING_ENABLED;
+        cps_api_object_attr_t flood_attr = cps_api_object_e_get(obj,ids,ids_len);
 
         if ((!ip_family_attr) || (!ip_addr_attr)){
             EV_LOGGING(INTERFACE, ERR , "NAS-VXLAN", "Required attr ip addr and addr family missing "
                                                                        "to add delete remote endpoint");
             continue;
         }
-
 
         cur_ep.remote_ip.af_index = cps_api_object_attr_data_u32(ip_family_attr);
         if(cur_ep.remote_ip.af_index == AF_INET){
@@ -308,6 +245,18 @@ static bool _nas_vxlan_handle_remote_endpoints(const std::string & vxlan_name,
                  sizeof(cur_ep.remote_ip.u.ipv4));
         }
 
+        if (member_op == DELL_BASE_IF_CMN_UPDATE_TYPE_UPDATE) {
+            NAS_VXLAN_INTERFACE *vxlan_obj = (NAS_VXLAN_INTERFACE *)nas_interface_map_obj_get(vxlan_name);
+            if (vxlan_obj == nullptr) {
+                EV_LOGGING(INTERFACE,ERR,"NAS-VXLAN", "Failed to get VXLAN object %s", vxlan_name.c_str());
+                return STD_ERR(INTERFACE,FAIL,0);
+            }
+            if (vxlan_obj->nas_interface_get_remote_endpoint(&cur_ep) != STD_ERR_OK) {
+                EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE",
+                        "Remove remote endpoint : remote IP not present vxlan_intf %s ", vxlan_name);
+                return STD_ERR(INTERFACE,FAIL,0);
+            }
+        }
         std_ip_to_string((const hal_ip_addr_t*) &cur_ep.remote_ip, buff, HAL_INET6_TEXT_LEN);
         EV_LOGGING(INTERFACE, DEBUG , "NAS-VXLAN", "VXLAN set read_remote_endpt read ip addr %s is_true set_mac_learn %d \n",
                                buff, mac_lrn_mode_attr ? true: false);
@@ -325,41 +274,29 @@ static bool _nas_vxlan_handle_remote_endpoints(const std::string & vxlan_name,
             }
         }
 
-        if(uc_flood_attr){
-            cur_ep.uc_flooding_enabled = cps_api_object_attr_data_uint(uc_flood_attr);
-        }
-        if(mc_flood_attr){
-            cur_ep.mc_flooding_enabled = cps_api_object_attr_data_uint(mc_flood_attr);
-        }
-        if(bc_flood_attr){
-            cur_ep.bc_flooding_enabled = cps_api_object_attr_data_uint(bc_flood_attr);
+        if(flood_attr){
+            cur_ep.flooding_enabled = cps_api_object_attr_data_uint(flood_attr);
         }
         cur_ep.rem_membership = true;
         _rem_ep_list.push_back(cur_ep);
     }
-
-    if(member_op_attr == nullptr) {
-        return true;
-    }
-
-    DELL_BASE_IF_CMN_UPDATE_TYPE_t member_op = (DELL_BASE_IF_CMN_UPDATE_TYPE_t)
-                                                    cps_api_object_attr_data_uint(member_op_attr);
-    bool add = member_op == DELL_BASE_IF_CMN_UPDATE_TYPE_ADD ? true : false;
-
+    t_std_error rc = STD_ERR_OK;
     for(auto it : _rem_ep_list){
-        if(add){
-           if(nas_bridge_utils_add_remote_endpoint(vxlan_name.c_str(),it) != STD_ERR_OK) return false;
-        }else{
-            if(nas_bridge_utils_remove_remote_endpoint(vxlan_name.c_str(),it) != STD_ERR_OK) return false;
+        if( member_op == DELL_BASE_IF_CMN_UPDATE_TYPE_ADD){
+           if((rc = nas_bridge_utils_add_remote_endpoint(vxlan_name.c_str(),it)) != STD_ERR_OK) return  rc;
+        }else if (member_op == DELL_BASE_IF_CMN_UPDATE_TYPE_REMOVE) {
+            if((rc = nas_bridge_utils_remove_remote_endpoint(vxlan_name.c_str(),it)) != STD_ERR_OK) return rc;
+        } else if (member_op == DELL_BASE_IF_CMN_UPDATE_TYPE_UPDATE){
+            if((rc = nas_bridge_utils_update_remote_endpoint(vxlan_name.c_str(),it)) != STD_ERR_OK) return rc;
         }
     }
 
-    return true;
-
+    return STD_ERR_OK;
 }
 
+
 static cps_api_return_code_t _vxlan_set(cps_api_object_t obj){
-    std::lock_guard<std::mutex> (get_vxlan_mutex());
+    std_mutex_simple_lock_guard lock(get_vxlan_mutex());
     EV_LOGGING(INTERFACE,DEBUG,"NAS-VXLAN","Vxlan remote endpoint");
 
     cps_api_object_attr_t name_attr = cps_api_get_key_data(obj, IF_INTERFACES_INTERFACE_NAME);
@@ -385,7 +322,7 @@ static cps_api_return_code_t _vxlan_set(cps_api_object_t obj){
     }
 
 
-    if(!_nas_vxlan_handle_remote_endpoints(vxlan_name,obj,it)){
+    if(_nas_vxlan_handle_remote_endpoints(vxlan_name,obj,it) != STD_ERR_OK){
         return cps_api_ret_code_ERR;
     }
 
@@ -395,7 +332,7 @@ static cps_api_return_code_t _vxlan_set(cps_api_object_t obj){
 cps_api_return_code_t nas_vxlan_add_cps_attr_for_interface(cps_api_object_t obj) {
 
 
-    std::lock_guard<std::mutex> (get_vxlan_mutex());
+    std_mutex_simple_lock_guard lock(get_vxlan_mutex());
     EV_LOGGING(INTERFACE,DEBUG,"NAS-VXLAN","Vxlan  gel all remote endpoint");
 
     cps_api_object_attr_t name_attr = cps_api_get_key_data(obj, IF_INTERFACES_INTERFACE_NAME);
@@ -445,19 +382,17 @@ static cps_api_return_code_t _vxlan_set_handler (void * context, cps_api_transac
 t_std_error nas_vxlan_init(cps_api_operation_handle_t handle) {
 
     if (intf_obj_handler_registration(obj_INTF, nas_int_type_VXLAN,
-            nas_interface_com_if_get_handler, _vxlan_set_handler) != STD_ERR_OK) {
+            nas_interface_if_get_handler, _vxlan_set_handler) != STD_ERR_OK) {
         EV_LOGGING (INTERFACE, ERR,"NAS-VXLAN-INIT", "Failed to register VXLAN CPS handler");
         return STD_ERR(INTERFACE,FAIL,0);
     }
 
     if (intf_obj_handler_registration(obj_INTF_STATE, nas_int_type_VXLAN,
-            nas_interface_com_if_state_get_handler, nas_interface_com_if_state_set_handler) != STD_ERR_OK) {
+            nas_interface_if_state_get_handler, nas_interface_com_if_state_set_handler) != STD_ERR_OK) {
         EV_LOGGING (INTERFACE, ERR,"NAS-VXLAN-INIT", "Failed to register VXLAN CPS handler");
         return STD_ERR(INTERFACE,FAIL,0);
     }
 
     EV_LOGGING(INTERFACE,ERR,"NAS-VXLAN-INIT", "Registered the vxlan interface/interface-state");
-    _set_vxlan_create_inf(true);
-
     return STD_ERR_OK;
 }

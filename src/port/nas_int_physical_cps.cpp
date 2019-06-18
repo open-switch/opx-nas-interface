@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -103,6 +103,20 @@ static void _if_fill_in_supported_speeds_attrs(npu_id_t npu, port_t port,
         cps_api_object_t obj) {
     size_t speed_count = NDI_PORT_SUPPORTED_SPEED_MAX;
     BASE_IF_SPEED_t speed_list[NDI_PORT_SUPPORTED_SPEED_MAX];
+    cps_api_object_attr_t _phy_mode_attr = cps_api_object_attr_get(obj, BASE_IF_PHY_PHYSICAL_PHY_MODE);
+    BASE_IF_PHY_MODE_TYPE_t phy_mode = BASE_IF_PHY_MODE_TYPE_ETHERNET;
+
+    if (_phy_mode_attr != nullptr) {
+        phy_mode = (BASE_IF_PHY_MODE_TYPE_t) cps_api_object_attr_data_u32(_phy_mode_attr);
+    } else {
+        EV_LOGGING(INTERFACE, ERR, "NAS-PHY", "NULL phy_mode_attr from obj for port:%d ", port);
+    }
+
+    if (phy_mode == BASE_IF_PHY_MODE_TYPE_FC) {
+        nas_fc_phy_fill_supported_speed(npu, port, obj);
+        return;
+    } 
+    
     if (ndi_port_supported_speed_get(npu,port,&speed_count, speed_list) == STD_ERR_OK) {
         size_t mx = speed_count;
         for (size_t ix =0;ix < mx; ix++) {

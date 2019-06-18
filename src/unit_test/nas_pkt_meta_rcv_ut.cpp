@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -35,8 +35,10 @@ TEST(meta_test, rx_pkt)
 
     constexpr size_t MAXLEN = 256;
     uint8_t buf[MAXLEN];
-    struct iovec sock_data = {buf, MAXLEN};
-    std_socket_msg_t msg = { NULL, 0, &sock_data, 2, NULL, 0, 0};
+    struct iovec sock_data[] = {buf, MAXLEN};
+    std_socket_msg_t msg = { NULL, 0, sock_data,
+                             sizeof(sock_data)/sizeof(struct iovec), NULL, 0,
+                             0};
 
     auto n = std_socket_op (std_socket_transit_o_READ, fd, &msg,
                             std_socket_transit_f_NONE, 0, &rc);

@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -17,7 +17,7 @@ import argparse
 import nas_vxlan_utils as vxlan_utils
 from argparse import ArgumentParser
 
-OPX_VXLAN_CONFIG_TOOL_VERSION = 1.0
+OS10_VXLAN_CONFIG_TOOL_VERSION = 1.0
 
 
 def _parse_args(args):
@@ -66,7 +66,7 @@ def _parse_args(args):
 
 if __name__ == '__main__':
 
-    parser = ArgumentParser(version=OPX_VXLAN_CONFIG_TOOL_VERSION, description="This is a VxLAN config tool.")
+    parser = ArgumentParser(version=OS10_VXLAN_CONFIG_TOOL_VERSION, description="This is a VxLAN config tool.")
     parser.add_argument('--verbose',
                         dest='verbose',
                         default=False,

@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -38,19 +38,25 @@
 
 #define DEFAULT_UNTAGGED_VLAN_ID 1
 #define INVALID_L2MC_GROUP_ID ((ndi_obj_id_t) ~0x0)
+
+
+typedef enum {
+    BRIDGE_MOD_CREATE, /* Created from bidge model */
+    INT_MOD_CREATE, /* created from INTERFACE model */
+    BOTH_MODEL, /* Cretaed from bridge ans interface model */
+    NONE, /* Means could be 1Q-> 1D migration  like at addition of vtep to 1Q bridge or set of mode change attribute.Currently noone uses mode change from 1q->1d*/
+} create_type_t;
+
 class NAS_DOT1D_BRIDGE : public NAS_BRIDGE {
     private:
          nas_bridge_id_t bridge_id; /*  .1D bridge ID created in the NPU */
-         ndi_obj_id_t    uc_l2mc_group_id; /*  L2MC group created for the .1D bridge */
-         ndi_obj_id_t    mc_l2mc_group_id; /*  L2MC group created for the .1D bridge */
-         ndi_obj_id_t    bc_l2mc_group_id; /*  L2MC group created for the .1D bridge */
+         ndi_obj_id_t    l2mc_group_id; /*  L2MC group created for the .1D bridge */
 
          memberlist_t    _vxlan_members;
          using l2mc_member_map = std::unordered_set<ndi_obj_id_t>;
-         l2mc_member_map uc_l2mc_members;
-         l2mc_member_map mc_l2mc_members;
-         l2mc_member_map bc_l2mc_members;
+         l2mc_member_map l2mc_members;
          hal_vlan_id_t   untagged_vlan_id;
+         create_type_t  create_flg;
 
     public:
         /** Constructor */
@@ -61,10 +67,9 @@ class NAS_DOT1D_BRIDGE : public NAS_BRIDGE {
                                                            idx)
                                                            {
                                                                bridge_id = NAS_INVALID_BRIDGE_ID;
-                                                               uc_l2mc_group_id = INVALID_L2MC_GROUP_ID;
-                                                               mc_l2mc_group_id = INVALID_L2MC_GROUP_ID;
-                                                               bc_l2mc_group_id = INVALID_L2MC_GROUP_ID;
+                                                               l2mc_group_id = INVALID_L2MC_GROUP_ID;
                                                                untagged_vlan_id = DEFAULT_UNTAGGED_VLAN_ID;
+                                                               create_flg = NONE;
                                                             }
         virtual ~NAS_DOT1D_BRIDGE(){}
         t_std_error nas_bridge_npu_create();
@@ -77,6 +82,7 @@ class NAS_DOT1D_BRIDGE : public NAS_BRIDGE {
         t_std_error nas_bridge_add_remove_memberlist(memberlist_t & m_list, nas_port_mode_t port_mode, bool add);
         t_std_error nas_bridge_npu_add_remove_member(std::string &mem_name, nas_int_type_t mem_type, bool add_member);
         t_std_error nas_bridge_associate_npu_port(std::string &mem_name, ndi_port_t *port, nas_port_mode_t port_mode, bool associate);
+        bool  nas_add_sub_interface(void);
         t_std_error nas_bridge_intf_cntrl_block_register(hal_intf_reg_op_type_t op);
         t_std_error nas_bridge_remove_remote_endpoint(BASE_CMN_VNI_t vni, hal_ip_addr_t local_ip, remote_endpoint_t *rm_endpoint);
         t_std_error nas_bridge_add_remote_endpoint(BASE_CMN_VNI_t vni, hal_ip_addr_t local_ip, remote_endpoint_t *rm_endpoint);
@@ -91,7 +97,7 @@ class NAS_DOT1D_BRIDGE : public NAS_BRIDGE {
         t_std_error nas_bridge_set_flooding(remote_endpoint_t *rm_endpoint); /* Sets flooding in NPU */
 
         nas_bridge_id_t bridge_id_get(void) {return bridge_id;}
-        ndi_obj_id_t l2mc_group_id_get(void) {return uc_l2mc_group_id;}
+        ndi_obj_id_t l2mc_group_id_get(void) {return l2mc_group_id;}
         t_std_error nas_bridge_set_learning_disable(bool disable);
         void nas_bridge_untagged_vlan_id_set(hal_vlan_id_t untagged_vlan) { untagged_vlan_id = untagged_vlan;}
 
@@ -111,6 +117,10 @@ class NAS_DOT1D_BRIDGE : public NAS_BRIDGE {
             }
             return untagged_vlan_id;
         }
+        create_type_t get_create_flag(void) {return create_flg;}
+        void set_create_flag(create_type_t flg) {create_flg = flg;}
+        virtual t_std_error nas_bridge_set_mtu(cps_api_object_t obj, cps_api_object_it_t & it);
+
 
 };
 

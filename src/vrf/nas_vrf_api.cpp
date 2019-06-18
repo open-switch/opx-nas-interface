@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -300,6 +300,11 @@ cps_api_return_code_t nas_vrf_process_cps_vrf_msg(cps_api_transaction_params_t *
             NAS_VRF_LOG_ERR("NAS-RT-CPS-SET", "OS VRF del failed");
             rc = cps_api_ret_code_ERR;
         }
+        /* Call L3 multicast synchronous cleanup */
+        if (nas_l3mc_vrf_cleanup(vrf_name) == false)
+        {
+            NAS_VRF_LOG_ERR("NAS-RT-CPS-SET", "Synchornous L3 multicast cleanup failed for VRF:%s", vrf_name);
+        }
         if (nas_vrf_update_vrf_id(vrf_name, false) == false) {
             NAS_VRF_LOG_ERR("NAS-RT-CPS-SET", "VRF id delete failed for VRF:%s!", vrf_name);
             return cps_api_ret_code_ERR;
@@ -485,6 +490,17 @@ cps_api_return_code_t nas_intf_bind_vrf_rpc_handler (void *context, cps_api_tran
             return cps_api_ret_code_OK;
         }
 
+        char if_ietf_type[256];
+        memset(if_ietf_type, 0, sizeof(if_ietf_type));
+        if (!nas_to_ietf_if_type_get(parent_intf_ctrl.int_type, if_ietf_type, sizeof(if_ietf_type))) {
+            NAS_VRF_LOG_ERR("INTF-VRF-RPC", "Failed to get IETF interface:%s type for type id %d VRF:%s",
+                            if_name, parent_intf_ctrl.int_type, vrf_name);
+            return cps_api_ret_code_ERR;
+        }
+        cps_api_object_attr_add(obj, IF_INTERFACES_INTERFACE_TYPE, (const void *)if_ietf_type,
+                strlen(if_ietf_type) + 1);
+
+
         if (parent_intf_ctrl.l3_intf_info.if_index == 0) {
             NAS_VRF_LOG_ERR("INTF-VRF-RPC", "Router VRF:%s intf not present on Intf:%s ",
                             vrf_name, if_name);
@@ -507,11 +523,19 @@ cps_api_return_code_t nas_intf_bind_vrf_rpc_handler (void *context, cps_api_tran
          * so as to use router interface (e.g e101-001-0/bo1/br10 - move to L3 mode)
          * in default context for L3 operations. */
         nas_intf_handle_intf_mode_change(intf_ctrl.if_name, BASE_IF_MODE_MODE_L2);
+
+        if (nas_intf_l3mc_intf_delete (intf_ctrl.if_name, BASE_IF_MODE_MODE_L3) == false) {
+            NAS_VRF_LOG_ERR("INTF-VRF-RPC",
+                    "Update to NAS-L3-MCAST interface delete failed. VRF:%s, intf:%s",
+                    vrf_name, intf_ctrl.if_name);
+        }
+
         if(nas_os_unbind_if_name_from_vrf(obj) != STD_ERR_OK){
             NAS_VRF_LOG_DEBUG("INTF-VRF-RPC", "OS VRF del failed");
             return cps_api_ret_code_ERR;
         }
         nas_intf_handle_intf_mode_change(if_name, BASE_IF_MODE_MODE_L3);
+
         NAS_VRF_LOG_INFO("INTF-VRF-RPC", "OS VRF:%s Parent Intf:%s rt-intf VRF-id:%d intf:%s(%d)"
                          " disassociated with VRF successful", vrf_name,
                          if_name, intf_ctrl.vrf_id, intf_ctrl.if_name, intf_ctrl.if_index);
@@ -521,7 +545,7 @@ cps_api_return_code_t nas_intf_bind_vrf_rpc_handler (void *context, cps_api_tran
         safestrncpy(parent_intf_ctrl.if_name, if_name, HAL_IF_NAME_SZ);
 
         if (dn_hal_get_interface_info(&parent_intf_ctrl) != STD_ERR_OK) {
-            NAS_VRF_LOG_INFO("INTF-VRF-RPC", "VRF:%s Intf:%s does not exist!", vrf_name, if_name);
+            NAS_VRF_LOG_ERR("INTF-VRF-RPC", "VRF:%s Intf:%s does not exist!", vrf_name, if_name);
             return cps_api_ret_code_ERR;
         }
 
@@ -531,6 +555,17 @@ cps_api_return_code_t nas_intf_bind_vrf_rpc_handler (void *context, cps_api_tran
                             parent_intf_ctrl.l3_intf_info.vrf_id);
             return cps_api_ret_code_ERR;
         }
+
+
+        char if_ietf_type[256];
+        memset(if_ietf_type, 0, sizeof(if_ietf_type));
+        if (!nas_to_ietf_if_type_get(parent_intf_ctrl.int_type, if_ietf_type, sizeof(if_ietf_type))) {
+            NAS_VRF_LOG_ERR("INTF-VRF-RPC", "Failed to get IETF interface:%s type for type id %d VRF:%s",
+                            if_name, parent_intf_ctrl.int_type, vrf_name);
+            return cps_api_ret_code_ERR;
+        }
+        cps_api_object_attr_add(obj, IF_INTERFACES_INTERFACE_TYPE, (const void *)if_ietf_type,
+                strlen(if_ietf_type) + 1);
 
         if(nas_os_bind_if_name_to_vrf(obj) != STD_ERR_OK){
             NAS_VRF_LOG_DEBUG("INTF-VRF-RPC", "OS VRF intf add failed for VRF:%s intf:%s", vrf_name, if_name);
@@ -549,6 +584,13 @@ cps_api_return_code_t nas_intf_bind_vrf_rpc_handler (void *context, cps_api_tran
          * interface (e.g v-e101-001-0/v-bo1/v-br10 - default mode is L3,
          * no explicit mode change required from VRF module to NAS-L3) in non-default context for L3 operations. */
         nas_intf_handle_intf_mode_change(if_name, BASE_IF_MODE_MODE_L2);
+
+        if (nas_intf_l3mc_intf_mode_change(if_name, BASE_IF_MODE_MODE_L2) == false) {
+            NAS_VRF_LOG_ERR("INTF-VRF-RPC",
+                    "Update to NAS-L3-MCAST interface(%s) mode change to L2 failed.",
+                    if_name);
+        }
+
         NAS_VRF_LOG_INFO("INTF-VRF-RPC", "OS VRF:%s Intf:%s associated with VRF successful", vrf_name, if_name);
     }
     nas_vrf_publish_intf_bind(obj, vrf_name, if_name, oper);

@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -61,7 +61,7 @@ t_std_error nas_bridge_utils_set_learning_disable(const char *br_name, bool disa
 
 
 /*  APIs to create and delete bridge  and its memberlist in the kernel  */
-t_std_error nas_bridge_utils_os_create_bridge(const char *br_name, hal_ifindex_t *idx);
+t_std_error nas_bridge_utils_os_create_bridge(const char *br_name, cps_api_object_t obj , hal_ifindex_t *idx);
 t_std_error nas_bridge_utils_os_delete_bridge(const char *br_name);
 t_std_error nas_bridge_utils_os_add_remove_memberlist(const char *br_name, memberlist_t & memlist, nas_port_mode_t port_mode, bool add);
 /*  Generic API to delete bridge completly in the kernel and in the NPU along with all of its members */
@@ -115,4 +115,17 @@ t_std_error nas_bridge_utils_associate_npu_port(const char * br_name, const char
                                                     nas_port_mode_t mode, bool associate);
 
 t_std_error nas_bridge_utils_check_membership(const char *br_name, const char *mem_name , bool *present);
+
+t_std_error nas_bridge_set_mode_if_bridge_exists(const char *name, create_type_t ty, bool &exist);
+t_std_error nas_bridge_delete_vn_bridge(const char *name, cps_api_object_t obj);
+
+t_std_error nas_bridge_utils_is_l3_bridge(std::string br_name);
+t_std_error nas_bridge_utils_is_l2_bridge(std::string br_name);
+
+void nas_bridge_utils_set_mtu (const char *br_name);
+void nas_bridge_utils_os_set_mtu (const char *br_name);
+
+t_std_error nas_bridge_os_vxlan_del_frm_br(std::string &br_name);
+t_std_error nas_bridge_os_vxlan_create_add_to_br(std::string &br_name);
+
 #endif /* _NAS_INTERFACE_BRIDGE_UTILS_H */

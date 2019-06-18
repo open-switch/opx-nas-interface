@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -49,7 +49,13 @@ t_std_error nas_interface_generic_init(cps_api_operation_handle_t handle);
 cps_api_return_code_t  nas_vxlan_add_cps_attr_for_interface(cps_api_object_t object);
 cps_api_return_code_t nas_interface_com_if_get_handler(void * context, cps_api_get_params_t * param,
         size_t key_ix);
+cps_api_return_code_t nas_interface_if_get_handler(void * context, cps_api_get_params_t * param,
+        size_t key_ix);
+cps_api_return_code_t nas_interface_fill_obj(cps_api_object_list_t *list, std::string name, 
+        bool get_state);
 cps_api_return_code_t nas_interface_com_if_state_get_handler(void * context, cps_api_get_params_t * param,
+        size_t key_ix);
+cps_api_return_code_t nas_interface_if_state_get_handler(void * context, cps_api_get_params_t * param,
         size_t key_ix);
 cps_api_return_code_t nas_interface_com_if_state_set_handler(void* context, cps_api_transaction_params_t* param,
         size_t ix);

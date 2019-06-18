@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -28,6 +28,7 @@
 
 #include "std_error_codes.h"
 #include "ds_common_types.h"
+#include "hal_if_mapping.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -83,6 +84,8 @@ typedef void (*hal_virt_pkt_transmit)(npu_id_t npu, npu_port_t port,
 
 //! the callback that will be used to process a packet and transmit to ingress pipeline
 typedef void (*hal_virt_pkt_transmit_to_ingress_pipeline)(void *data, unsigned int len);
+typedef void (*hal_virt_pkt_transmit_to_ingress_pipeline_hybrid)(void *data, unsigned int len, ndi_packet_tx_type_t tx_type,
+                                                                 ndi_obj_id_t obj_id);
 
 /**
  * Wait for a packet and call the callback function based on the correct npu,port
@@ -93,6 +96,7 @@ typedef void (*hal_virt_pkt_transmit_to_ingress_pipeline)(void *data, unsigned i
  */
 t_std_error hal_virtual_interface_wait(hal_virt_pkt_transmit tx_fun,
         hal_virt_pkt_transmit_to_ingress_pipeline tx_to_ingress_fun,
+        hal_virt_pkt_transmit_to_ingress_pipeline_hybrid tx_to_ingress_hybrid_fun,
         void *buff, unsigned int len);
 
 /**
@@ -137,10 +141,6 @@ void nas_int_oper_state_register_cb(oper_state_handler_t oper_state_cb);
  * Handles remote endpoint addition and deletion to a vxlan interface
  * */
 t_std_error nas_vxlan_remote_endpoint_handler_register(void);
-/*
- *  Initialize os event processing flag
- *  */
-void init_intf_os_event_flag(void);
 #ifdef __cplusplus
 }
 #endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -22,10 +22,12 @@
 #include "cps_api_object.h"
 #include "ds_common_types.h"
 #include "cps_api_object_key.h"
+#include "cps_api_object_tools.h"
 #include "cps_api_events.h"
 #include "cps_class_map.h"
 #include "bridge/nas_interface_bridge_cps.h"
 #include "bridge/nas_interface_bridge_com.h"
+#include "bridge/nas_interface_1d_bridge.h"
 #include "std_mutex_lock.h"
 
 
@@ -75,6 +77,7 @@ static cps_api_return_code_t _bridge_update(cps_api_object_t req, cps_api_object
 
         int id = (int) cps_api_object_attr_id(it.attr);
         switch (id) {
+        /* This is not used ??? can it be remove ?? */
         case BRIDGE_DOMAIN_BRIDGE_MODE:
             br_mode = (BASE_IF_BRIDGE_MODE_t) cps_api_object_attr_data_u32(it.attr);
             if ((rc = nas_bridge_utils_change_mode(br_name, br_mode)) != STD_ERR_OK) {
@@ -123,6 +126,8 @@ static cps_api_return_code_t _bridge_update(cps_api_object_t req, cps_api_object
     /*  May need to first find the differenc */
     /*  Member could be vxlan , untagged port/lag or vlan sub interface */
     /*  Need to search in all list */
+    /*  Set bridge MTU in OS  */
+    nas_bridge_utils_os_set_mtu(br_name);
     return cps_api_ret_code_OK;
 }
 
@@ -133,36 +138,49 @@ static cps_api_return_code_t _bridge_create(cps_api_object_t obj)
     /*  Create in the kernel  */
     NAS_DOT1D_BRIDGE *dot1d_br_obj = nullptr;
     hal_ifindex_t idx;
-
+    bool exist;
     if (_nas_bridge_name_get(obj, br_name, sizeof(br_name)) != cps_api_ret_code_OK) {
         return cps_api_ret_code_ERR;
     }
     /*  Take the bridge lock  */
     std_mutex_simple_lock_guard _lg(nas_bridge_mtx_lock());
+    if (nas_bridge_set_mode_if_bridge_exists(br_name, BRIDGE_MOD_CREATE, exist) != STD_ERR_OK) {
+         cps_api_set_object_return_attrs(obj, rc, "Virtual Network exists as 1Q");
+         return cps_api_ret_code_ERR;
 
-    /*  check if bridge already exists  */
-    if (nas_bridge_utils_if_bridge_exists(br_name) == STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, DEBUG, "NAS-BRIDGE-CREATE", "Bridge already Exists for %s ",br_name );
-        return cps_api_ret_code_ERR;
     }
-    EV_LOGGING(INTERFACE, DEBUG, "NAS-BRIDGE-CREATE", "Create Bridge for %s ",br_name );
-    if ((rc = nas_bridge_utils_os_create_bridge(br_name, &idx))  != STD_ERR_OK) {
-        return cps_api_ret_code_ERR;
+    if (exist == false) {
+
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-BRIDGE-CREATE", "Create Bridge for %s ",br_name );
+        if ((rc = nas_bridge_utils_os_create_bridge(br_name, obj, &idx))  != STD_ERR_OK) {
+            return cps_api_ret_code_ERR;
+        }
+        /*  Create object and in the NPU with mode 1D  by default */
+        /*  Register with hal control block if not registered */
+        if (nas_create_bridge(br_name, BASE_IF_BRIDGE_MODE_1D, idx, (NAS_BRIDGE **)&dot1d_br_obj) != STD_ERR_OK) {
+           EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE-CREATE", " Bridge obj create failed %s", br_name);
+           cps_api_set_object_return_attrs(obj, rc, "Virtual Network creation failed");
+           return cps_api_ret_code_ERR;
+        }
+        dot1d_br_obj->set_create_flag(BRIDGE_MOD_CREATE);
+        /* Send mode =l2  if create from here */
+        if (nas_intf_handle_intf_mode_change(br_name, BASE_IF_MODE_MODE_L2) == false) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE-CREATE", "Update to NAS-L3 about interface mode change failed for %s",
+                                                      br_name);
+        }
+        /* Set ipv6 to false if vn is created by bridge model only */
+        nas_os_interface_ipv6_config_handle(br_name, false);
     }
-    /*  Create object and in the NPU with mode 1D  by default */
-    /*  Register with hal control block if not registered */
-    if (nas_create_bridge(br_name, BASE_IF_BRIDGE_MODE_1D, idx, (NAS_BRIDGE **)&dot1d_br_obj) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-INT", " Bridge obj create failed %s", br_name);
-        return cps_api_ret_code_ERR;
-    }
+
     /*  Call _bridge_update for member additions assuming it is already created */
     if (_bridge_update(obj, NULL) != STD_ERR_OK) {
         // TODO delete bridge
         return cps_api_ret_code_ERR;
     }
 
+
     /*  Publish  the object */
-    dot1d_br_obj->nas_bridge_publish_event(cps_api_oper_CREATE);
+    nas_bridge_utils_publish_event(br_name, cps_api_oper_CREATE);
 
     return cps_api_ret_code_OK;
 }

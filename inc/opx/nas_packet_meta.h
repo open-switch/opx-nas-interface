@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -139,6 +139,7 @@ static inline size_t nas_pkt_meta_attr_len(nas_pkt_meta_attr_ptr_t attr) {
  * @return attribute's data
  */
 uint_t nas_pkt_meta_attr_data_uint (nas_pkt_meta_attr_ptr_t attr);
+uint64_t nas_pkt_meta_attr_data_uint64 (nas_pkt_meta_attr_ptr_t attr);
 
 /**
  * Get pointer to data in current packet meta-data attribute.

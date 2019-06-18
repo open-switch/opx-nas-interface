@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -24,7 +24,6 @@
 #include "cps_api_operation.h"
 #include "cps_api_object_key.h"
 #include "cps_class_map.h"
-#include "nas_int_bridge.h"
 #include "nas_int_physical_cps.h"
 #include "dell-base-if-linux.h"
 #include "dell-base-if.h"
@@ -44,10 +43,7 @@
 #include "event_log_types.h"
 #include "event_log.h"
 #include "nas_ndi_port.h"
-#include "std_assert.h"
 
-#include "std_config_file.h"
-#include "nas_int_vlan.h"
 #include "nas_int_port.h"
 #include "nas_stats.h"
 #include "nas_fc_stats.h"
@@ -183,7 +179,6 @@ t_std_error hal_interface_init(void) {
 
     char buff[CPS_API_KEY_STR_MAX];
 
-    init_intf_os_event_flag();
     if (!cps_api_key_from_attr_with_qual(&keys[0],
                 BASE_IF_LINUX_IF_INTERFACES_INTERFACE_OBJ, cps_api_qualifier_OBSERVED)) {
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Could not translate %d to key %s",
@@ -231,6 +226,12 @@ t_std_error hal_interface_init(void) {
         EV_LOGGING(INTERFACE,ERR,"NAS-INTF-CPS-VLAN-SWERR", "Initializing CPS for VLAN failed");
         return rc;
     }
+
+    if((rc = nas_vxlan_bridge_cps_init(nas_if_handle)) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-INTF-CPS-VXLAN-SWERR", "Initializing CPS for VXLAN failed");
+        return rc;
+    }
+
     if ( (rc=nas_stats_if_init(nas_if_handle))!= STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-INT-SWERR", "Initializing interface statistic failed");
         return rc;
@@ -272,6 +273,12 @@ t_std_error hal_interface_init(void) {
         EV_LOGGING(INTERFACE,ERR,"NAS-INT-SWERR", "Initializing tunnel statistics failed");
         return rc;
     }
+
+    if ( (rc=nas_stats_virt_network_init(nas_if_handle))!= STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-INT-SWERR", "Initializing virt network statistics failed");
+        return rc;
+    }
+
 
     if ((rc=nas_eee_stats_if_init(nas_if_handle)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR, "NAS-EEE-INT-SWERR",

@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -269,6 +269,11 @@ cps_api_return_code_t NAS_BRIDGE::nas_bridge_fill_vlan_intf_model_com_info(cps_a
     cps_api_object_attr_add(obj,IF_INTERFACES_INTERFACE_TYPE,
                             (const void *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN,
                             strlen(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_L2VLAN)+1);
+    cps_api_object_attr_add_u32(obj,IF_INTERFACES_INTERFACE_ENABLED, get_bridge_enabled());
+    cps_api_object_attr_add_u32(obj,DELL_IF_IF_INTERFACES_INTERFACE_MTU, get_bridge_mtu());
+    cps_api_object_attr_add(obj,DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS, get_bridge_mac().c_str(),
+                            get_bridge_mac().length() + 1);
+    cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, get_bridge_mac_learn_mode());
     // Add tagged and untagged members name
     if (!tagged_members.empty()) {
         for (auto it = tagged_members.begin(); it != tagged_members.end(); ++it) {
@@ -287,8 +292,6 @@ cps_api_return_code_t NAS_BRIDGE::nas_bridge_fill_vlan_intf_model_com_info(cps_a
                     strlen(it->c_str())+1);
         }
     }
-    cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE, get_bridge_mac_learn_mode());
-    cps_api_object_attr_add_u32(obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, get_bridge_intf_index());
     return cps_api_ret_code_OK;
 }
 cps_api_return_code_t NAS_BRIDGE::nas_bridge_fill_com_info(cps_api_object_t obj)
@@ -367,13 +370,6 @@ void NAS_BRIDGE::nas_bridge_publish_memberlist_event(memberlist_t &memlist, cps_
 t_std_error NAS_BRIDGE::nas_bridge_os_add_remove_member(std::string & mem_name, nas_port_mode_t port_mode, bool add)
 {
     t_std_error rc = STD_ERR_OK;
-    if ((nas_g_scaled_vlan_get() == true) && (bridge_l3_mode_get() != BASE_IF_MODE_MODE_L3)) {
-        // Nothing to do in case of non L3 mode
-        return rc;
-    }
-
-    /*  check if the interface exist  */
-    // if not then first create
 
     cps_api_object_guard _og(cps_api_object_create());
     if(!_og.valid()){
@@ -386,19 +382,41 @@ t_std_error NAS_BRIDGE::nas_bridge_os_add_remove_member(std::string & mem_name, 
                                strlen(get_bridge_name().c_str())+1);
     cps_api_attr_id_t port_mode_id = DELL_IF_IF_INTERFACES_INTERFACE_UNTAGGED_PORTS;
     hal_vlan_id_t vlan_id =0;
+    hal_ifindex_t ifindex =0;
     if(port_mode == NAS_PORT_TAGGED) {
-        // check if sub interface exists
-        // TODO crate if sub interface is required
         port_mode_id = DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS;
         std::string parent;
-        hal_ifindex_t ifindex;
-        rc = nas_interface_utils_parent_name_get(mem_name, parent);
-        rc = nas_interface_utils_vlan_id_get(mem_name, vlan_id);
-        rc = nas_interface_utils_ifindex_get(mem_name,ifindex);
-        if (rc != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"INT-DB-GET","Member %s does not exist member", mem_name.c_str());
-            return rc;
+
+        NAS_INTERFACE *intf_obj = nas_interface_map_obj_get(mem_name);
+        if ((intf_obj != nullptr) && (intf_obj->intf_type_get() == nas_int_type_VLANSUB_INTF)) {
+            NAS_VLAN_INTERFACE *vlan_intf_obj =  dynamic_cast<NAS_VLAN_INTERFACE *>(intf_obj);
+            if (vlan_intf_obj == nullptr) {
+                return STD_ERR(INTERFACE, FAIL, 0);
+            }
+            parent = vlan_intf_obj->parent_name_get();
+            vlan_id = vlan_intf_obj->vlan_id_get();
+            ifindex = intf_obj->get_ifindex();
+        } else {
+           EV_LOGGING(INTERFACE,ERR,"INT-DB-GET","Member %s type in not subint but getting added as tagged port ", mem_name.c_str());
+           return STD_ERR(INTERFACE, FAIL, 0);
         }
+        if (add) {
+            if (!nas_add_sub_interface()) {
+                /*  For migration handling if subintf exist in OS delete it */
+                if (nas_interface_os_subintf_delete(mem_name, vlan_id, parent, intf_obj) != STD_ERR_OK) {
+                    EV_LOGGING(INTERFACE, ERR,"INT-DB-GET", "Falied to delete subint %s in os that came as add to bridge %s",
+                                  mem_name.c_str(), get_bridge_name().c_str());
+                }
+                return STD_ERR_OK;
+            } else {
+                /* If interface doesn't exist we need to create it */
+                if (nas_interface_subintf_create(mem_name, vlan_id, parent, ifindex, nullptr) != STD_ERR_OK) {
+                    EV_LOGGING(INTERFACE,ERR,"INT-DB-GET", " Falied to create subint %s in os for adding to bridge %s",
+                                  mem_name.c_str(), get_bridge_name().c_str());
+                }
+            }
+        }
+
         cps_api_object_attr_add(_og.get(),DELL_IF_IF_INTERFACES_INTERFACE_PARENT_INTERFACE, parent.c_str(), strlen(parent.c_str())+1);
         cps_api_object_attr_add_u32(_og.get(),DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,ifindex);
     }
@@ -411,8 +429,15 @@ t_std_error NAS_BRIDGE::nas_bridge_os_add_remove_member(std::string & mem_name, 
         if ((rc = nas_os_add_intf_to_bridge(_og.get())) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE,ERR,"INT-DB-GET","Failed to add member %s to the bridge %s in the kernel",
                                     mem_name.c_str(), get_bridge_name().c_str() );
+        } else {
+            /* Set MTU in subintf */
+            nas_bridge_set_mtu();
         }
     } else  {
+        /* If the interface has valid index then delete interface from bridge */
+        if (port_mode == NAS_PORT_TAGGED && ifindex == NAS_IF_INDEX_INVALID) {
+            return STD_ERR_OK;
+        }
         if ((rc = nas_os_del_intf_from_bridge(_og.get())) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE,ERR,"INT-DB-GET","Failed to delete member %s from the bridge %s  in the kernel",
                                     mem_name.c_str(), get_bridge_name().c_str() );
@@ -420,9 +445,9 @@ t_std_error NAS_BRIDGE::nas_bridge_os_add_remove_member(std::string & mem_name, 
     }
     return rc;
 }
+
 t_std_error NAS_BRIDGE::nas_bridge_os_add_remove_memberlist(memberlist_t & memlist, nas_port_mode_t port_mode, bool add)
 {
-
     for (auto mem : memlist ) {
        nas_bridge_os_add_remove_member(mem, port_mode, add);
        // TODO May need to add check error for rollback
@@ -434,18 +459,22 @@ t_std_error NAS_BRIDGE::nas_bridge_os_add_remove_memberlist(memberlist_t & memli
 t_std_error NAS_BRIDGE::nas_bridge_set_admin_status(cps_api_object_t obj, cps_api_object_it_t & it)
 {
 
-    t_std_error rc;
+    t_std_error rc = STD_ERR_OK;
 
+    cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
     cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, if_index);
 
-    if((rc = nas_os_interface_set_attribute(obj,IF_INTERFACES_INTERFACE_ENABLED)) != STD_ERR_OK)
-    {
-        EV_LOGGING(INTERFACE, ERR ,"BRIDGE-ADMIN","Failed to set Admin status for bridge %s",bridge_name.c_str());
-        return rc;
+    if (op != cps_api_oper_CREATE) {
+        /*  already done as part of bridge creation  */
+        if((rc = nas_os_interface_set_attribute(obj,IF_INTERFACES_INTERFACE_ENABLED)) != STD_ERR_OK)
+        {
+            EV_LOGGING(INTERFACE, ERR ,"BRIDGE-ADMIN","Failed to set Admin status for bridge %s",bridge_name.c_str());
+            return rc;
+        }
     }
 
     admin_status = ((bool)cps_api_object_attr_data_u32(it.attr) == true)?
-        IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_UP : IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS_DOWN;
+        true: false;
 
     return rc;
 }
@@ -454,13 +483,17 @@ t_std_error NAS_BRIDGE::nas_bridge_set_admin_status(cps_api_object_t obj, cps_ap
 t_std_error NAS_BRIDGE::nas_bridge_set_mac_address(cps_api_object_t obj, cps_api_object_it_t & it)
 {
 
-    t_std_error rc;
+    t_std_error rc = STD_ERR_OK;
 
+    cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
     cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, if_index);
 
-    if((rc = nas_os_interface_set_attribute(obj,DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE, ERR ,"BRIDGE-ADMIN","Failed to set MAC address for bridge %s",bridge_name.c_str());
-        return rc;
+    if (op != cps_api_oper_CREATE) {
+        /*  already done as part of bridge creation  */
+        if((rc = nas_os_interface_set_attribute(obj,DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS)) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE, ERR ,"BRIDGE-ADMIN","Failed to set MAC address for bridge %s",bridge_name.c_str());
+            return rc;
+        }
     }
 
     mac_addr = std::string((char *) cps_api_object_attr_data_bin(it.attr));
@@ -484,17 +517,66 @@ t_std_error NAS_BRIDGE::nas_bridge_set_mtu(cps_api_object_t obj, cps_api_object_
     t_std_error rc;
     cps_api_object_attr_add_u32(obj, DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, if_index);
 
+    this->mtu = mtu;
+
     for(auto member : tagged_members){
         NAS_VLAN_INTERFACE * intf = dynamic_cast<NAS_VLAN_INTERFACE *>(nas_interface_map_obj_get(member));
         if(intf){
             if((rc = intf->set_mtu(mtu))!=STD_ERR_OK){
-                return rc;
+                EV_LOGGING(INTERFACE, ERR ,"BRIDGE-ADMIN","Failed to set MTU for member %s", member.c_str());
             }
         }
     }
-    this->mtu = mtu;
 
-    return cps_api_ret_code_OK;
+    if((rc = nas_os_interface_set_attribute(obj,DELL_IF_IF_INTERFACES_INTERFACE_MTU)) != STD_ERR_OK)
+    {
+        EV_LOGGING(INTERFACE, ERR ,"BRIDGE-ADMIN","Failed to set MTU for bridge %s",bridge_name.c_str());
+    }
+    return STD_ERR_OK;
+}
+
+void NAS_BRIDGE::nas_bridge_set_mtu(void)
+{
+    cps_api_object_guard _og(cps_api_object_create());
+    if (!_og.valid()) {
+        EV_LOGGING(INTERFACE, ERR ,"BRIDGE-ADMIN", "Failed to create an object to set MTU for a Bridge %s",
+                bridge_name.c_str());
+        return;
+    }
+
+    cps_api_object_attr_add(_og.get(),IF_INTERFACES_INTERFACE_NAME, get_bridge_name().c_str(),
+            strlen(get_bridge_name().c_str())+1);
+    cps_api_object_attr_add_u32(_og.get(), DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, if_index);
+    cps_api_object_attr_add_u32(_og.get(), DELL_IF_IF_INTERFACES_INTERFACE_MTU, this->mtu);
+
+    cps_api_object_it_t it;
+    cps_api_attr_id_t id = DELL_IF_IF_INTERFACES_INTERFACE_MTU;
+    if(!cps_api_object_it(_og.get(), &id, 1, &it)) {
+        EV_LOGGING(INTERFACE, ERR ,"BRIDGE-ADMIN", "No bridge MTU attr found in the object");
+        return;
+    }
+
+    this->nas_bridge_set_mtu(_og.get(), it);
+}
+
+void NAS_BRIDGE::nas_bridge_os_set_mtu(void)
+{
+    t_std_error rc = STD_ERR_OK;
+    cps_api_object_guard _og(cps_api_object_create());
+    if (!_og.valid()) {
+        EV_LOGGING(INTERFACE, ERR ,"BRIDGE-ADMIN", "Failed to create object for the Bridge %s, MTU set in OS",
+                bridge_name.c_str());
+        return;
+    }
+    cps_api_object_attr_add(_og.get(),IF_INTERFACES_INTERFACE_NAME, get_bridge_name().c_str(),
+            strlen(get_bridge_name().c_str())+1);
+    cps_api_object_attr_add_u32(_og.get(), DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, if_index);
+    cps_api_object_attr_add_u32(_og.get(), DELL_IF_IF_INTERFACES_INTERFACE_MTU, this->mtu);
+    if((rc = nas_os_interface_set_attribute(_og.get(),DELL_IF_IF_INTERFACES_INTERFACE_MTU)) != STD_ERR_OK)
+    {
+         EV_LOGGING(INTERFACE, ERR ,"BRIDGE-ADMIN","Failed to set MTU for bridge %s",bridge_name.c_str());
+    }
+    return;
 }
 
 
@@ -587,5 +669,28 @@ t_std_error NAS_BRIDGE::nas_bridge_set_tag_untag_drop(hal_ifindex_t ifx, ndi_por
     return rc;
 
 
+}
+
+void NAS_BRIDGE::nas_bridge_com_set_learning_disable (bool disable)
+{
+    learning_disable = disable;
+
+    // NOTE: The following code block is a temporary workaround for the fact
+    // that current users of the DELL_IF_IF_INTERFACES_INTERFACE_LEARNING_MODE
+    // Yang leaf have implemented it as a boolean instead of the defined
+    // enum intended for placement in this leaf.
+    //
+    // The implementation should be fixed in both nas-interface and in the
+    // clients who request setting of the value. In conjunction with the code
+    // changes to use the correct enum values, the following block of code
+    // should be removed/replaced by code to directly set the specified
+    // MAC learning mode enum value into the corresponding NAS_BRIDGE
+    // data member.
+    //
+    if (disable) {
+        learning_mode = BASE_IF_MAC_LEARN_MODE_DISABLE;
+    } else {
+        learning_mode = BASE_IF_MAC_LEARN_MODE_HW ;
+    }
 }
 

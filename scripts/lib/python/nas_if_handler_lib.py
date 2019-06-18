@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -18,6 +18,7 @@ import nas_os_if_utils as nas_if
 import nas_if_config_obj as if_config
 import nas_common_header as nas_comm
 import nas_media_config as media_config
+import nas_phy_port_utils as port_utils
 
 
 def verify_intf_supported_speed(config, speed):
@@ -183,10 +184,26 @@ def set_if_speed(speed, config, obj):
         speed = _get_default_speed(config)
         nas_if.log_info('Default Speed: ' + str(speed))
 
+    try:
+        (npu_id, port_id) = config.get_npu_port()
+        nas_if.log_info('set_if_speed: Obtained npu %s and port %s from config for intf %s' 
+                % (str(npu_id), str(port_id), str(config.name)))
+    except ValueError:
+        nas_if.log_err('Missing npu or port or non physical port cps obj request')
+        nas_if.log_obj(obj.get())
+        return False
+
+    supported_speed_list = []
+    supported_speed_list = port_utils.phy_port_supported_speed_get(npu_id, port_id)
+
+    nas_if.log_info('supported-speed list: ' + str(supported_speed_list))
     # Add attribute to CPS object
     if speed is not None and verify_intf_supported_speed(config, speed) == True:
-        if fp.is_qsfp28_cap_supported(config.get_fp_port()) != True:
+        if speed in supported_speed_list:
             obj.add_attr(nas_comm.yang.get_value('speed', 'attr_name'), speed)
+            nas_if.log_info('Added speed %s into obj' % str(speed))
+        else:
+            nas_if.log_err('speed %s not added into the obj' % str(speed))
 
     config.get_media_obj().add_attr(nas_comm.yang.get_value('speed', 'attr_name'), speed)
     return True

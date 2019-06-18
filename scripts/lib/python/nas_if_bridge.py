@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -22,6 +22,7 @@ import dn_base_br_tool
 import nas_os_if_utils as nas_if
 import nas_common_header as nas_comm
 import nas_bridge_config_obj as if_bridge_config
+import nas_mac_addr_utils as ma
 import copy
 import cps_utils
 
@@ -29,6 +30,7 @@ bridge_op_attr_name = 'bridge-domain/set-bridge/input/operation'
 
 use_linux_path = False
 
+virtual_network_mac_address = None
 ''' Helper Methods '''
 def __if_present(name):
     """Method to check if the interface is present in linux"""
@@ -175,6 +177,8 @@ def _handle_bridge_intf(cps_obj, params):
     if op is None:
         return False
 
+    global virtual_network_mac_address
+    cps_obj.add_attr('bridge-domain/bridge/phys-address', virtual_network_mac_address)
     if not use_linux_path:
         return _send_obj_to_base(cps_obj,op)
 
@@ -208,6 +212,10 @@ def set_bridge_cb(methods, params):
         logging.exception('Bridge error')
 
 def nas_bridge_cps_regster(handle):
+    global virtual_network_mac_address
+    # Fetch Virtual network MAC address
+    if_type = 'virtual-network'
+    virtual_network_mac_address, _ = ma.get_intf_mac_addr(if_type, None)
     d = {}
     d['transaction'] = set_bridge_cb
     cps.obj_register(handle, nas_comm.yang.get_value('set_bridge_key', 'keys_id'), d)

@@ -1,6 +1,17 @@
+opx-nas-interface (5.22.0) unstable; urgency=medium
+
+  * Feature: Subinterface creation enable for Virtual Machine
+  * Update: Deleting FEC attribute for disabled FEC
+  * Update: Modified the log message for successful deferred interface "enable"
+  * Update: New vlan attribute to set dynamic arp filter for vlan
+  * Update: Add vxlan Lock during remote endpoint addition/deletion to avoid race condition
+  * Update: Copyright year
+  
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Mon, 5 Jun 2019  15:36:00 -0800
+
 opx-nas-interface (5.20.3+opx15) unstable; urgency=medium
 
-  * Bugfix: resolve issue in opx-config-fanout when interface index 
+  * Bugfix: resolve issue in opx-config-fanout when interface index
             given as argument instead of interface name, github issue #85
 
  -- Dell EMC <ops-dev@lists.openswitch.net>  Thu, 20 Dec 2018  08:36:00 -0800
@@ -472,7 +483,7 @@ opx-nas-interface (4.4.1) unstable; urgency=medium
   * Update: Miscellaneous performance improvements
   * Bugfix: Miscellaneous bug fixes
 
- -- Dell EMC <ops-dev@lists.openswitch.net>  Wed, 22 June 2017  16:47:07 -0700
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Wed, 22 Jun 2017  16:47:07 -0700
 
 opx-nas-interface (1.0.2) unstable; urgency=medium
 

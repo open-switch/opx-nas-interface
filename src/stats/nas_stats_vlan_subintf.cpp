@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -39,12 +39,16 @@
 #include "nas_switch.h"
 #include "interface_obj.h"
 #include "nas_ndi_1d_bridge.h"
+#include "std_time_tools.h"
 
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
 #include <stdint.h>
 #include <time.h>
+#include <string>
+#include <utility>
+#include<algorithm>
 
 static const auto vlan_subintf_stat_ids = new std::vector<ndi_stat_id_t>  {
         DELL_IF_IF_INTERFACES_STATE_INTERFACE_STATISTICS_IN_PKTS,
@@ -53,25 +57,12 @@ static const auto vlan_subintf_stat_ids = new std::vector<ndi_stat_id_t>  {
         IF_INTERFACES_STATE_INTERFACE_STATISTICS_OUT_OCTETS
 };
 
-static bool _fill_vlan_sub_intf_info(cps_api_object_t obj, NAS_VLAN_INTERFACE * &vlan_obj,
+static bool _fill_vlan_sub_intf_info(std::string _if_name, NAS_VLAN_INTERFACE * &vlan_obj,
                                      interface_ctrl_t & intf_ctrl){
 
-    cps_api_object_attr_t _if_name_attr  = cps_api_get_key_data(obj,IF_INTERFACES_STATE_INTERFACE_NAME);
-    if(!_if_name_attr){
-        _if_name_attr = cps_api_get_key_data(obj,DELL_IF_CLEAR_COUNTERS_INPUT_INTF_CHOICE_IFNAME_CASE_IFNAME);
-    }
-
-    if(!_if_name_attr){
-        EV_LOGGING(INTERFACE,ERR,"NAS-STAT","No Interface name passed to get vlan sub interface stat");
-        return false;
-    }
-
-    const char * _if_name = (const char *)cps_api_object_attr_data_bin(_if_name_attr);
-    std::string vlan_name = std::string(_if_name);
-
-    vlan_obj = dynamic_cast<NAS_VLAN_INTERFACE *>(nas_interface_map_obj_get(vlan_name));
+    vlan_obj = dynamic_cast<NAS_VLAN_INTERFACE *>(nas_interface_map_obj_get(_if_name));
     if(!vlan_obj){
-        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-SUB-INTF-STAT","No object for vlan sub intf %s exist",_if_name);
+        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-SUB-INTF-STAT","No object for vlan sub intf %s exist",_if_name.c_str());
         return false;
     }
 
@@ -80,23 +71,23 @@ static bool _fill_vlan_sub_intf_info(cps_api_object_t obj, NAS_VLAN_INTERFACE * 
     memcpy(intf_ctrl.if_name,vlan_obj->parent_intf_name.c_str(),sizeof(intf_ctrl.if_name));
 
     if (dn_hal_get_interface_info(&intf_ctrl) != STD_ERR_OK) {
-       EV_LOGGING(INTERFACE,ERR,"NAS-STAT","Failed to find interface information for bridge %s",_if_name);
+       EV_LOGGING(INTERFACE,ERR,"NAS-STAT","Failed to find interface information for bridge %s",_if_name.c_str());
        return false;
     }
 
     return true;
 }
 
-static cps_api_return_code_t if_stats_get (void * context, cps_api_get_params_t * param,
-                                           size_t ix) {
-
-    cps_api_object_t obj = cps_api_object_list_get(param->filters,ix);
+static cps_api_return_code_t _fill_vlan_sub_intf_stats_get(cps_api_get_params_t *param, std::string _if_name) {
     NAS_VLAN_INTERFACE *vlan_obj=nullptr;
     interface_ctrl_t intf_ctrl;
 
-    if(!_fill_vlan_sub_intf_info(obj,vlan_obj,intf_ctrl)){
+    if(!_fill_vlan_sub_intf_info(_if_name, vlan_obj, intf_ctrl)){
         return cps_api_ret_code_ERR;
     }
+
+    if (vlan_obj->nas_is_1q_br_member())
+       return cps_api_ret_code_ERR;
 
     uint64_t stat_val[vlan_subintf_stat_ids->size()];
 
@@ -128,16 +119,50 @@ static cps_api_return_code_t if_stats_get (void * context, cps_api_get_params_t 
 
     cps_api_object_attr_add_u32(_r_obj,DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,time(NULL));
 
+    cps_api_object_attr_add(_r_obj, IF_INTERFACES_STATE_INTERFACE_NAME, _if_name.c_str(), strlen(_if_name.c_str()) + 1);
+
+    uint64_t time_uptime = std_get_uptime(nullptr);
+    uint64_t time_from_epoch = std_time_get_current_from_epoch_in_nanoseconds();
+
+    cps_api_object_set_timestamp(_r_obj,time_from_epoch); // For  retrieving time from epoch
+    cps_api_object_attr_add_u32(_r_obj, DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,
+    		(uint32_t)time_uptime); // Used for measuring time intervals
+
+    return cps_api_ret_code_OK;
+}
+static cps_api_return_code_t if_stats_get (void * context, cps_api_get_params_t * param,
+                                           size_t ix) {
+    std::string _if_name;
+    cps_api_object_t obj = cps_api_object_list_get(param->filters,ix);
+    cps_api_object_attr_t _if_name_attr  = cps_api_get_key_data(obj,IF_INTERFACES_STATE_INTERFACE_NAME);
+
+    // TODO - Maintain ifdex to ifname map. When if_index is valid get ifname and give outout. This will avoid loop
+
+    if(!_if_name_attr){
+        std::for_each(nas_interface_obj_map_get().begin(),
+                      nas_interface_obj_map_get().end(), [param, obj] (const std::pair<std::string, class NAS_INTERFACE *>& intf_obj) {
+
+                      if (intf_obj.second->intf_type_get() != nas_int_type_VLANSUB_INTF) return;
+
+                       cps_api_object_attr_t _if_ifx_attr = cps_api_get_key_data(obj, IF_INTERFACES_STATE_INTERFACE_IF_INDEX);
+
+                      if (_if_ifx_attr && ((hal_ifindex_t) cps_api_object_attr_data_u32(_if_ifx_attr) != intf_obj.second->get_ifindex())) return;
+                       _fill_vlan_sub_intf_stats_get(param, intf_obj.second->get_ifname());
+
+                      });
+
+    } else {
+       _if_name.assign((char *)cps_api_object_attr_data_bin(_if_name_attr));
+       return _fill_vlan_sub_intf_stats_get(param, _if_name);
+    }
     return cps_api_ret_code_OK;
 }
 
-
-cps_api_return_code_t nas_vlan_sub_intf_stat_clear(cps_api_object_t obj){
-
+static cps_api_return_code_t _vlan_sub_intf_stats_clear(std::string _if_name) {
     NAS_VLAN_INTERFACE * vlan_obj=nullptr;
     interface_ctrl_t intf_ctrl;
 
-    if(!_fill_vlan_sub_intf_info(obj,vlan_obj,intf_ctrl)){
+    if(!_fill_vlan_sub_intf_info(_if_name, vlan_obj, intf_ctrl)){
         return cps_api_ret_code_ERR;
     }
 
@@ -156,6 +181,25 @@ cps_api_return_code_t nas_vlan_sub_intf_stat_clear(cps_api_object_t obj){
             EV_LOGGING(INTERFACE,ERR,"NAS-STAT","Failed to clear stat for %s",vlan_obj->if_name.c_str());
             return cps_api_ret_code_ERR;
         }
+    }
+    return cps_api_ret_code_OK;
+}
+
+cps_api_return_code_t nas_vlan_sub_intf_stat_clear(cps_api_object_t obj){
+    std::string _if_name;
+    cps_api_object_attr_t _if_name_attr  = cps_api_get_key_data(obj,
+             DELL_IF_CLEAR_COUNTERS_INPUT_INTF_CHOICE_IFNAME_CASE_IFNAME);
+
+    if(!_if_name_attr){
+        std::for_each(nas_interface_obj_map_get().begin(),
+                      nas_interface_obj_map_get().end(), [] (const std::pair<std::string, class NAS_INTERFACE *>& intf_obj) {
+
+                      if (intf_obj.second->intf_type_get() != nas_int_type_VLANSUB_INTF) return;
+                      _vlan_sub_intf_stats_clear(intf_obj.second->get_ifname());
+                      });
+    } else {
+       _if_name.assign((char *)cps_api_object_attr_data_bin(_if_name_attr));
+       return _vlan_sub_intf_stats_clear(_if_name);
     }
 
     return cps_api_ret_code_OK;

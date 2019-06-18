@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -31,7 +31,9 @@
 #include "dell-base-if.h"
 #include "dell-interface.h"
 #include "nas_ndi_port.h"
-
+#include "nas_int_lag_cps.h"
+#include "nas_ndi_lag.h"
+#include "nas_switch.h"
 
 
 /** struct nas_lag_slave_info_t
@@ -332,6 +334,8 @@ t_std_error nas_lag_master_add(hal_ifindex_t index,const char *if_name,
     nas_lag_master_info_t nas_lag_entry;
     t_std_error rc = STD_ERR_OK;
     nas_obj_id_t ndi_lag_id;
+    npu_id_t npu = 0;   //@TODO to retrive NPU ID in multi npu case
+
 
     if(nas_lag_exist(if_name)){
         EV_LOGGING(INTERFACE, INFO, "NAS-LAG", "Lag exists index %d name %s ", index, if_name);
@@ -339,11 +343,15 @@ t_std_error nas_lag_master_add(hal_ifindex_t index,const char *if_name,
     }
 
     // Create Lag in NPU
-    //@TODO to retrive NPU ID in multi npu case
-    if(nas_lag_create(0, &ndi_lag_id) != STD_ERR_OK){
+    if(nas_lag_create(npu, &ndi_lag_id) != STD_ERR_OK){
         return STD_ERR(INTERFACE,FAIL, 0);
     }
 
+    /* only add resilient hash attribute if supported by platform */
+    if (nas_switch_resilient_hash_lag_supported()) {
+        ndi_set_lag_resilient_hash(npu, ndi_lag_id, nas_lag_hash_value_get());
+    }
+   
     nas_lag_entry.ifindex = index;
     nas_lag_entry.lag_id = lag_id;
     nas_lag_entry.ndi_lag_id = ndi_lag_id;

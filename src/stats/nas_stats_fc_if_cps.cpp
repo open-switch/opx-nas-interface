@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -29,7 +29,7 @@
 #include "nas_ndi_common.h"
 #include "nas_ndi_fc_stat.h"
 
-#include <time.h>
+#include "std_time_tools.h"
 
 typedef uint64_t nas_fc_if_stat_id_t;
 
@@ -102,9 +102,9 @@ static bool get_fc_stats(hal_ifindex_t ifindex, cps_api_object_list_t list){
         cps_api_object_attr_add_u64(obj, nas_fc_if_stat_ids[ix], nas_fc_stat_values[ix]);
     }
 
-    cps_api_object_attr_add_u32(obj,
-        DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,
-        time(NULL));
+    uint64_t time_uptime = std_get_uptime(nullptr);
+    cps_api_object_attr_add_u32(obj, DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,
+                                (uint32_t)time_uptime);
     cps_api_object_attr_add_u32(obj,IF_INTERFACES_STATE_INTERFACE_IF_INDEX, ifindex);
     if(strlen(intf_ctrl.if_name) != 0)
         cps_api_object_attr_add(obj, IF_INTERFACES_STATE_INTERFACE_NAME, intf_ctrl.if_name, strlen(intf_ctrl.if_name) + 1);

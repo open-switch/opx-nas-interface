@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -96,8 +96,7 @@ static bool _nas_bridge_handle_mode_change(const char *br_name, BASE_IF_MODE_t m
     std_mutex_simple_lock_guard _lg(nas_vlan_mode_mtx());
     if(nas_g_scaled_vlan_get() == false) return true;
 
-     nas_bridge_utils_l3_mode_set(br_name, mode);
-
+    nas_bridge_utils_l3_mode_set(br_name, mode);
     if(mode == BASE_IF_MODE_MODE_L3){
 
         /*  get the list of all tagged members  */
@@ -113,8 +112,7 @@ static bool _nas_bridge_handle_mode_change(const char *br_name, BASE_IF_MODE_t m
         /*  create sub interfaces  */
         /*  add all sub interfaces to the bridge in the kernel
          *  IT should already be in the local cache */
-        /*  TODO set mtu also  */
-        if (nas_interface_vlan_subintf_list_create(tagged_list,vlan_id, true)  != STD_ERR_OK) {
+        if (nas_interface_os_vlan_subintf_list_create(tagged_list,vlan_id)  != STD_ERR_OK) {
             EV_LOGGING(INTERFACE,ERR,"NAS-INT", " Bridge %s tagged member list create failed  ", br_name);
             return false;
         }
@@ -126,6 +124,7 @@ static bool _nas_bridge_handle_mode_change(const char *br_name, BASE_IF_MODE_t m
     }
     return true;
 }
+
 static cps_api_return_code_t nas_vlan_set_parent_bridge(const char *br_name, cps_api_object_t obj, cps_api_object_it_t & it){
 
     size_t len = cps_api_object_attr_len(it.attr);
@@ -155,13 +154,13 @@ static cps_api_return_code_t nas_vlan_set_parent_bridge(const char *br_name, cps
          * modify any other properties
          */
         std::string new_parent = std::string((const char *)(cps_api_object_attr_data_bin(it.attr)));
-        if (nas_bridge_utils_if_bridge_exists(new_parent.c_str()) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-ATTACH","Can't attach parent bridge %s to vlan %s as "
-                      "parent bridge does not exist",new_parent.c_str(),br_name);
-            cps_api_set_object_return_attrs(obj, rc, "Virtual-Network %s does not exist",new_parent.c_str());
-            return cps_api_ret_code_ERR;
 
-        } else if(!nas_bridge_is_empty(new_parent)){
+        if (nas_bridge_utils_is_l2_bridge(new_parent) != STD_ERR_OK) {
+            cps_api_set_object_return_attrs(obj, rc, "Virtual-Network  %s does not exist",new_parent.c_str());
+            return cps_api_ret_code_ERR;
+        }
+
+        if(!nas_bridge_is_empty(new_parent)) {
             EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-ATTACH","Can't attach parent bridge %s to vlan %s as "
                       "parent bridge already has members",new_parent.c_str(),br_name);
 
@@ -172,7 +171,7 @@ static cps_api_return_code_t nas_vlan_set_parent_bridge(const char *br_name, cps
         if (nas_bridge_utils_attach_vlan(br_name, new_parent.c_str()) != STD_ERR_OK) {
             rc  = cps_api_ret_code_ERR;
         }
-        EV_LOGGING(INTERFACE,NOTICE,"NAS-VLAN-ATTACH","new parent bridge is %s ", new_parent.c_str());
+        EV_LOGGING(INTERFACE,INFO,"NAS-VLAN-ATTACH","new parent bridge is %s ", new_parent.c_str());
     } else {
         EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-ATTACH"," Invalid case: length is 0 and parent is not present %s", br_name);
         rc  = cps_api_ret_code_ERR;
@@ -183,6 +182,7 @@ static cps_api_return_code_t nas_vlan_set_parent_bridge(const char *br_name, cps
 
 static cps_api_return_code_t nas_vlan_intf_cps_process_get(void * context, cps_api_get_params_t *param, size_t ix, bool get_state)
 {
+    std::string _br_name;
 
 
     EV_LOGGING(INTERFACE, DEBUG, "NAS-Vlan", "nas_vlan_intf_cps_get");
@@ -211,7 +211,6 @@ static cps_api_return_code_t nas_vlan_intf_cps_process_get(void * context, cps_a
             br_name = (const char*)cps_api_object_attr_data_bin(_name);
         } else if (_vlan_id != nullptr) {
             hal_vlan_id_t vid = cps_api_object_attr_data_u32(_vlan_id);
-            std::string _br_name;
             if (nas_bridge_vlan_to_bridge_get(vid, _br_name) == false) {
                 return cps_api_ret_code_ERR;
             }
@@ -250,10 +249,11 @@ static cps_api_return_code_t nas_cps_update_vlan(const char *br_name, cps_api_ob
 
     cps_api_return_code_t rc =  cps_api_ret_code_ERR;
     cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
-    cps_api_object_it_t it;
+    cps_api_object_it_t it, mtu_it;
     bool untag_list_attr = false;
     bool tag_list_attr = false;
     memberlist_t tagged_list, untagged_list;
+    bool mtu_set = false;
 
     BASE_IF_MODE_t mode;
     hal_vlan_id_t vlan_id;
@@ -279,10 +279,12 @@ static cps_api_return_code_t nas_cps_update_vlan(const char *br_name, cps_api_ob
     if (_ifndex  == nullptr) {
         cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, if_index);
     }
+    int id = 0;
+    std::string cur_parent;
     cps_api_object_it_begin(obj,&it);
     for ( ; cps_api_object_it_valid(&it) ; cps_api_object_it_next(&it) ) {
 
-        int id = (int) cps_api_object_attr_id(it.attr);
+        id = (int) cps_api_object_attr_id(it.attr);
         switch (id) {
         case DELL_IF_IF_INTERFACES_INTERFACE_PARENT_BRIDGE:
             if (nas_vlan_set_parent_bridge(br_name,obj, it) != cps_api_ret_code_OK) {
@@ -291,6 +293,16 @@ static cps_api_return_code_t nas_cps_update_vlan(const char *br_name, cps_api_ob
             break;
         case DELL_IF_IF_INTERFACES_INTERFACE_VLAN_MODE:
             mode = (BASE_IF_MODE_t)cps_api_object_attr_data_uint(it.attr);
+            nas_bridge_utils_parent_bridge_get(br_name, cur_parent);
+            if (cur_parent.size()) {
+                /* Save the mode ,even if it is attached
+                 * If error is retured for attached case ,
+                 * reload fails when mode comes after parent.
+                 */
+
+                nas_bridge_utils_l3_mode_set(br_name, mode);
+                EV_LOGGING(INTERFACE, ERR, "NAS-Vlan", "attrib VLAN_MODE setting failed  for vlan %d",  vlan_id);
+            }
             if (!_nas_bridge_handle_mode_change(br_name, mode)) {
                 rc = cps_api_ret_code_ERR;
                 cps_api_set_object_return_attrs(obj, rc, "VLAN Mode setting Failed for %d", vlan_id);
@@ -326,8 +338,11 @@ static cps_api_return_code_t nas_cps_update_vlan(const char *br_name, cps_api_ob
             }
         }
             break;
-        case DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS:
         case DELL_IF_IF_INTERFACES_INTERFACE_MTU:
+            mtu_set = true;
+            mtu_it = it;
+            break;
+        case DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS:
         case IF_INTERFACES_INTERFACE_ENABLED:
            if (op  == cps_api_oper_CREATE) break; /*  attributes already set during create time */
            if (nas_bridge_utils_set_attribute(br_name, obj , it) !=STD_ERR_OK) {
@@ -356,6 +371,20 @@ static cps_api_return_code_t nas_cps_update_vlan(const char *br_name, cps_api_ob
         cps_api_set_object_return_attrs(obj, rc , "Member list processing failed for vlan %d", vlan_id);
         EV_LOGGING(INTERFACE, ERR, "NAS-Vlan", "Member list processing failed for bridge %s" , br_name);
         return rc;
+    }
+
+    /* Check is mtu config set need to handled, mtu_set flag will be set to true if mtu attr is specified
+     * in cps set attr list.
+     */
+    if (mtu_set == true) {
+        if (nas_bridge_utils_set_attribute(br_name, obj , mtu_it) !=STD_ERR_OK) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-Vlan", "attrib %d setting failed  for vlan %d", id, vlan_id);
+            return  cps_api_ret_code_ERR;
+        }
+    }
+    if ((mtu_set == false) && ((tag_list_attr == true)
+                || (untag_list_attr == true))) {
+        nas_bridge_utils_os_set_mtu(br_name);
     }
     return cps_api_ret_code_OK;
 }

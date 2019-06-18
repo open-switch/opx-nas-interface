@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -24,6 +24,8 @@
 #include "dell-base-if.h"
 #include "bridge-model.h"
 #include "nas_os_interface.h"
+#include "cps_api_object_tools.h"
+#include "nas_com_bridge_utils.h"
 #include "bridge/nas_interface_bridge.h"
 #include "bridge/nas_interface_bridge_utils.h"
 #include "bridge/nas_interface_bridge_map.h"
@@ -93,6 +95,148 @@ t_std_error nas_bridge_utils_if_bridge_exists(const char *name, NAS_BRIDGE **bri
     return STD_ERR(INTERFACE, FAIL, 0);
 }
 
+/* Check to see if bridge was created with bridge model */
+
+t_std_error nas_bridge_utils_is_l2_bridge(std::string br_name) {
+    NAS_BRIDGE *br_obj = nullptr;
+
+    if (nas_bridge_utils_if_bridge_exists(br_name.c_str(), &br_obj) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-VXLAN-BR","bridge does not exist",br_name.c_str());
+        return STD_ERR(INTERFACE, FAIL, 0);
+
+    }
+    NAS_DOT1D_BRIDGE *dot1d_bridge = dynamic_cast<NAS_DOT1D_BRIDGE *>(br_obj);
+    if (dot1d_bridge == nullptr) {
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    create_type_t flg = dot1d_bridge->get_create_flag();
+    if (flg != BOTH_MODEL && flg != BRIDGE_MOD_CREATE) {
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VXLAN-BR",
+             "bridge %s is not l2 bridge flag: %d ",br_name.c_str(), flg);
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    return STD_ERR_OK;
+}
+
+t_std_error nas_bridge_utils_is_l3_bridge(std::string br_name) {
+    NAS_BRIDGE *br_obj = nullptr;
+
+    if (nas_bridge_utils_if_bridge_exists(br_name.c_str(), &br_obj) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-VXLAN-BR","bridge does not exist",br_name.c_str());
+        return STD_ERR(INTERFACE, FAIL, 0);
+
+    }
+    NAS_DOT1D_BRIDGE *dot1d_bridge = dynamic_cast<NAS_DOT1D_BRIDGE *>(br_obj);
+    if (dot1d_bridge == nullptr) {
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    create_type_t flg = dot1d_bridge->get_create_flag();
+    if (flg != BOTH_MODEL && flg != INT_MOD_CREATE) {
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VXLAN-BR",
+             "bridge %s is not l3 bridge flag: %d ",br_name.c_str(), flg);
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    return STD_ERR_OK;
+}
+
+t_std_error nas_bridge_set_mode_if_bridge_exists(const char *name, create_type_t ty, bool &exist) {
+    std::string _name(name);
+    NAS_BRIDGE *br_obj;
+    create_type_t current;
+    exist = false;
+    if (nas_bridge_map_obj_get(_name, &br_obj) == STD_ERR_OK) {
+        if (br_obj->bridge_mode != BASE_IF_BRIDGE_MODE_1D) {
+           EV_LOGGING(INTERFACE, ERR,"NAS-VN-CREATE", "this  Bridge %s cannot be create as mode is not 1D", name);
+           return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        NAS_DOT1D_BRIDGE *dot1d_bridge = dynamic_cast<NAS_DOT1D_BRIDGE *>(br_obj);
+        current = dot1d_bridge->get_create_flag();
+        if((current == BRIDGE_MOD_CREATE && ty == INT_MOD_CREATE) ||
+               (current == INT_MOD_CREATE && ty ==BRIDGE_MOD_CREATE))  {
+            dot1d_bridge->set_create_flag(BOTH_MODEL);
+            EV_LOGGING(INTERFACE, DEBUG,"NAS-VN-CREATE", "1D bridge  %s  created by both models", name);
+        } else {
+           /* we don't need this to pass this */
+            EV_LOGGING(INTERFACE, ERR, "NAS-VN-CREATE", "current mode for br %d , new mode %d", current,ty);
+            return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        exist = true;
+    }
+    return STD_ERR_OK;
+
+
+}
+
+t_std_error nas_bridge_delete_vn_bridge(const char *name, cps_api_object_t obj) {
+    std::string _name(name);
+    NAS_BRIDGE *br_obj;
+    create_type_t current;
+    t_std_error rc = cps_api_ret_code_ERR;
+
+    if (nas_bridge_map_obj_get(_name, &br_obj) == STD_ERR_OK) {
+        if (br_obj->bridge_mode != BASE_IF_BRIDGE_MODE_1D) {
+           EV_LOGGING(INTERFACE, ERR,"NAS-VN-DEL", "this  Virtual Intf %s cannot be deleted as mode is not 1D", name);
+           cps_api_set_object_return_attrs(obj, cps_api_ret_code_ERR, "Virtual Interface is not in 1D mode");
+           return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        NAS_DOT1D_BRIDGE *dot1d_bridge = dynamic_cast<NAS_DOT1D_BRIDGE *>(br_obj);
+        if (dot1d_bridge ==nullptr) {
+           return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        current = dot1d_bridge->get_create_flag();
+        EV_LOGGING(INTERFACE,ERR,"NAS-VN-DEL", "Bridge  vn delete  %s with create_mode %d", name, current);
+
+        if (current == INT_MOD_CREATE) {
+            memberlist_t vxlan_list;
+            dot1d_bridge->nas_bridge_get_vxlan_member_list(vxlan_list);
+            if (!vxlan_list.empty()) {
+                cps_api_set_object_return_attrs(obj, cps_api_ret_code_ERR, "Virtual Interface has vxlan member");
+                EV_LOGGING(INTERFACE,ERR, "NAS-VN-DEL",  "Bridge  %s has vxlan member and is not created by Both model" ,name);
+                return STD_ERR(INTERFACE, FAIL, 0);
+            }
+            if (!(br_obj->nas_bridge_tagged_member_present()) && !(br_obj-> nas_bridge_untagged_member_present())) {
+                /* Delete the bridge and return if no members are there */
+                /* TODO: May have to handle mode change to l2 or none for this bridge */
+                EV_LOGGING(INTERFACE,ERR,"NAS-VN-DEL", "Bridge vn getting deleted from system   %s with create_mode %d", name, current);
+                if ((rc = nas_bridge_utils_delete(name)) != STD_ERR_OK) {
+                    EV_LOGGING(INTERFACE,ERR,"NAS-VN-DEL", " Failed to delete bridge %s in the npu", name);
+                    return rc;
+                }
+                if (( rc = nas_bridge_utils_os_delete_bridge(name)) != STD_ERR_OK) {
+                    EV_LOGGING(INTERFACE,ERR,"NAS-VN-DEL", " Failed to delete bridge %s in the os", name);
+                    return rc;
+                }
+
+            } else {
+                EV_LOGGING(INTERFACE,NOTICE, "NAS-VN-DEL", "Virtual Interface %s cannot be deleted as it has members", name);
+                cps_api_set_object_return_attrs(obj, cps_api_ret_code_ERR, "Bride has members and is not created by Both model");
+                return STD_ERR(INTERFACE, FAIL, 0);
+            }
+
+        } else if (current == BOTH_MODEL) {
+           /* Set the mode correctly and return */
+           dot1d_bridge->set_create_flag(BRIDGE_MOD_CREATE);
+           /* Set ipv6 to disable as it was enbled on vn create from intf model */
+           nas_os_interface_ipv6_config_handle(name, false);
+           EV_LOGGING(INTERFACE,NOTICE, "NAS-VN-DEL", "this  Bridge %s cannot be deleted yet, mode set to BRIDGE", name);
+
+        } else {
+           EV_LOGGING(INTERFACE, ERR,"NAS-VN-DEL", "this  Bridge %s cannot be deleted from INT model as mode is  %d", name, current);
+           cps_api_set_object_return_attrs(obj, cps_api_ret_code_ERR, "Virtual Interface not create with correct create mode");
+           return STD_ERR(INTERFACE, FAIL, 0);
+
+
+        }
+    } else {
+        cps_api_set_object_return_attrs(obj, cps_api_ret_code_ERR, "Virtual Interface doesn't exist in system");
+        EV_LOGGING(INTERFACE, ERR,"NAS-VN-DEL", "this  Bridge %s doesn't exist in system", name);
+        return STD_ERR(INTERFACE, FAIL, 0);
+
+    }
+
+    return STD_ERR_OK;
+}
+
 t_std_error nas_bridge_utils_vlan_id_get(const char * br_name, hal_vlan_id_t *vlan_id )
 {
     NAS_BRIDGE *br_obj;
@@ -117,27 +261,23 @@ t_std_error nas_bridge_utils_ifindex_get(const char * br_name, hal_ifindex_t *id
     return STD_ERR_OK;
 }
 
-
-t_std_error nas_bridge_utils_l3_mode_get(const char * br_name, BASE_IF_MODE_t *mode)
-{
-    if (mode == NULL) return STD_ERR(INTERFACE, FAIL, 0);
-
-    NAS_BRIDGE *br_obj;
-    if (nas_bridge_map_obj_get(std::string(br_name), &br_obj) != STD_ERR_OK) {
-        return STD_ERR(INTERFACE, FAIL, 0);
-    }
-    *mode = br_obj->bridge_l3_mode_get();
-    return STD_ERR_OK;
-}
 t_std_error nas_bridge_utils_l3_mode_set(const char * br_name, BASE_IF_MODE_t mode)
 {
     NAS_BRIDGE *br_obj;
     if (nas_bridge_map_obj_get(std::string(br_name), &br_obj) != STD_ERR_OK) {
         return STD_ERR(INTERFACE, FAIL, 0);
     }
-    br_obj->bridge_l3_mode_set(mode);
+    if (br_obj->bridge_mode_get() != BASE_IF_BRIDGE_MODE_1Q)  {
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    NAS_DOT1Q_BRIDGE *dot1q_bridge = dynamic_cast<NAS_DOT1Q_BRIDGE *>(br_obj);
+    if (dot1q_bridge == nullptr) {
+       return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    dot1q_bridge->bridge_l3_mode_set(mode);
     return STD_ERR_OK;
 }
+
 t_std_error nas_bridge_utils_vlan_type_set(const char * br_name, BASE_IF_VLAN_TYPE_t vlan_type)
 {
     NAS_BRIDGE *br_obj;
@@ -145,9 +285,14 @@ t_std_error nas_bridge_utils_vlan_type_set(const char * br_name, BASE_IF_VLAN_TY
         return STD_ERR(INTERFACE, FAIL, 0);
     }
     NAS_DOT1Q_BRIDGE *dot1q_bridge = dynamic_cast<NAS_DOT1Q_BRIDGE *>(br_obj);
+    if (dot1q_bridge == nullptr) {
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+
     dot1q_bridge->nas_bridge_sub_type_set(vlan_type);
     return STD_ERR_OK;
 }
+
 t_std_error nas_bridge_utils_validate_bridge_mem_list(const char *br_name, std::list <std::string> &intf_list,
                                                         std::list <std::string>&mem_list)
 {
@@ -191,7 +336,6 @@ t_std_error nas_bridge_utils_create_obj(const char *name, BASE_IF_BRIDGE_MODE_t 
         *bridge_obj = br_obj;
     }
     /*  save in the name to bridge object map */
-    EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge obj created ");
     return (nas_bridge_map_obj_add(_name, br_obj));
 }
 
@@ -213,7 +357,9 @@ t_std_error nas_create_bridge(const char *name, BASE_IF_BRIDGE_MODE_t br_type, h
     return rc;
 }
 
-t_std_error nas_bridge_create_vlan(const char *br_name, hal_vlan_id_t vlan_id, cps_api_object_t obj, NAS_BRIDGE **bridge_obj)
+t_std_error nas_bridge_create_vlan (const char *br_name, hal_vlan_id_t vlan_id,
+                                    cps_api_object_t obj,
+                                    NAS_BRIDGE **bridge_obj)
 {
     t_std_error rc = STD_ERR_OK;
     hal_ifindex_t if_index;
@@ -227,13 +373,18 @@ t_std_error nas_bridge_create_vlan(const char *br_name, hal_vlan_id_t vlan_id, c
         EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Bridge delete failed in the OS %s", br_name);
         return STD_ERR(INTERFACE, FAIL, 0);
     }
-    EV_LOGGING(INTERFACE, NOTICE, "NAS-BRIDGE-CREATE", "Create Bridge for %s in kernel Successful",br_name );
+    EV_LOGGING(INTERFACE, DEBUG, "NAS-BRIDGE-CREATE", "Create Bridge for %s in kernel Successful",br_name );
     cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,if_index);
     NAS_DOT1Q_BRIDGE *dot1q_br_obj;
     if ((rc = nas_bridge_utils_create_obj(br_name, BASE_IF_BRIDGE_MODE_1Q, if_index, (NAS_BRIDGE **)&dot1q_br_obj)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to create bridge object, name %s",br_name);
         return rc;
     }
+
+    cps_api_object_attr_t _mac_attr = cps_api_object_attr_get(obj, DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS);
+    STD_ASSERT(_mac_attr != nullptr);
+    std::string mac_addr_str = (char *) cps_api_object_attr_data_bin(_mac_attr);
+    dot1q_br_obj->nas_bridge_set_mac_address(mac_addr_str);
 
     dot1q_br_obj->nas_bridge_vlan_id_set(vlan_id);
     dot1q_br_obj->set_bridge_model(INT_VLAN_MODEL);
@@ -247,6 +398,7 @@ t_std_error nas_bridge_create_vlan(const char *br_name, hal_vlan_id_t vlan_id, c
     return rc;
 
 }
+
 t_std_error nas_bridge_utils_delete_obj(NAS_BRIDGE *br_obj) {
     t_std_error rc = STD_ERR_OK;
     if ((rc = br_obj->nas_bridge_npu_delete()) != STD_ERR_OK) {
@@ -266,18 +418,24 @@ t_std_error nas_bridge_utils_delete(const char *name)
         EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to get bridge obj for %s", name);
         return STD_ERR(INTERFACE, FAIL, 0);
     }
-    if (nas_intf_handle_intf_mode_change(br_obj->get_bridge_intf_index(), BASE_IF_MODE_MODE_L2) == false) {
-        EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "Update to NAS-L3 about interface mode change failed(%s)",
-                name);
-    }
     if (br_obj->bridge_mode_get() == BASE_IF_BRIDGE_MODE_1Q) {
         NAS_DOT1Q_BRIDGE *dot1q_bridge = dynamic_cast<NAS_DOT1Q_BRIDGE *>(br_obj);
         hal_vlan_id_t vlan_id = dot1q_bridge-> nas_bridge_vlan_id_get();
+        if (nas_intf_handle_intf_mode_change(br_obj->get_bridge_intf_index(), BASE_IF_MODE_MODE_L2) == false) {
+            EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN", "Update to NAS-L3 about interface mode change failed(%s)",
+                    name);
+        }
         if (!nas_intf_cleanup_l2mc_config(0, vlan_id)) {
-            EV_LOGGING(INTERFACE, ERR, "NAS-Vlan", "Error cleaning L2MC membership for VLAN %d", vlan_id);
+            EV_LOGGING(INTERFACE, ERR, "NAS-VLAN", "Error cleaning L2MC membership for VLAN %d", vlan_id);
         }
     }
-    EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge delete from NPU");
+    // Cleanup nas multicast synchronously
+    //TODO - need only for dot1Q?
+    if (nas_intf_l3mc_intf_delete (name, BASE_IF_MODE_MODE_NONE) == false) {
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-VLAN",
+                "Update to NAS-L3-MCAST about interface delete change failed(%s)", name);
+    }
+    EV_LOGGING(INTERFACE,DEBUG,"NAS-INT", " Bridge delete from NPU");
 
     if ((nas_bridge_utils_delete_obj(br_obj)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to delete bridge obj for %s", name);
@@ -299,7 +457,7 @@ t_std_error nas_bridge_utils_npu_remove_member(const char *br_name, nas_int_type
         return STD_ERR(INTERFACE, FAIL, 0);
     }
     std::string _mem_name = std::string(mem_name);
-    EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge member remove %s member %s ", br_name, mem_name);
+    EV_LOGGING(INTERFACE,DEBUG,"NAS-INT", " Bridge member remove %s member %s ", br_name, mem_name);
     if( br_obj->nas_bridge_npu_add_remove_member(_mem_name, mem_type, false) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Bridge member addition failed ");
         return STD_ERR(INTERFACE, FAIL, 0);
@@ -321,6 +479,9 @@ static bool nas_check_bridge_1q_validity(NAS_DOT1D_BRIDGE *dot1d_br_obj)
 }
 t_std_error nas_bridge_utils_parent_bridge_get(const char *br_name, std::string &parent_bridge )
 {
+    if (br_name == nullptr) {
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
     std::string _br_name(br_name);
     NAS_BRIDGE *br_obj = nullptr;
     if (nas_bridge_map_obj_get(_br_name, &br_obj) != STD_ERR_OK) {
@@ -333,6 +494,9 @@ t_std_error nas_bridge_utils_parent_bridge_get(const char *br_name, std::string 
 
 t_std_error nas_bridge_utils_parent_bridge_set(const char *br_name, std::string &parent_bridge )
 {
+    if (br_name == nullptr) {
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
     std::string _br_name(br_name);
     NAS_BRIDGE *br_obj = nullptr;
     if (nas_bridge_map_obj_get(_br_name, &br_obj) != STD_ERR_OK) {
@@ -360,7 +524,7 @@ t_std_error nas_bridge_utils_mem_list_get(NAS_BRIDGE *br_obj, list_t &mem_list)
         /*  Remove the member from src_br_obj */
         t_std_error rc = STD_ERR_OK;
         nas_int_type_t mem_type;
-        if ((rc = nas_get_int_name_type(mem_name.c_str(), &mem_type)) != STD_ERR_OK) {
+        if ((rc = nas_get_int_name_type_frm_cache(mem_name.c_str(), &mem_type)) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " NAS OS L2 PORT Event: Failed to get member type %s ", mem_name.c_str());
             return rc ;
         }
@@ -382,7 +546,7 @@ static t_std_error nas_npu_migrate_bridge_members(NAS_BRIDGE *dest_br_obj, NAS_B
         /*  Remove the member from src_br_obj */
         t_std_error rc = STD_ERR_OK;
         nas_int_type_t mem_type;
-        if ((rc = nas_get_int_name_type(mem_name.c_str(), &mem_type)) != STD_ERR_OK) {
+        if ((rc = nas_get_int_name_type_frm_cache(mem_name.c_str(), &mem_type)) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " NAS OS L2 PORT Event: Failed to get member type %s ", mem_name.c_str());
             return rc ;
         }
@@ -476,10 +640,10 @@ t_std_error nas_bridge_utils_npu_add_member(const char *br_name, nas_int_type_t 
     }
     BASE_IF_BRIDGE_MODE_t mode = br_obj->bridge_mode;
 
-    EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge member add %s  member %s", br_name, mem_name);
+    EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge member add %s  member %s mode %d", br_name, mem_name, mode);
     /*  If bridge is .1q and member is vxlan then migrate to .1d bridge */
-    if ((mode == BASE_IF_BRIDGE_MODE_1Q) && (mem_type == nas_int_type_VXLAN)) {
 
+    if ((mode == BASE_IF_BRIDGE_MODE_1Q) && (mem_type == nas_int_type_VXLAN)) {
         if (br_obj->nas_bridge_intf_cntrl_block_register(HAL_INTF_OP_DEREG) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE,ERR,"NAS-INT", " Dot 1Q Bridge deregistration failed %s", br_name);
             return STD_ERR(INTERFACE, FAIL, 0);
@@ -538,23 +702,44 @@ static t_std_error nas_bridge_utils_os_add_remove_member(const char *br_name, na
     return STD_ERR_OK;
 }
 
-/*  Add a member in the bridge in kernel as well as in the NPU */
+
+/* Called by bridge model at update _bridge_update */
+/*  Adds a member in the bridge in OS (only if bridge created by intf model) and  in the NPU */
 t_std_error nas_bridge_utils_add_member(const char *br_name, const char *mem_name)
 {
     t_std_error rc = STD_ERR_OK;
     nas_int_type_t mem_type;
-    if ((rc = nas_get_int_name_type(mem_name, &mem_type)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " Failed to get the member type %s ", mem_name);
-        return rc ;
+    if ((rc = nas_get_int_name_type_frm_cache(mem_name, &mem_type)) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,DEBUG, "NAS-BRIDGE", " Failed to get the member type %s in cache ", mem_name);
+            return STD_ERR(INTERFACE, FAIL, 0);
     }
+    bool  add_in_os =true;
     nas_port_mode_t port_mode = NAS_PORT_UNTAGGED;
     if (mem_type == nas_int_type_VLANSUB_INTF) {
-        port_mode = NAS_PORT_UNTAGGED;
+        port_mode = NAS_PORT_TAGGED;
+    } else if (mem_type == nas_int_type_VXLAN) {
+        NAS_BRIDGE *_br_obj = nullptr;
+        if (nas_bridge_map_obj_get(br_name, &_br_obj) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Bridge %s not present in the map ", br_name);
+            return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        add_in_os = _br_obj->nas_add_sub_interface();
     }
+    if (add_in_os) {
+        /* Cretae vtep if not created and then add it as a member */
+        if (mem_type == nas_int_type_VXLAN) {
+            NAS_VXLAN_INTERFACE * vxlan_obj = dynamic_cast<NAS_VXLAN_INTERFACE *>(nas_interface_map_obj_get(mem_name));
+            if (vxlan_obj == nullptr) {
+                EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "At bridge_and_add_vtep  Bridge %s doesn't have vtep %s", br_name, mem_name);
+                return STD_ERR(INTERFACE, FAIL, 0);
+            }
+            vxlan_obj->nas_vxlan_create_in_os();
+        }
 
-    if ((rc = nas_bridge_utils_os_add_remove_member(br_name, port_mode, mem_name, true)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " Failed to add member  in the kernel %s ", mem_name);
-        return rc;
+        if ((rc = nas_bridge_utils_os_add_remove_member(br_name, port_mode, mem_name, true)) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " Failed to add vtep member  in the kernel %s ", mem_name);
+            return rc;
+        }
     }
     if ((rc = nas_bridge_utils_npu_add_member(br_name, mem_type, mem_name)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " NAS Failed to add member in the NPU %s ", mem_name);
@@ -564,31 +749,45 @@ t_std_error nas_bridge_utils_add_member(const char *br_name, const char *mem_nam
     }
     return STD_ERR_OK;
 }
-/*  Add a member in the bridge in kernel as well as in the NPU */
+/*  Remove a member in the bridge in kernel as well as in the NPU for 1D bridge. Called from bridge modle */
 t_std_error nas_bridge_utils_remove_member(const char *br_name, const char *mem_name)
 {
     t_std_error rc = STD_ERR_OK;
     nas_int_type_t mem_type;
-    if ((rc = nas_get_int_name_type(mem_name, &mem_type)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " Failed to get the member type %s ", mem_name);
-        return rc ;
+    bool rm_in_os = true;
+    if ((rc = nas_get_int_name_type_frm_cache(mem_name, &mem_type)) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,DEBUG, "NAS-BRIDGE", " Failed to get the member type in cache %s ", mem_name);
+        return STD_ERR(INTERFACE, FAIL, 0);
+
     }
     nas_port_mode_t port_mode = NAS_PORT_UNTAGGED;
     if (mem_type == nas_int_type_VLANSUB_INTF) {
         port_mode = NAS_PORT_TAGGED;
-    }
+    } else if (mem_type == nas_int_type_VXLAN) {
+        NAS_VXLAN_INTERFACE * vxlan_obj = dynamic_cast<NAS_VXLAN_INTERFACE *>(nas_interface_map_obj_get(mem_name));
+        if(vxlan_obj == nullptr){
+            EV_LOGGING(INTERFACE,ERR,"BRIDGE","RM BR %s member: vxlan interface doesn't %s exist", br_name , mem_name);
+            return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        hal_ifindex_t idx = vxlan_obj->get_ifindex();
+        if (idx == NAS_IF_INDEX_INVALID) {
+            rm_in_os = false;
+        }
 
+    }
     if ((rc = nas_bridge_utils_npu_remove_member(br_name, mem_type, mem_name)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " NAS Failed to remove member %s in the NPU from bridge %s ",
                             mem_name, br_name);
         return rc;
     }
-    if ((rc = nas_bridge_utils_os_add_remove_member(br_name, port_mode, mem_name, false)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " Failed to remove member %s in the kernel from bridge %s ",
+    if (rm_in_os) {
+        if ((rc = nas_bridge_utils_os_add_remove_member(br_name, port_mode, mem_name, false)) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " Failed to remove member %s in the kernel from bridge %s ",
                             mem_name, br_name);
-        // Add it back in case of failure
-         nas_bridge_utils_npu_add_member(br_name, mem_type, mem_name);
-        return rc;
+            // Add it back in case of failure
+            nas_bridge_utils_npu_add_member(br_name, mem_type, mem_name);
+            return rc;
+        }
     }
     return STD_ERR_OK;
 }
@@ -643,7 +842,7 @@ nas_bridge_utils_internal_pub_mem_update(const char *br_name, memberlist_t &list
             const char *_parent = strtok(_intf_name,".");
             if(_parent != nullptr){
                intf_name = std::string(_parent);
-               EV_LOGGING(INTERFACE,ERR,"NAS-INT", " Mem_publish :parent intf %s",  intf_name.c_str());
+               EV_LOGGING(INTERFACE,DEBUG,"NAS-INT", " Mem_publish :parent intf %s",  intf_name.c_str());
             } else {
                EV_LOGGING(INTERFACE,ERR,"NAS-INT", " Mem_publish :failed to get parent for  %s",  _intf_name);
                return STD_ERR(INTERFACE, FAIL, 0);
@@ -664,6 +863,7 @@ nas_bridge_utils_internal_pub_mem_update(const char *br_name, memberlist_t &list
 
 }
 
+/* Called from vlan model only */
 t_std_error nas_bridge_utils_update_member_list(const char *br_name, memberlist_t &new_list,
                                                                 memberlist_t &cur_list , nas_port_mode_t port_mode)
 {
@@ -703,9 +903,9 @@ t_std_error nas_bridge_utils_update_member_list(const char *br_name, memberlist_
     // the the parent bridge only. on the vlan bridge, just update the lsit
     bool add_to_parent = false;
     NAS_BRIDGE *oper_br_obj = br_obj;
+    NAS_BRIDGE *p_br_obj = nullptr;
     if (br_obj->bridge_is_parent_bridge_exists()) {
         std::string p_bridge = br_obj->bridge_parent_bridge_get();
-        NAS_BRIDGE *p_br_obj = nullptr;
         if (nas_bridge_map_obj_get(p_bridge.c_str(), &p_br_obj) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE,ERR,"NAS-INT", " parent Bridge %s not present in the map ", p_bridge.c_str());
             return STD_ERR(INTERFACE, FAIL, 0);
@@ -718,15 +918,22 @@ t_std_error nas_bridge_utils_update_member_list(const char *br_name, memberlist_
 
     // if tagged mode then first create all sub interfaces if do not exists
     // Get the vlan id
-    bool  in_os = true;
+    bool  in_os = false;
     if (port_mode == NAS_PORT_TAGGED) {
-        if ((nas_g_scaled_vlan_get() == true) &&
-            (oper_br_obj->bridge_l3_mode_get() != BASE_IF_MODE_MODE_L3)) {
-            in_os = false;
+        if (add_to_parent) {
+            if (p_br_obj->nas_add_sub_interface()) {
+                in_os = true;
+            }
+        } else {
+            if (br_obj->nas_add_sub_interface()) {
+                in_os =true;
+            }
         }
         NAS_DOT1Q_BRIDGE *dot1q_bridge = dynamic_cast<NAS_DOT1Q_BRIDGE *>(br_obj);
+        if (dot1q_bridge == nullptr) {
+            return STD_ERR(INTERFACE, FAIL, 0);
+        }
         hal_vlan_id_t vlan_id = dot1q_bridge->nas_bridge_vlan_id_get();
-
         if (nas_interface_vlan_subintf_list_create(add_list, vlan_id, in_os) != STD_ERR_OK) {
              EV_LOGGING(INTERFACE,ERR,"INT-DB-GET","Failed to create  a memberlist to the bridge %s ",
                                         br_name);
@@ -870,7 +1077,15 @@ t_std_error nas_bridge_utils_attach_vlan(const char *vlan_intf, const char *pare
         }
 
     }
+    /*
+     * As part of moving/updating the member list kernel sets the MTU of vn interface
+     * to max mtu, need to re apply the vn interface
+     */
 
+    nas_bridge_utils_set_mtu(parent_bridge);
+
+    /*  Add bridge to vlan id mapping */
+    nas_com_add_1d_br_untag_vid(parent_bridge, dot1q_br_obj->nas_bridge_vlan_id_get());
     return STD_ERR_OK;
 }
 
@@ -925,6 +1140,10 @@ t_std_error nas_bridge_utils_detach_vlan(const char *vlan_intf, const char *pare
     p_br_obj->nas_bridge_remove_vlan_member_from_attached_list(std::string(vlan_intf));
     NAS_DOT1D_BRIDGE * dot1d_br_obj = dynamic_cast<NAS_DOT1D_BRIDGE *>(p_br_obj);
     if (dot1d_br_obj) dot1d_br_obj->nas_bridge_untagged_vlan_id_set(DEFAULT_UNTAGGED_VLAN_ID);
+
+    nas_bridge_utils_set_mtu(vlan_intf);
+    /*  Remove bridge to vlan id mapping */
+    nas_com_del_1d_br_untag_vid(parent_bridge);
     return STD_ERR_OK;
 }
 t_std_error nas_bridge_utils_get_remote_endpoint_stats(const char *vxlan_intf_name, hal_ip_addr_t & remote_ip,
@@ -1143,8 +1362,9 @@ t_std_error nas_bridge_utils_remove_remote_endpoint(const char *vxlan_intf_name,
     /*  Get vxlan_obj from name  */
     std::string _if_name = std::string(vxlan_intf_name);
     NAS_VXLAN_INTERFACE *vxlan_obj = (NAS_VXLAN_INTERFACE *)nas_interface_map_obj_get(_if_name);
+
     if (vxlan_obj == nullptr) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " remote enpoint removal failed  vxlan interface not found %s", vxlan_intf_name);
+        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Remote endpoint removal failed:  vxlan interface %s not found",vxlan_intf_name);
         return rc;
     }
 
@@ -1153,6 +1373,7 @@ t_std_error nas_bridge_utils_remove_remote_endpoint(const char *vxlan_intf_name,
     EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Remove remote endpoint :vxlan_intf %s, remote ip-address %s", vxlan_intf_name, buff);
     remote_endpoint_t cur_rem_ep;
     cur_rem_ep.remote_ip = rem_ep.remote_ip;
+
     if (vxlan_obj->nas_interface_get_remote_endpoint(&cur_rem_ep) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Remove remote endpoint : not present vxlan_intf %s, remote ip-address %s", vxlan_intf_name, buff);
         return STD_ERR_OK;
@@ -1163,7 +1384,10 @@ t_std_error nas_bridge_utils_remove_remote_endpoint(const char *vxlan_intf_name,
         EV_LOGGING(INTERFACE,INFO ,"NAS-BRIDGE", " remote member is added by interface object but delete is from MAC event.");
         return STD_ERR_OK;
     }
-    vxlan_obj->nas_interface_remove_remote_endpoint(&rem_ep);
+    if ((rc = vxlan_obj->nas_interface_remove_remote_endpoint(&rem_ep)) != STD_ERR_OK)  {
+        EV_LOGGING(INTERFACE,INFO,"NAS-BRIDGE", " Remote endpoint Removal Failed: does not exist in %s", vxlan_intf_name);
+        return  rc;
+    }
 
     /*  Check if vxlan has 1d bridge associated */
     /*  IF yes  then Get the bridge object and call
@@ -1182,7 +1406,6 @@ t_std_error nas_bridge_utils_remove_remote_endpoint(const char *vxlan_intf_name,
     uint32_t vni = vxlan_obj->vni;
     hal_ip_addr_t source_ip = vxlan_obj->source_ip;
     NAS_BRIDGE *bridge_obj = nullptr;
-    /*  TODO Add bridge lock */
 
     /*  vxlan is associated with a bridge */
     if (nas_bridge_map_obj_get(vxlan_obj->bridge_name, &bridge_obj) != STD_ERR_OK) {
@@ -1289,7 +1512,7 @@ t_std_error nas_bridge_utils_associate_npu_port(const char * br_name, const char
     return br_obj->nas_bridge_associate_npu_port(_mem, ndi_port, mode, associate);
 }
 
-t_std_error nas_bridge_utils_os_create_bridge(const char *br_name, hal_ifindex_t *if_index)
+t_std_error nas_bridge_utils_os_create_bridge(const char *br_name, cps_api_object_t obj, hal_ifindex_t *if_index)
 {
     cps_api_object_guard _og(cps_api_object_create());
     if(!_og.valid()){
@@ -1298,18 +1521,31 @@ t_std_error nas_bridge_utils_os_create_bridge(const char *br_name, hal_ifindex_t
     }
     cps_api_set_key_data(_og.get(),IF_INTERFACES_INTERFACE_NAME,
                                cps_api_object_ATTR_T_BIN, br_name, strlen(br_name)+1);
-    // TODO change the name of API
+
+    cps_api_object_attr_t _admin_attr = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_ENABLED);
+    bool enabled = true;
+    if (_admin_attr) {
+        enabled = cps_api_object_attr_data_u32(_admin_attr);
+    }
+    cps_api_object_attr_add_u32(_og.get(),IF_INTERFACES_INTERFACE_ENABLED,enabled);
+
+    cps_api_object_attr_t _mac_attr = cps_api_object_attr_get(obj, BRIDGE_DOMAIN_BRIDGE_PHYS_ADDRESS);
+    if (_mac_attr == nullptr) {
+        _mac_attr = cps_api_object_attr_get(obj, DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS);
+    }
+    if (_mac_attr) {
+        char *mac_addr_str = (char *) cps_api_object_attr_data_bin(_mac_attr);
+        cps_api_object_attr_add(_og.get(),DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS,
+                                mac_addr_str, strlen(mac_addr_str)+1);
+        EV_LOGGING(INTERFACE,INFO,"NAS-BRIDGE", " Bridge MAC address for bridge %s to MAC %s",
+                         br_name, mac_addr_str);
+    }
+
+    /*  change the API */
     if (nas_os_add_vlan(_og.get(), if_index) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Bridge delete failed in the OS %s", br_name);
         return STD_ERR(INTERFACE, FAIL, 0);
     }
-
-    cps_api_object_attr_add_u32(_og.get(),DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX,*if_index);
-    cps_api_object_attr_add_u32(_og.get(),IF_INTERFACES_INTERFACE_ENABLED,true);
-
-    nas_os_interface_set_attribute(_og.get(),IF_INTERFACES_INTERFACE_ENABLED);
-
-
     return STD_ERR_OK;
 }
 
@@ -1381,9 +1617,12 @@ t_std_error nas_bridge_delete_bridge(const char *br_name)
         return rc;
     }
     if (br_obj->bridge_mode_get() == BASE_IF_BRIDGE_MODE_1D)  {
+        create_type_t current;
+        NAS_DOT1D_BRIDGE *dot1d_bridge = dynamic_cast<NAS_DOT1D_BRIDGE *>(br_obj);
+        current = dot1d_bridge->get_create_flag();
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Delete from bridge model: create mode %d for br %s", current, br_name);
         /*  Delete  VXLAN members if any */
         memberlist_t vxlan_list;
-        NAS_DOT1D_BRIDGE *dot1d_bridge = dynamic_cast<NAS_DOT1D_BRIDGE *>(br_obj);
         dot1d_bridge->nas_bridge_get_vxlan_member_list(vxlan_list);
         if (!vxlan_list.empty()) {
             if ((rc = dot1d_bridge->nas_bridge_add_remove_memberlist(vxlan_list, NAS_PORT_TAGGED, false)) != STD_ERR_OK) {
@@ -1391,6 +1630,20 @@ t_std_error nas_bridge_delete_bridge(const char *br_name)
                 return rc;
 
             }
+        }
+        if (current == BOTH_MODEL) {
+            /* This case we will leave the bridge in NPU and OS  but delete tagged sub interfaces*/
+            intf_list_t & sub_intf_list = tagged_list;
+            if ((rc = nas_interface_vlan_subintf_list_delete(sub_intf_list)) != STD_ERR_OK) {
+                EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to delete vlan sub interfaces of bridgei 1d %s in the kernel",
+                                 br_name);
+                return rc;
+            }
+            EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Bridge Delete: Set mode INT_MOD_CREATE for bridge %s", br_name);
+            /* Return now: bridge will exist in npu and os with no members to be cleaned up from interface model Side */
+            dot1d_bridge->set_create_flag(INT_MOD_CREATE);
+            return STD_ERR_OK;
+
         }
     }
     /*  Delete bridge in the NPU and delete objects */
@@ -1454,6 +1707,7 @@ t_std_error nas_bridge_process_cps_memberlist(const char *br_name, memberlist_t 
     return STD_ERR_OK;
 }
 
+/* Called from vlan model only */
 t_std_error nas_bridge_utils_os_add_remove_memberlist(const char *br_name, memberlist_t & memlist, nas_port_mode_t port_mode, bool add)
 {
 
@@ -1479,6 +1733,29 @@ t_std_error nas_bridge_utils_set_attribute(const char *br_name, cps_api_object_t
     return (br_obj->nas_bridge_set_attribute(obj, it));
 }
 
+void nas_bridge_utils_set_mtu (const char *br_name)
+{
+    NAS_BRIDGE *br_obj = nullptr;
+
+    if (nas_bridge_map_obj_get(br_name, &br_obj) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Bridge object get failed %s", br_name);
+        return;
+    }
+
+    br_obj->nas_bridge_set_mtu();
+}
+
+void nas_bridge_utils_os_set_mtu (const char *br_name)
+{
+    NAS_BRIDGE *br_obj = nullptr;
+
+    if (nas_bridge_map_obj_get(br_name, &br_obj) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Bridge object get failed %s", br_name);
+        return;
+    }
+    br_obj->nas_bridge_os_set_mtu();
+}
+
 t_std_error nas_bridge_utils_set_learning_disable(const char *br_name, bool disable){
      NAS_BRIDGE *br_obj = nullptr;
     if (nas_bridge_map_obj_get(br_name, &br_obj) != STD_ERR_OK) {
@@ -1502,7 +1779,7 @@ t_std_error nas_bridge_utils_check_membership(const char *br_name, const char *m
         return STD_ERR(INTERFACE, FAIL, 0);
     }
     nas_int_type_t mem_type;
-    if ((nas_get_int_name_type(mem_name, &mem_type)) != STD_ERR_OK) {
+    if ((nas_get_int_name_type_frm_cache(mem_name, &mem_type)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR, "NAS-BRIDGE", " NAS OS L2 PORT Event: Failed to get member type %s ", mem_name);
         return STD_ERR(INTERFACE, FAIL, 0);
     }
@@ -1523,5 +1800,86 @@ t_std_error nas_bridge_utils_check_membership(const char *br_name, const char *m
         }
     }
     return STD_ERR_OK;
+}
+
+/* Create vtep in os and adds to bridge in os */
+t_std_error nas_bridge_os_vxlan_create_add_to_br(std::string &br_name) {
+
+    NAS_BRIDGE *br_obj = nullptr;
+    t_std_error rc =STD_ERR_OK;
+
+    EV_LOGGING(INTERFACE,DEBUG,"NAS-VN-INT"," Create vtep and add to bridge %s", br_name.c_str());
+    if (nas_bridge_map_obj_get(br_name, &br_obj) != STD_ERR_OK) {
+       EV_LOGGING(INTERFACE,ERR,"NAS-VN-INT", "At create_and_add_vtep  Bridge %s doesn't exist", br_name.c_str());
+       return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    NAS_DOT1D_BRIDGE *dot1d_bridge = dynamic_cast<NAS_DOT1D_BRIDGE *>(br_obj);
+    if (dot1d_bridge == nullptr) {
+       EV_LOGGING(INTERFACE,ERR,"NAS-VN-INT", "At create_and_add_vtep  Bridge %s is not 1D", br_name.c_str());
+       return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    memberlist_t vxlan_list;
+    dot1d_bridge->nas_bridge_get_vxlan_member_list(vxlan_list);
+    /* There will be only one member in vxlan_list */
+    /* Create vxlan intf in kernel */
+    if (vxlan_list.empty()) {
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VN-INT", "Bridge %s doesn't have vtep yet", br_name.c_str());
+        return rc;
+    }
+    for (auto mem : vxlan_list) {
+        t_std_error rc;
+        NAS_VXLAN_INTERFACE * vxlan_obj = dynamic_cast<NAS_VXLAN_INTERFACE *>(nas_interface_map_obj_get(mem));
+        if (vxlan_obj == nullptr) {
+           EV_LOGGING(INTERFACE,ERR,"NAS-VN-INT", "At create_and_add_vtep  Bridge's %s  vtep %s doesn't exist", br_name.c_str(), mem.c_str());
+           return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        vxlan_obj->nas_vxlan_create_in_os();
+        if ((rc = dot1d_bridge->nas_bridge_os_add_remove_member(mem, NAS_PORT_UNTAGGED, true)) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-VN-INT", " Failed to add vxlan member %s to bridge %s", mem.c_str(), br_name.c_str());
+            return rc;
+        }
+        vxlan_obj->nas_interface_update_all_rem_endpt_flooding();
+    }
+
+    return rc;
+}
+
+/* remove vtep from bridge in OS and then delete vtep in os */
+t_std_error nas_bridge_os_vxlan_del_frm_br(std::string &br_name)
+{
+    NAS_BRIDGE *br_obj = nullptr;
+    t_std_error rc =STD_ERR_OK;
+
+    if (nas_bridge_map_obj_get(br_name, &br_obj) != STD_ERR_OK) {
+       EV_LOGGING(INTERFACE,ERR,"NAS-VN-INT", "At create_and_add_vtep  Bridge %s doesn't exist", br_name.c_str());
+       return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    NAS_DOT1D_BRIDGE *dot1d_bridge = dynamic_cast<NAS_DOT1D_BRIDGE *>(br_obj);
+    if (dot1d_bridge == nullptr) {
+       EV_LOGGING(INTERFACE,ERR,"NAS-VN-INT", "At del_and_del_vtep  Bridge %s is not 1D", br_name.c_str());
+       return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    memberlist_t vxlan_list;
+    dot1d_bridge->nas_bridge_get_vxlan_member_list(vxlan_list);
+    /* There will be only one member in vxlan_list */
+    /* Create vxlan intf in kernel */
+    if (vxlan_list.empty()) {
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VN-INT", "At del_and_del_vtep  Bridge %s doesn't have vtep yet", br_name.c_str());
+        return rc;
+    }
+    for (auto mem : vxlan_list) {
+        NAS_VXLAN_INTERFACE * vxlan_obj = dynamic_cast<NAS_VXLAN_INTERFACE *>(nas_interface_map_obj_get(mem));
+        if (vxlan_obj == nullptr) {
+           EV_LOGGING(INTERFACE,ERR,"NAS-VN-INT", "At del_and_del_vtep  Bridge %s doesn't have vtep %s", br_name.c_str(), mem.c_str());
+           return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        /* Vtep goes as untagged */
+        if ((rc = dot1d_bridge->nas_bridge_os_add_remove_member(mem, NAS_PORT_UNTAGGED, false)) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-VN-INT", " Failed to del vxlan member %s from bridge %s", mem.c_str(), br_name.c_str());
+            return rc;
+        }
+        vxlan_obj->nas_vxlan_del_in_os();
+    }
+    return rc;
 }
 

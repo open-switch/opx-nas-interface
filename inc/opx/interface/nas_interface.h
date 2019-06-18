@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -47,8 +47,8 @@ typedef enum {
     MEMBER_TYPE_1D,
 }br_member_type_t;
 class NAS_INTERFACE {
+        bool _create_in_os; // true if vtep creted by linux cli and not cps
 
-        bool _create_in_os;
         BASE_IF_MAC_LEARN_MODE_t mac_learn_mode;
         std::unordered_set<std::string> sub_intf_list;
         /*
@@ -65,11 +65,12 @@ class NAS_INTERFACE {
         bool           enabled; /* Config attribute which need to be stored to handle vrf change */
         BASE_IF_SPEED_t          speed;   /* Config attribute speed */
         BASE_CMN_DUPLEX_TYPE_t   duplex;  /* Config attribute duplex */
+        std::string     bridge_name;
+        size_t         mtu;
     public:
         std::string    if_name;
         std::string    mac_addr;
         hal_ifindex_t  if_index;
-        size_t         mtu;
         nas_int_type_t if_type;
         npu_id_t       npu_id;
 
@@ -89,8 +90,18 @@ class NAS_INTERFACE {
         }
 
         virtual ~NAS_INTERFACE(){}
-        cps_api_return_code_t nas_interface_fill_info(cps_api_object_t obj);
+        virtual cps_api_return_code_t nas_interface_fill_info(cps_api_object_t obj);
         cps_api_return_code_t nas_interface_fill_com_info(cps_api_object_t obj);
+
+        std::string get_bridge_name (void) {
+            return bridge_name;
+        }
+        void set_bridge_name (std::string br_name) {
+            bridge_name.assign(br_name);
+        }
+        void clear_bridge_name (void) {
+            bridge_name.clear();
+        }
 
         bool get_enabled (void) {
             return enabled;
@@ -122,6 +133,16 @@ class NAS_INTERFACE {
         hal_ifindex_t get_ifindex() const {
             return if_index;
         }
+        size_t get_mtu(void) const {
+            return mtu;
+        }
+        void set_ifindex(hal_ifindex_t if_idx) {
+            if_index = if_idx;
+        }
+        std::string get_ifname() const {
+            return if_name;
+        }
+
 
         nas_int_type_t intf_type_get(void) { return if_type;}
 
@@ -138,6 +159,9 @@ class NAS_INTERFACE {
         void set_mac_learn_mode(BASE_IF_MAC_LEARN_MODE_t mode){
             mac_learn_mode = mode;
         }
+
+        t_std_error set_mtu(size_t mtu);
+
 
         BASE_IF_MAC_LEARN_MODE_t get_mac_learn_mode() const {
             return mac_learn_mode;

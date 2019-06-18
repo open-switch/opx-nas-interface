@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -21,6 +21,7 @@
 
 #include "dell-base-interface-common.h"
 #include "nas_int_utils.h"
+#include "bridge/nas_interface_bridge_com.h"
 #include "bridge/nas_interface_1q_bridge.h"
 #include "interface/nas_interface_utils.h"
 
@@ -61,7 +62,6 @@ t_std_error NAS_DOT1Q_BRIDGE::nas_bridge_npu_delete() {
 
 
     /** Delete VLAN in the NPU */
-    EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge delete from NPU call");
     hal_vlan_id_t vlan_id = bridge_vlan_id;
     if (vlan_id != NAS_VLAN_ID_INVALID) {
         if(ndi_delete_vlan(npu_id, vlan_id) != STD_ERR_OK) {
@@ -82,7 +82,7 @@ t_std_error NAS_DOT1Q_BRIDGE::nas_bridge_npu_delete() {
         EV_LOGGING(INTERFACE, DEBUG, "DOT-1Q", "Found intf %s for deletion", *it->c_str());
     }
 
-    EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge delete from NPU successful");
+    EV_LOGGING(INTERFACE,DEBUG,"NAS-INT", " Bridge delete from NPU successful");
     return STD_ERR_OK;
 }
 
@@ -110,10 +110,12 @@ static t_std_error _nas_npu_add_remove_lag_to_vlan(ndi_obj_id_t *lag_id, hal_vla
     t_std_error rc = STD_ERR_OK;
     ndi_obj_id_t *t_list = NULL, *ut_list = NULL;
     size_t tag_cnt =0, untag_cnt=0;
+    ndi_obj_id_t lag_list[] = {*lag_id};
+    size_t lag_count = sizeof(lag_list)/sizeof(ndi_obj_id_t);
 
-    (port_mode == NAS_PORT_UNTAGGED) ?  (ut_list = lag_id, untag_cnt=1) :
-                                  (t_list = lag_id, tag_cnt=1);
-   if (add) {
+    (port_mode == NAS_PORT_UNTAGGED) ?  (ut_list = lag_list, untag_cnt = lag_count) :
+                                  (t_list = lag_list, tag_cnt = lag_count);
+    if (add) {
         rc  = ndi_add_lag_to_vlan(0, vlan_id, t_list, tag_cnt, ut_list, untag_cnt);
         if (port_mode == NAS_PORT_UNTAGGED) {
             ndi_set_lag_pvid(0, *lag_id, vlan_id);
@@ -121,7 +123,7 @@ static t_std_error _nas_npu_add_remove_lag_to_vlan(ndi_obj_id_t *lag_id, hal_vla
     } else {
         rc = ndi_del_lag_from_vlan(0, vlan_id, t_list, tag_cnt, ut_list, untag_cnt);
     }
-   return rc;
+    return rc;
 }
 
 t_std_error NAS_DOT1Q_BRIDGE::nas_bridge_npu_update_all_untagged_members(void)
@@ -156,6 +158,10 @@ t_std_error NAS_DOT1Q_BRIDGE::nas_bridge_npu_update_all_untagged_members(void)
                 EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE",
                         "Update to NAS-L3 about interface mode change failed(%s)", intf_ctrl.if_name);
                 // TODO no need to return failure
+            }
+            if (nas_intf_l3mc_intf_mode_change(intf_ctrl.if_index, new_intf_mode) == false) {
+                EV_LOGGING(INTERFACE, ERR, "NAS-BRIDGE", "L3 MC mode change RPC failed if_index(%d), mode(%d)",
+                        intf_ctrl.if_index, new_intf_mode);
             }
         }
         if (intf_ctrl.int_type == nas_int_type_LAG) {
@@ -325,6 +331,10 @@ t_std_error NAS_DOT1Q_BRIDGE::nas_bridge_npu_add_remove_member(std::string &mem_
                     intf_ctrl.if_name);
             // TODO no need to return failure
         }
+        if (nas_intf_l3mc_intf_mode_change(intf_ctrl.if_index, new_intf_mode) == false) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-BRIDGE", "L3 MC mode change RPC failed if_index(%d), mode(%d)",
+                       intf_ctrl.if_index, new_intf_mode);
+        }
     }
     // call nas_intf_cleanup_l2mc_config(p_link_node->ifindex,  p_bridge->vlan_id)) if 1Q mode
 
@@ -366,7 +376,8 @@ t_std_error NAS_DOT1Q_BRIDGE::nas_bridge_add_remove_member(std::string & mem_nam
     // first add in the kernel and then add in the npu
     t_std_error  rc = STD_ERR_OK;
 
-    nas_int_type_t mem_type, parent_type;
+    nas_int_type_t mem_type;
+    nas_int_type_t parent_type = nas_int_type_INVALID;
     bool is_mgmt_port =false;
 
     if (port_mode == NAS_PORT_TAGGED) {
@@ -407,6 +418,19 @@ t_std_error NAS_DOT1Q_BRIDGE::nas_bridge_add_remove_member(std::string & mem_nam
                             (add ? "add":"delete"), mem_name.c_str(), get_bridge_name());
         return rc;
     }
+    if (port_mode == NAS_PORT_TAGGED) {
+        NAS_VLAN_INTERFACE * intf = dynamic_cast<NAS_VLAN_INTERFACE *>(nas_interface_map_obj_get(mem_name));
+        if(intf){
+            if((rc = intf->set_mtu(nas_bridge_get_mtu())) != STD_ERR_OK){
+                EV_LOGGING(INTERFACE, ERR ,"NAS-BRIDGE","Failed to set MTU for member %s", mem_name.c_str());
+            }
+        }
+    }
+    if (add == true) {
+        nas_interface_util_bridge_name_set(mem_name, bridge_name);
+    } else {
+        nas_interface_util_bridge_name_clear(mem_name);
+    }
     return STD_ERR_OK;
 }
 
@@ -424,7 +448,7 @@ t_std_error NAS_DOT1Q_BRIDGE::nas_bridge_add_remove_memberlist(memberlist_t & m_
     if (rc != STD_ERR_OK) {
         // IF any failure then rollback the added or removed members
         for (auto mem : processed_mem_list) {
-            if ((rc = nas_bridge_add_remove_member(mem, port_mode, !add)) != STD_ERR_OK) {
+            if (nas_bridge_add_remove_member(mem, port_mode, !add) != STD_ERR_OK) {
                 EV_LOGGING(INTERFACE,ERR,"INT-DB-GET","Failed to rollback member %s update", mem.c_str());
             }
         }
@@ -466,6 +490,9 @@ t_std_error NAS_DOT1Q_BRIDGE::nas_bridge_intf_cntrl_block_register(hal_intf_reg_
     details.vlan_id = bridge_vlan_id;
     details.int_type = nas_int_type_VLAN;
     details.int_sub_type = bridge_sub_type;
+    std::string intf_mac = get_bridge_mac();
+    safestrncpy(details.mac_addr,intf_mac.c_str(), sizeof(details.mac_addr));
+
 
     if ((op == HAL_INTF_OP_DEREG) && ((dn_hal_get_interface_info(&details)) != STD_ERR_OK)) {
         EV_LOGGING(INTERFACE,ERR,"NAS-Vlan", "VLAN %d %s Not registered with ifCntrl ",
@@ -497,6 +524,17 @@ cps_api_return_code_t NAS_DOT1Q_BRIDGE::nas_bridge_fill_info(cps_api_object_t ob
 
 }
 
+bool NAS_DOT1Q_BRIDGE::nas_add_sub_interface()
+{
+    /* expectation is scaled_vlan will be set before any vlan is created */
+    if (nas_g_scaled_vlan_get() == false) {
+        return true;
+    } else if (l3_mode == BASE_IF_MODE_MODE_L3) { /* means scaled vlan is true */
+       return true;
+    }
+    return false;
+}
+
 t_std_error NAS_DOT1Q_BRIDGE::nas_bridge_set_learning_disable(bool disable){
 
     if(ndi_set_vlan_learning(0, bridge_vlan_id, disable) != STD_ERR_OK) {
@@ -505,7 +543,7 @@ t_std_error NAS_DOT1Q_BRIDGE::nas_bridge_set_learning_disable(bool disable){
             return STD_ERR(INTERFACE,FAIL,0);
     }
 
-    learning_disable = disable;
+    nas_bridge_com_set_learning_disable(disable);
 
     return STD_ERR_OK;
 }

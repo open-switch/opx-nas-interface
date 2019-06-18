@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -43,7 +43,7 @@
 #include "iana-if-type.h"
 #include "nas_if_utils.h"
 #include "nas_int_com_utils.h"
-#include "interface/nas_interface.h"
+#include "interface/nas_interface_lag.h"
 #include "interface/nas_interface_map.h"
 #include "interface/nas_interface_utils.h"
 #include "std_rw_lock.h"
@@ -219,7 +219,8 @@ static cps_api_return_code_t nas_cps_create_lag(cps_api_object_t obj)
     /*
      * Register LAG object with interface cache
      */
-    NAS_INTERFACE *l_obj = new NAS_INTERFACE(lag_name, lag_index,nas_int_type_LAG);
+    NAS_LAG_INTERFACE *l_obj = new NAS_LAG_INTERFACE(lag_name, lag_index, nas_int_type_LAG);
+
     if(l_obj){
         nas_interface_map_obj_add(lag_name,l_obj);
     }
@@ -262,7 +263,6 @@ static cps_api_return_code_t nas_cps_delete_lag(cps_api_object_t obj)
         return cps_api_ret_code_ERR;
     }
 
-
       NAS_INTERFACE * l_obj = nullptr;
       std::string intf_name = std::string(nas_lag_entry->name);
       if(nas_interface_map_obj_remove(intf_name,&l_obj) ==STD_ERR_OK){
@@ -291,7 +291,11 @@ static cps_api_return_code_t nas_cps_delete_lag(cps_api_object_t obj)
         EV_LOGGING(INTERFACE, DEBUG, "NAS-CPS-LAG",
                 "Update to NAS-L3 about interface mode change failed(%d)", lag_index);
     }
-
+    // Cleanup nas multicast synchronously
+    if (nas_intf_l3mc_intf_delete (lag_index, BASE_IF_MODE_MODE_NONE) == false) {
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-CPS-LAG",
+                "Update to NAS-L3-MCAST about interface delete change failed(%d)", lag_index);
+    }
     if(nas_os_delete_lag(obj) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG",
                    "Failure deleting LAG index from kernel");
@@ -424,6 +428,10 @@ static cps_api_return_code_t nas_cps_add_port_to_lag(nas_lag_master_info_t *nas_
             if (nas_intf_handle_intf_mode_change(port_idx, new_mode) == false) {
                 EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG-MASTER", "Update to NAS-L3 about interface mode change failed(%d)", port_idx);
             }
+            if (nas_intf_l3mc_intf_mode_change(port_idx, new_mode) == false) {
+                EV_LOGGING(INTERFACE, ERR, "NAS-LAG-MASTER", "L3 MC mode change RPC failed if_index(%d), mode(%d)",
+                        port_idx, new_mode);
+            }
         }
     }
 
@@ -485,6 +493,10 @@ static cps_api_return_code_t nas_cps_delete_port_from_lag(nas_lag_master_info_t 
             if (nas_intf_handle_intf_mode_change(ifindex, new_mode) == false) {
                 EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG-MASTER", "Update to NAS-L3 about interface mode change failed(%d)",
                         ifindex);
+            }
+            if (nas_intf_l3mc_intf_mode_change(ifindex, new_mode) == false) {
+                EV_LOGGING(INTERFACE, ERR, "NAS-LAG-MASTER", "L3 MC mode change RPC failed if_index(%d), mode(%d)",
+                        ifindex, new_mode);
             }
         }
     }
@@ -873,12 +885,12 @@ static t_std_error nas_lag_set_mac_learn_mode(cps_api_object_t obj,nas_lag_maste
                                            cps_api_object_attr_data_u32(mac_learn_mode);
 
     bool enable = true;
-    if(mode == BASE_IF_PHY_MAC_LEARN_MODE_DROP || mode == BASE_IF_PHY_MAC_LEARN_MODE_DISABLE ){
+    if((mode == BASE_IF_PHY_MAC_LEARN_MODE_DROP) || (mode == BASE_IF_PHY_MAC_LEARN_MODE_DISABLE)) {
         enable = false;
     }
-
     if(nas_os_mac_change_learning(entry->ifindex,enable) != STD_ERR_OK){
-        EV_LOGGING(INTERFACE,INFO,"NAS-IF-SET","Failed to update MAC learn mode in Linux kernel");
+        EV_LOGGING(INTERFACE,ERR,"NAS-IF-SET","Failed to update MAC learn mode in OS for intf:%d mode:%d",
+                   entry->ifindex, mode);
         return STD_ERR(INTERFACE,CFG,0);
     }
 
@@ -888,8 +900,9 @@ static t_std_error nas_lag_set_mac_learn_mode(cps_api_object_t obj,nas_lag_maste
     t_std_error rc;
     std::string intf_name = std::string(entry->name);
     if ( (rc = nas_interface_utils_set_lag_mac_learn_mode(intf_name, 0, entry->ndi_lag_id, mode))  != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,INFO,"NAS-IF-SET","Failed to update MAC learn mode in the npu for %s", entry->name);
+        EV_LOGGING(INTERFACE,ERR,"NAS-IF-SET","Failed to update MAC learn mode:%d in the npu for %s", mode, entry->name);
     }
+    EV_LOGGING(INTERFACE,DEBUG,"NAS-IF-SET","Updated MAC learn mode:%d in the npu for %s", mode, entry->name);
     return rc;
 
 }
@@ -1389,6 +1402,153 @@ static cps_api_return_code_t nas_process_cps_lag_state_set(void *context, cps_ap
     return cps_api_ret_code_ERR;
 }
 
+static bool nas_lag_hash_value_set(bool set, bool new_value)
+{
+    static bool lag_hash_value;
+    if (set)
+        lag_hash_value = new_value;
+    return lag_hash_value;
+}
+
+bool nas_lag_hash_value_get(void)
+{
+    return nas_lag_hash_value_set(false, false);
+}
+
+static cps_api_return_code_t nas_process_cps_lag_resilient_get(void * context,
+        cps_api_get_params_t *param, size_t ix) {
+
+    bool             hash_enabled = nas_lag_hash_value_get();
+    cps_api_object_t ret_obj;
+
+    ret_obj = cps_api_object_list_create_obj_and_append(param->list);
+    if (ret_obj == NULL) {
+        EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
+                "failed creating resilient-hash return object");
+        return cps_api_ret_code_ERR;
+    }
+
+    cps_api_object_attr_add_u32(ret_obj,
+            DELL_IF_IF_INTERFACES_LAG_GLOBALS_RESILIENT_HASH_ENABLE, hash_enabled);
+
+    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG",
+            "LAG resilient-hash (%d)", hash_enabled);
+
+    return cps_api_ret_code_OK;
+}
+
+
+/*
+ * Scans and updates all routes when
+ * (global) resilient hash configuration has changed.
+ */
+static void nas_process_lag_paths_rh_update(bool new_setting)
+{
+    nas_lag_master_info_t *nas_lag_entry = NULL;
+    nas_lag_master_table_t nas_lag_master_table;
+    npu_id_t npu = 0;   //@TODO to retrive NPU ID in multi npu case
+
+    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "nas_process_lag_paths_rh_update");
+
+    nas_lag_master_table = nas_get_lag_table();
+
+    for (auto it = nas_lag_master_table.begin();it != nas_lag_master_table.end(); ++it){
+
+        EV_LOGGING(INTERFACE, INFO, "NAS-LAG-CPS", "Inside Loop");
+        nas_lag_entry = nas_get_lag_node(it->first);
+
+        if(nas_lag_entry == NULL) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-LAG-CPS",
+                       "Error finding lagnode %d for RH update operation", it->first);
+            return;
+        }
+
+        ndi_set_lag_resilient_hash(npu, nas_lag_entry->ndi_lag_id, new_setting);
+    }
+    return;
+}
+
+
+static cps_api_return_code_t nas_process_cps_lag_resilient_set(void *context,
+        cps_api_transaction_params_t *param, size_t ix)
+{
+    cps_api_return_code_t rc = cps_api_ret_code_OK;
+    cps_api_object_it_t   it;
+    bool                  is_valid = false;
+    bool                  new_setting = false;
+
+    if (param == NULL) {
+        EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "no params with lag global-config set");
+        return cps_api_ret_code_ERR;
+    }
+
+    cps_api_object_t obj = cps_api_object_list_get(param->change_list,ix);
+    if (obj == NULL) {
+        EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "lag global-config set missing");
+        return cps_api_ret_code_ERR;
+    }
+
+    cps_api_object_it_begin(obj, &it);
+    for ( ; cps_api_object_it_valid(&it) ; cps_api_object_it_next(&it) ) {
+        cps_api_attr_id_t id = cps_api_object_attr_id(it.attr);
+
+        switch (id) {
+            case DELL_IF_IF_INTERFACES_LAG_GLOBALS_RESILIENT_HASH_ENABLE:
+                new_setting = cps_api_object_attr_data_u32(it.attr);
+                EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "set LAG resilient hash to %s",
+                        new_setting ? "enable" : "disable");
+                is_valid = true;
+                break;
+
+            default:
+                EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "ignore unknown leaf id (%d)", id);
+                break;
+        }
+    }
+
+    if ((nas_lag_hash_value_get() != new_setting) && is_valid) {
+        /* set global configuration flag */
+        nas_lag_hash_value_set(true, new_setting);
+
+        /* update any existing LAG paths */
+        nas_process_lag_paths_rh_update(new_setting);
+    }
+
+    return rc;
+}
+
+cps_api_return_code_t nas_process_cps_lag_resilient_rollback(void * ctx,
+                                      cps_api_transaction_params_t * param, size_t ix){
+
+    EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "LAG global rollback function");
+    return cps_api_ret_code_OK;
+}
+
+
+t_std_error nas_process_cps_lag_globals_init(cps_api_operation_handle_t nas_process_cps_handle) {
+    cps_api_registration_functions_t f;
+    memset(&f,0,sizeof(f));
+
+    f.handle             = nas_process_cps_handle;
+    f._read_function     = nas_process_cps_lag_resilient_get;
+    f._write_function    = nas_process_cps_lag_resilient_set;
+    f._rollback_function = nas_process_cps_lag_resilient_rollback;
+
+    if (!cps_api_key_from_attr_with_qual(&f.key,
+               DELL_IF_IF_INTERFACES_LAG_GLOBALS, cps_api_qualifier_TARGET)) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "failed translating LAG resilient hash key");
+        return STD_ERR(INTERFACE, FAIL, 0);
+   }
+
+   if (cps_api_register(&f) != cps_api_ret_code_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-CPS-LAG", "failed registering LAG resilient hash object");
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+
+    return STD_ERR_OK;
+}
+
+
 void nas_lag_port_oper_state_cb(npu_id_t npu, npu_port_t port, IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t status)
 {
     ndi_port_t ndi_port;
@@ -1526,6 +1686,9 @@ t_std_error nas_cps_lag_init(cps_api_operation_handle_t lag_intf_handle) {
 
     EV_LOGGING(INTERFACE, INFO, "NAS-CPS-LAG", "CPS LAG Initialize");
 
+    /* register global LAG CPS container */
+    nas_process_cps_lag_globals_init(lag_intf_handle);
+
     if (intf_obj_handler_registration(obj_INTF, nas_int_type_LAG, nas_process_cps_lag_get, nas_process_cps_lag_set) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE, ERR, "NAS-LAG-INIT",
                    "Failed to register LAG interface CPS handler");
@@ -1537,6 +1700,7 @@ t_std_error nas_cps_lag_init(cps_api_operation_handle_t lag_intf_handle) {
                    "Failed to register LAG interface-state CPS handler");
            return STD_ERR(INTERFACE,FAIL,0);
     }
+
     /*  register a handler for physical port oper state change */
     nas_int_oper_state_register_cb(nas_lag_port_oper_state_cb);
 
@@ -1566,5 +1730,6 @@ t_std_error nas_cps_lag_init(cps_api_operation_handle_t lag_intf_handle) {
         EV_LOGGING(INTERFACE, ERR, "NAS-VLAN-INIT", "Cannot register interface operation event");
         return STD_ERR(INTERFACE,FAIL,0);
     }
+
     return STD_ERR_OK;;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -41,6 +41,7 @@
 #include "std_mutex_lock.h"
 #include "std_time_tools.h"
 #include "std_ip_utils.h"
+#include "std_mac_utils.h"
 
 #include <vector>
 #include <stdio.h>
@@ -166,6 +167,7 @@ typedef struct _nas_vif_pkt_tx_t {
     hal_virt_pkt_transmit egress_tx_cb; // Pointer to packet tx callback function
     // Pointer to packet tx to ingress pipeline callback function
     hal_virt_pkt_transmit_to_ingress_pipeline tx_to_ingress_fun;
+    hal_virt_pkt_transmit_to_ingress_pipeline_hybrid tx_to_ingress_hybrid_fun;
     void *tx_buf;                      // Pointer to packet tx buffer
     unsigned int tx_buf_len;           // packet tx buffer len
     struct event *nas_nflog_fd_ev;     // nflog fd event struct
@@ -177,8 +179,12 @@ nas_vif_pkt_tx_t g_vif_pkt_tx; //global virtual interface packet tx information
 
 static int     nas_nflog_pkts_tx_to_ingress_pipeline = 0;
 static int     nas_nflog_pkts_tx_to_ingress_pipeline_dropped = 0;
+static int     nas_nflog_pkts_tx_to_ingress_pipeline_hybrid = 0;
+static int     nas_nflog_pkts_tx_to_ingress_pipeline_hybrid_dropped = 0;
 uint8_t        dest_ipv4_from_last_pkt[4];
 static struct timespec ts_last_pkt_sent = {0,0};
+uint8_t        dest_ipv6_from_last_pkt[16];
+static struct timespec ts_last_ns_pkt_sent = {0,0};
 
 typedef struct _arp_header {
     uint16_t htype;
@@ -192,6 +198,28 @@ typedef struct _arp_header {
     uint8_t  target_ip[4];
 } arp_header_t;
 
+typedef struct _icmpv6_options_header {
+    uint8_t type;
+    uint8_t length;
+    uint8_t link_layer_address[6];
+}icmpv6_options_header_t;
+
+typedef struct _icmpv6_header {
+    uint8_t type;
+    uint8_t code;
+    uint16_t  checksum;
+    uint32_t reserved;
+    uint8_t target_address[16];
+} icmpv6_header_t;
+
+typedef struct _ipv6_header {
+    uint32_t ver_class_flow;
+    uint16_t  plen;
+    uint8_t next_header;
+    uint8_t  hop_limit;
+    uint8_t  source_ipv6[16];
+    uint8_t  target_ipv6[16];
+} ipv6_header_t;
 
 void process_packets (evutil_socket_t fd, short evt, void *arg);
 void process_nflog_packets (evutil_socket_t fd, short evt, void *arg);
@@ -251,7 +279,7 @@ static t_std_error tap_fd_register_with_evt (swp_util_tap_descr tap, CNasPortDet
         }
 
         if (event_add(nas_fd_ev, NULL) < 0) {
-            EV_LOGGING(INTERFACE,ERR,"TAP-TX", "NAS Packet read event add failed for interface (%s) fd (%d).",
+            EV_LOGGING(INTERFACE,INFO,"TAP-TX", "NAS Packet read event add failed for interface (%s) fd (%d).",
                        swp_util_tap_descr_get_name(tap),fd);
             event_free (nas_fd_ev);
             return STD_ERR(INTERFACE,FAIL,0);
@@ -287,7 +315,7 @@ static t_std_error tap_fd_deregister_from_evt (swp_util_tap_descr tap) {
         if (it == g_vif_pkt_tx._tap_fd_to_event_info_map.end())
         {
             /* fd is not registered for events; simply continue to next fd */
-            EV_LOGGING(INTERFACE,ERR,"TAP-UP",
+            EV_LOGGING(INTERFACE,INFO,"TAP-UP",
                     "interface (%s) fd (%d) not present in event info map",
                     swp_util_tap_descr_get_name(tap),fd);
             continue;
@@ -331,7 +359,7 @@ static bool tap_link_up(swp_util_tap_descr tap, CNasPortDetails *npu) {
     bool success = false;
     for ( ; retry < MAX_RETRY ; ++retry ) {
         if (swp_util_alloc_tap(tap,SWP_UTIL_TYPE_TAP)!=STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"INT-LINK",
+            EV_LOGGING(INTERFACE,INFO,"INT-LINK",
                     "Can not bring the link up %s had issues opening device (%lu)",
                     swp_util_tap_descr_get_name(tap),retry);
             std_usleep(MILLI_TO_MICRO((1<<retry)));
@@ -449,22 +477,149 @@ void nas_evt_signal_cb (evutil_socket_t sig_num, short evt, void *arg)
     event_base_loopbreak(p_vif_pkt_tx->nas_evt_base);
 }
 
-int nas_process_payload_and_form_packet (uint8_t *pkt_buf,
-                                         nas_nflog_params_t *p_nas_nflog_params)
+int nas_process_payload_and_form_NS_packet(uint8_t *pkt_buf, nas_nflog_params_t *p_nas_nflog_params,
+                                           interface_ctrl_t *intf_ctrl)
 {
 #define NSEC_PER_SEC 1000000000
+#define ICMPV6_HDR 0x3A
+#define ICMPV6_NS_PACKET 0x87
+
+    int               pkt_len = 0;
+    static const uint16_t          vlan_protocol = htons (0x8100);
+    uint16_t          vlan_id = 0;
+    struct timespec   ts_cur_pkt;
+    struct timespec   ts_diff;
+    unsigned char     dest_mac[6]={0x33,0x33,0x33,0x33,0x33,0x13};
+    ipv6_header_t      *p_ipv6_header = NULL;
+    uint8_t     src_mac[6]={0x00,0x00,0x00,0x00,0x00,0x00};
+    icmpv6_header_t *p_icmpv6_header = NULL ;
+    icmpv6_options_header_t *p_icmpv6_options_header = NULL;
+
+    p_ipv6_header = (ipv6_header_t *)p_nas_nflog_params->payload;
+
+    memcpy(&dest_mac[2],&(p_ipv6_header->target_ipv6[12]),4);
+
+    if(p_ipv6_header->next_header != ICMPV6_HDR)
+    {
+        /* Non NS packet. return it here */
+        return -1;
+    }
+
+    if(intf_ctrl->int_type == nas_int_type_VLAN)
+    {
+        vlan_id = htons (intf_ctrl->vlan_id);
+    }
+    if((intf_ctrl->l3_intf_info.if_index != 0) && (intf_ctrl->l3_intf_info.vrf_id != 0))
+    {
+        hal_vrf_id_t parent_vrf_id = intf_ctrl->l3_intf_info.vrf_id;
+        hal_ifindex_t parent_if_index = intf_ctrl->l3_intf_info.if_index;
+        if (parent_if_index != 0) {
+            memset(intf_ctrl, 0, sizeof(interface_ctrl_t));
+            intf_ctrl->q_type = HAL_INTF_INFO_FROM_IF;
+            intf_ctrl->vrf_id = parent_vrf_id;
+            intf_ctrl->if_index = parent_if_index;
+
+            if ((dn_hal_get_interface_info(intf_ctrl)) != STD_ERR_OK) {
+                EV_LOGGING(INTERFACE,ERR,"TAP-TX", "Invalid VRF interface %d. ",
+                           parent_if_index);
+                return -1;
+            }
+        }
+    }
+    clock_gettime (CLOCK_MONOTONIC, &ts_cur_pkt);
+
+    ts_diff.tv_nsec = (ts_cur_pkt.tv_nsec - ts_last_ns_pkt_sent.tv_nsec);
+    ts_diff.tv_sec = (ts_cur_pkt.tv_sec - ts_last_ns_pkt_sent.tv_sec);
+
+    while (ts_diff.tv_nsec >= NSEC_PER_SEC)
+    {
+        ts_diff.tv_nsec -= NSEC_PER_SEC;
+        ++ts_diff.tv_sec;
+    }
+    while (ts_diff.tv_nsec < 0)
+    {
+        ts_diff.tv_nsec += NSEC_PER_SEC;
+        --ts_diff.tv_nsec;
+    }
+    if ((memcmp (&dest_ipv6_from_last_pkt, &p_ipv6_header->target_ipv6, 16) == 0) &&
+        (ts_diff.tv_sec < 1))
+    {
+        return 0;
+    }
+
+    ts_last_ns_pkt_sent = ts_cur_pkt;
+    memcpy (&dest_ipv6_from_last_pkt, &p_ipv6_header->target_ipv6, 16);
+
+    memcpy ((pkt_buf + pkt_len), &dest_mac, 6);
+    pkt_len += 6;
+
+    p_icmpv6_header = (icmpv6_header_t *)(p_nas_nflog_params->payload + sizeof(ipv6_header_t));
+    if(p_icmpv6_header->type == ICMPV6_NS_PACKET)
+    {
+        p_icmpv6_options_header = (icmpv6_options_header_t *)(p_nas_nflog_params->payload + (sizeof(ipv6_header_t) + sizeof(icmpv6_header_t)));
+        // Need to get the data from payload as much as possible.
+        if(p_icmpv6_options_header->type == 0x1)
+            memcpy (&src_mac, &p_icmpv6_options_header->link_layer_address, 6);
+        else
+            std_string_to_mac(&src_mac, intf_ctrl->mac_addr,sizeof(intf_ctrl->mac_addr));
+    }
+    else
+    {
+        std_string_to_mac(&src_mac, intf_ctrl->mac_addr,sizeof(intf_ctrl->mac_addr));
+    }
+    /* copy the ethernet header source-mac from interface structure. icmpv6 options wont be available in some NS packet */
+    memcpy ((pkt_buf + pkt_len), &src_mac, 6);
+    pkt_len += 6;
+
+
+    if(vlan_id != 0 )
+    {
+        memcpy ((pkt_buf + pkt_len), &vlan_protocol, 2);
+        pkt_len += 2;
+
+        memcpy ((pkt_buf + pkt_len), &vlan_id, 2);
+        pkt_len += 2;
+    }
+    memcpy ((pkt_buf + pkt_len), &p_nas_nflog_params->hw_protocol, 2);
+    pkt_len += 2;
+
+    memcpy ((pkt_buf + pkt_len), p_nas_nflog_params->payload, p_nas_nflog_params->payload_len);
+    pkt_len += p_nas_nflog_params->payload_len;
+    return pkt_len;
+}
+
+int nas_process_payload_and_form_packet (uint8_t *pkt_buf,
+                                         nas_nflog_params_t *p_nas_nflog_params,
+                                         interface_ctrl_t *intf_ctrl)
+{
+#define NSEC_PER_SEC 1000000000
+#define ICMPV6_HDR 0x3A
+#define ICMPV6_NS_PACKET 0x87
     int               pkt_len = 0;
     uint16_t          vlan_id = 0;
     static const uint16_t          vlan_protocol = htons (0x8100);
     static const uint16_t          arp_protocol = htons (0x0806);
     static const uint16_t          ip_protocol = htons (0x0800); //ipv4
+    static const uint16_t          ip6_protocol = htons (0x86dd); //ipv6
     static const unsigned char     dest_mac[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
-    interface_ctrl_t  intf_ctrl;
     arp_header_t      *p_arp_header = NULL;
     struct timespec   ts_cur_pkt;
     struct timespec   ts_diff;
+    ipv6_header_t      *p_ipv6_header = NULL;
+    icmpv6_header_t *p_icmpv6_header = NULL ;
 
-//@@TODO handle for ipv6 ND
+    p_ipv6_header = (ipv6_header_t *)p_nas_nflog_params->payload;
+    if((p_nas_nflog_params->hw_protocol == ip6_protocol) &&
+       p_ipv6_header->next_header == ICMPV6_HDR)
+    {
+        p_icmpv6_header = (icmpv6_header_t *)(p_nas_nflog_params->payload + sizeof(ipv6_header_t));
+        if(p_icmpv6_header->type == ICMPV6_NS_PACKET)
+        {
+            pkt_len = nas_process_payload_and_form_NS_packet (pkt_buf,p_nas_nflog_params, intf_ctrl);
+            return pkt_len;
+        }
+        return -1;
+    }
 
     /* reference arp header from nflog payload */
     p_arp_header = (arp_header_t *) p_nas_nflog_params->payload;
@@ -479,17 +634,6 @@ int nas_process_payload_and_form_packet (uint8_t *pkt_buf,
         (p_arp_header->ptype != ip_protocol))
     {
         /* return, if its not IPv4 ARP */
-        return -1;
-    }
-
-    memset(&intf_ctrl, 0, sizeof(interface_ctrl_t));
-    intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF;
-    intf_ctrl.if_index = p_nas_nflog_params->out_ifindex;
-
-    /* retrieve the VLAN id from interface index */
-    if ((dn_hal_get_interface_info(&intf_ctrl)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"TAP-TX", "Processing payload failed. Invalid interface %d. ifInfo get failed",
-                   p_nas_nflog_params->out_ifindex);
         return -1;
     }
 
@@ -531,9 +675,9 @@ int nas_process_payload_and_form_packet (uint8_t *pkt_buf,
     memcpy ((pkt_buf + pkt_len), p_arp_header->sender_hw_addr, 6);
     pkt_len += 6;
 
-    if(intf_ctrl.int_type == nas_int_type_VLAN)
+    if(intf_ctrl->int_type == nas_int_type_VLAN)
     {
-        vlan_id = htons (intf_ctrl.vlan_id);
+        vlan_id = htons (intf_ctrl->vlan_id);
 
         memcpy ((pkt_buf + pkt_len), &vlan_protocol, 2);
         pkt_len += 2;
@@ -581,17 +725,49 @@ void process_nflog_packets (evutil_socket_t fd, short evt, void *arg)
         nas_os_nl_get_nflog_params ((uint8_t *) g_vif_pkt_tx.tx_buf,
                                     pkt_len, &nflog_params);
 
+        if (!(nflog_params.payload_len))
+        {
+            /* skip, if payload length is not valid */
+            nas_nflog_pkts_tx_to_ingress_pipeline_dropped++;
+            continue;
+        }
+
+        interface_ctrl_t  intf_ctrl;
+        memset(&intf_ctrl, 0, sizeof(interface_ctrl_t));
+        intf_ctrl.q_type = HAL_INTF_INFO_FROM_IF;
+        intf_ctrl.if_index = nflog_params.out_ifindex;
+
+        /* retrieve the VLAN id from interface index */
+        if ((dn_hal_get_interface_info(&intf_ctrl)) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"TAP-TX", "Processing payload failed. Invalid interface %d. ifInfo get failed",
+                       nflog_params.out_ifindex);
+            nas_nflog_pkts_tx_to_ingress_pipeline_dropped++;
+            continue;
+        }
+
+        nas_int_type_t int_type = intf_ctrl.int_type;
+        nas_bridge_id_t bridge_id = intf_ctrl.bridge_id;
         pkt_len = nas_process_payload_and_form_packet ((uint8_t *) g_vif_pkt_tx.tx_buf,
-                                                       &nflog_params);
+                                                       &nflog_params, &intf_ctrl);
 
         /* send packet for transmission to ingress pipeline processing
          * to the registered callback function with registered packet buffer
          */
         if (pkt_len > 0) {
-            nas_nflog_pkts_tx_to_ingress_pipeline++;
-            g_vif_pkt_tx.tx_to_ingress_fun (g_vif_pkt_tx.tx_buf,pkt_len);
+            if(int_type == nas_int_type_DOT1D_BRIDGE) {
+                nas_nflog_pkts_tx_to_ingress_pipeline_hybrid++;
+                g_vif_pkt_tx.tx_to_ingress_hybrid_fun (g_vif_pkt_tx.tx_buf,pkt_len,
+                                                       NDI_PACKET_TX_TYPE_PIPELINE_HYBRID_BRIDGE, bridge_id);
+            } else {
+                nas_nflog_pkts_tx_to_ingress_pipeline++;
+                g_vif_pkt_tx.tx_to_ingress_fun (g_vif_pkt_tx.tx_buf,pkt_len);
+            }
         } else if (pkt_len == 0) {
-            nas_nflog_pkts_tx_to_ingress_pipeline_dropped++;
+            if(int_type == nas_int_type_DOT1D_BRIDGE) {
+                nas_nflog_pkts_tx_to_ingress_pipeline_hybrid_dropped++;
+            } else {
+                nas_nflog_pkts_tx_to_ingress_pipeline_dropped++;
+            }
         }
     }
 }
@@ -657,6 +833,7 @@ void process_packets (evutil_socket_t fd, short evt, void *arg)
  */
 t_std_error hal_virtual_interface_wait (hal_virt_pkt_transmit tx_fun,
                                         hal_virt_pkt_transmit_to_ingress_pipeline tx_to_ingress_fun,
+                                        hal_virt_pkt_transmit_to_ingress_pipeline_hybrid tx_to_ingress_hybrid_fun,
                                         void *data, unsigned int len)
 {
     /* initialize global virtual interface packet tx information with given input params */
@@ -667,6 +844,7 @@ t_std_error hal_virtual_interface_wait (hal_virt_pkt_transmit tx_fun,
 
     g_vif_pkt_tx.egress_tx_cb = tx_fun;
     g_vif_pkt_tx.tx_to_ingress_fun = tx_to_ingress_fun;
+    g_vif_pkt_tx.tx_to_ingress_hybrid_fun = tx_to_ingress_hybrid_fun;
     g_vif_pkt_tx.tx_buf = data;
     g_vif_pkt_tx.tx_buf_len = len;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -26,6 +26,7 @@
 #include "nas_ndi_vlan.h"
 #include "bridge/nas_interface_bridge_com.h"
 #include "nas_switch.h"
+#include "nas_com_bridge_utils.h"
 #include "hal_if_mapping.h"
 #include "interface/nas_interface_vlan.h"
 
@@ -80,6 +81,7 @@ bool nas_vlan_interface_get_vn_untagged_vlan(hal_vlan_id_t * vlan_id){
     return true;
 }
 
+
 cps_api_return_code_t nas_interface_handle_global_set (void * context,
                                                        cps_api_transaction_params_t *param,
                                                       size_t ix) {
@@ -102,10 +104,14 @@ cps_api_return_code_t nas_interface_handle_global_set (void * context,
          cps_api_object_attr_t _vn_untagged_vlan_attr = cps_api_object_attr_get(obj,
                                      DELL_IF_IF_INTERFACES_VLAN_GLOBALS_VN_UNTAGGED_VLAN);
          if (_vn_untagged_vlan_attr != NULL) {
-             std::lock_guard<std::mutex> l(_m);
-             vn_untagged_vlan = cps_api_object_attr_data_uint(_vn_untagged_vlan_attr);
+             hal_vlan_id_t nas_com_ut_id;
+             {
+                 std::lock_guard<std::mutex> l(_m);
+                 nas_com_ut_id = vn_untagged_vlan = cps_api_object_attr_data_uint(_vn_untagged_vlan_attr);
                      EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN","Changed the vn untagged vlan to %d",
                              vn_untagged_vlan);
+             }
+             nas_com_set_1d_br_reserved_vid(nas_com_ut_id);
          }
 
      }
@@ -116,6 +122,7 @@ cps_api_return_code_t nas_interface_handle_global_set (void * context,
                                  DELL_IF_IF_INTERFACES_VLAN_GLOBALS_DEFAULT_VLAN);
 
      if (_def_vlan_name) {
+         npu_id_t npu_id = 0;   //@TODO to retrive NPU ID in multi npu case
          const char * default_vlan_name = (const char *)cps_api_object_attr_data_bin(_def_vlan_name);
          EV_LOGGING(INTERFACE,INFO,"NAS-VLAN","Default VLAN Name %s",default_vlan_name);
          interface_ctrl_t entry;
@@ -133,6 +140,7 @@ cps_api_return_code_t nas_interface_handle_global_set (void * context,
 
          }
          nas_vlan_interface_set_default_vlan(entry.vlan_id);
+         ndi_set_default_vlan_id (npu_id, entry.vlan_id);
          EV_LOGGING(INTERFACE,INFO,"NAS-VLAN","Default VLAN is %d",entry.vlan_id);
      }
 

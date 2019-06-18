@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -156,6 +156,9 @@ def _if_update_config(op, obj):
         if (nas_if.get_cps_attr(obj, nas_comm.yang.get_value('negotiation', 'attr_name')) is None):
             obj.add_attr(nas_comm.yang.get_value('negotiation', 'attr_name'), nas_comm.yang.get_value('auto', 'yang-autoneg'))
 
+        if (nas_if.get_cps_attr(obj, nas_comm.yang.get_value('speed', 'attr_name')) is None):
+            obj.add_attr(nas_comm.yang.get_value('speed', 'attr_name'), nas_comm.yang.get_value('auto', 'yang-speed'))
+
     config = if_config.if_config_get(if_name)
     if config is None:
         nas_if.log_info(' interface not present in if config list' + str(if_name))
@@ -167,10 +170,11 @@ def _if_update_config(op, obj):
 
     if op == 'set' or op == 'create':
         force_update = False
-        negotiation = nas_if.get_cps_attr(obj, nas_comm.yang.get_value('negotiation', 'attr_name'))
-        speed       = nas_if.get_cps_attr(obj, nas_comm.yang.get_value('speed', 'attr_name'))
-        duplex      = nas_if.get_cps_attr(obj, nas_comm.yang.get_value('duplex', 'attr_name'))
-        fec         = nas_if.get_cps_attr(obj, nas_comm.yang.get_value('fec_mode', 'attr_name'))
+
+        negotiation = nas_if.get_attr_from_obj_if_present(obj, 'negotiation', 'yang-autoneg', 'attr_name')
+        speed = nas_if.get_attr_from_obj_if_present(obj, 'speed', 'yang-speed', 'attr_name')
+        duplex = nas_if.get_attr_from_obj_if_present(obj, 'duplex', 'yang-duplex', 'attr_name')
+        fec = nas_if.get_attr_from_obj_if_present(obj, 'fec_mode', 'yang-fec', 'attr_name')
         if npu_port_found:
             if npu_id != None or port_id != None:
                 #for create or assiociate request
@@ -306,7 +310,6 @@ def _handle_loopback_intf(cps_obj, params):
     op = _get_op_id(cps_obj)
     if op is None:
         return False
-
     if op == 'set':
         return if_lpbk.set_loopback_interface(cps_obj)
     if op == 'create':
@@ -355,10 +358,9 @@ def set_intf_rpc_cb(methods, params):
     except:
         pass
 
+    nas_if.log_info(" cps object : %s" % str(params['change']))
     if_type = if_config.get_intf_type(cps_obj)
-    if if_type == 'loopback':
-        return _handle_loopback_intf(cps_obj, params)
-    elif if_type == 'vxlan':
+    if if_type == 'vxlan':
         return if_vtep.handle_vtep_intf(cps_obj, params)
     elif if_type == 'vlanSubInterface':
         return if_vlan_subintf.handle_vlan_sub_intf(cps_obj, params)
@@ -400,19 +402,12 @@ def set_intf_rpc_cb(methods, params):
         if mac_addr is None:
             nas_if.log_info('No mac address given in input object, get assigned mac address')
             try:
-                param_list = ma.get_alloc_mac_addr_params(if_type, cps_obj)
+                mac_addr_info = ma.get_intf_mac_addr(if_type, cps_obj)
             except Exception:
                 logging.exception('Failed to get params')
                 return False
-            if param_list != None:
-                try:
-                    mac_addr = ma.if_get_mac_addr(**param_list)
-                except Exception:
-                    logging.exception('Failed to get mac address')
-                    return False
-                if mac_addr is None:
-                    nas_if.log_err('Failed to get mac address')
-                    return False
+            if mac_addr_info is not None:
+                mac_addr, _ = mac_addr_info
                 if len(mac_addr) > 0:
                     nas_if.log_info('Assigned mac address: %s' % mac_addr)
                     cps_obj.add_attr(nas_comm.yang.get_value('phy_addr', 'attr_name'), mac_addr)
@@ -466,6 +461,7 @@ def set_intf_rpc_cb(methods, params):
     upd = (op, obj)
     trans = cps_utils.CPSTransaction([upd])
     ret_data = trans.commit()
+    nas_if.log_info(" cps object : %s" % str(obj))
     if ret_data == False:
         nas_if.log_err('Failed to commit request')
         ret_data = trans.get_objects()

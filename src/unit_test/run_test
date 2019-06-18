@@ -1,6 +1,6 @@
 #!/bin/bash -e
 #
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -32,7 +32,7 @@ apt-get update
 apt-get install -y python-pytest
 fi
 
-pytest -s ./test_nas_get_next_interface.py
 pytest -s ./nas_hybrid_group_test.py
 pytest -s ./nas_port_pkt_drop_test.py
 pytest -s ./test_nas_get_ether_stats.py
+pytest -s ./test_nas_get_interface.py

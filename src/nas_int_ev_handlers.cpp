@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -24,9 +24,7 @@
 #include "hal_interface_common.h"
 #include "hal_if_mapping.h"
 #include "nas_int_utils.h"
-#include "nas_int_vlan.h"
 #include "nas_os_interface.h"
-#include "nas_int_bridge.h"
 #include "nas_int_lag.h"
 #include "nas_int_lag_api.h"
 #include "nas_int_com_utils.h"
@@ -48,6 +46,7 @@
 #include "nas_if_utils.h"
 #include "dell-base-interface-common.h"
 #include "vrf-mgmt.h"
+#include "iana-if-type.h"
 
 #include "dell-base-l2-mac.h"
 #include "cps_api_object_key.h"
@@ -63,36 +62,7 @@
 
 #include <unordered_map>
 #include <string.h>
-
-
-#define INTERFACE_FILE_NAME "/etc/opx/nas_if_nocreate"
-
-static bool process_intf_os_event = true;
-
-/*  Check if netlink event needs processing.
- *  In case of open edition, nas-interface module processes netlink event coming for interfaces.
- *  Applications can make interface configuration changes using native linux command.
- *  Currently open edition is determined based on the file nas_if_nocreate absence.
- *  So if this file is present in then interface module will no monitor netlink event.
- *  application will not be allowed to make change in the interface directly in the kernel via
- *  native command of netlink interface.
- *
- * The ideal solution would be to not send unwanted OS events for interface. further optimization will be done in nas-os
- * side to filter out os event which is result of its own configuration in the kernel.
- *  */
-void init_intf_os_event_flag(void) {
-    if (FILE *file = fopen(INTERFACE_FILE_NAME, "r")) {
-        /*  If file present in the it is NOT open source  */
-        process_intf_os_event = false;
-        EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", "Processing of Interface netlink event is blocked");
-        fclose(file);
-        return;
-    }
-    /*  file may not be present which means it is open edition and hence allow netlink event processing */
-    EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", "Processing of Interface netlink event is allowed");
-}
-
-
+#include "nas_switch.h"
 
 static bool nas_intf_cntrl_blk_register(cps_api_object_t obj, interface_ctrl_t *details) {
 
@@ -334,11 +304,10 @@ void nas_vxlan_ev_handler(cps_api_object_t obj)
             EV_LOGGING(INTERFACE,ERR,"VXLAN","No entry for vxlan interface %s exist",_if_name.c_str());
             return;
         }
-
-        if(!vxlan_obj->create_in_os()){
+        if (vxlan_obj->create_in_os()) {
             if (nas_interface_utils_vxlan_delete(_if_name) != STD_ERR_OK) {
                 EV_LOGGING(INTERFACE,INFO,"NAS-INT",
-                        "VXLAN interface OS delete event handling failed %s", _if_name.c_str());
+                    "VXLAN interface OS delete event handling failed %s", _if_name.c_str());
                 return;
             }
         }else{
@@ -419,6 +388,10 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                         EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG",
                                 "Update to NAS-L3 about interface mode change failed(%d)", mem_idx);
                     }
+                    if (nas_intf_l3mc_intf_mode_change(mem_idx, new_mode) == false) {
+                        EV_LOGGING(INTERFACE, ERR, "NAS-LAG", "L3 MC mode change RPC failed if_index(%d), mode(%d)",
+                                mem_idx, new_mode);
+                    }
                 }
             }
         } else if (op == cps_api_oper_DELETE) {
@@ -451,6 +424,10 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                     if (nas_intf_handle_intf_mode_change(mem_idx, new_mode) == false) {
                         EV_LOGGING(INTERFACE,DEBUG,"NAS-LAG",
                                 "Update to NAS-L3 about interface mode change failed(%d)", mem_idx);
+                    }
+                    if (nas_intf_l3mc_intf_mode_change(mem_idx, new_mode) == false) {
+                        EV_LOGGING(INTERFACE, ERR, "NAS-LAG", "L3 MC mode change RPC failed if_index(%d), mode(%d)",
+                                mem_idx, new_mode);
                     }
                 }
             }
@@ -568,6 +545,11 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                 EV_LOGGING(INTERFACE, DEBUG, "NAS-LAG",
                         "Update to NAS-L3 about interface mode change failed(%d)", bond_idx);
             }
+            // Cleanup nas multicast synchronously
+            if (nas_intf_l3mc_intf_delete (bond_idx, BASE_IF_MODE_MODE_NONE) == false) {
+                EV_LOGGING(INTERFACE, DEBUG, "NAS-LAG",
+                        "Update to NAS-L3-MCAST about interface delete change failed(%d)", bond_idx);
+            }
             /*  Otherwise the event is to delete the lag */
             if((nas_lag_master_delete(bond_idx) != STD_ERR_OK))
                 return ;
@@ -643,6 +625,11 @@ static void nas_bridge_ev_handler(cps_api_object_t obj)
             EV_LOGGING(INTERFACE, DEBUG, "NAS-BR",
                     "Update to NAS-L3 about interface mode change failed(%s)", br_name);
         }
+        // Cleanup nas multicast synchronously
+        if (nas_intf_l3mc_intf_delete (br_name, BASE_IF_MODE_MODE_NONE) == false) {
+            EV_LOGGING(INTERFACE, DEBUG, "NAS-LAG",
+                    "Update to NAS-L3-MCAST about interface delete change failed(%s)", br_name);
+        }
         EV_LOGGING(INTERFACE,NOTICE,"NAS-INT", " Bridge delete ");
         if (nas_bridge_utils_delete(br_name) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE,ERR,"NAS-INT", " Bridge obj already deleted or does not exist %s", br_name);
@@ -675,74 +662,6 @@ void nas_send_admin_state_event(hal_ifindex_t if_index, IF_INTERFACES_STATE_INTE
     hal_interface_send_event(obj);
 }
 
-static void send_lpbk_intf_oper_event(cps_api_object_t obj)
-{
-    cps_api_object_attr_t _enabled_attr = cps_api_object_attr_get(obj, IF_INTERFACES_INTERFACE_ENABLED);
-    if (_enabled_attr == nullptr) return;
-
-    if (!cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
-                DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_OBJ,
-                cps_api_qualifier_OBSERVED)) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-IF","Could not translate to logical interface key ");
-        return;
-    }
-    bool _enabled = (bool) cps_api_object_attr_data_u32(_enabled_attr);
-    IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_t _oper_state =  (_enabled) ?
-        IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_UP : IF_INTERFACES_STATE_INTERFACE_OPER_STATUS_DOWN;
-
-    cps_api_object_attr_add_u32(obj,IF_INTERFACES_STATE_INTERFACE_OPER_STATUS,_oper_state);
-    hal_interface_send_event(obj);
-
-}
-static void nas_loopback_ev_handler(cps_api_object_t obj)
-{
-    interface_ctrl_t details;
-    hal_intf_reg_op_type_t reg_op;
-
-    memset(&details,0,sizeof(details));
-    cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
-    cps_api_object_attr_t if_attr = cps_api_object_attr_get(obj,
-            DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
-    cps_api_object_attr_t if_name_attr = cps_api_object_attr_get(obj,
-            IF_INTERFACES_INTERFACE_NAME);
-    if (if_attr == nullptr || if_name_attr == nullptr) {
-        EV_LOGGING(INTERFACE,INFO,"NAS-INT",
-                   "if index or if name missing for loopback interface type ");
-        return ; // if index or name not present
-    }
-
-    const char *name =  (const char*)cps_api_object_attr_data_bin(if_name_attr);
-    safestrncpy(details.if_name,name,sizeof(details.if_name));
-    details.if_index = cps_api_object_attr_data_u32(if_attr);
-    details.int_type = nas_int_type_LPBK;
-    details.desc = nullptr;
-
-    if_name_attr = cps_api_object_attr_get(obj, IF_INTERFACES_STATE_INTERFACE_NAME);
-    if (if_name_attr == nullptr) {
-        cps_api_object_attr_delete(obj, IF_INTERFACES_INTERFACE_NAME);
-        name = details.if_name;
-        cps_api_object_attr_add(obj, IF_INTERFACES_STATE_INTERFACE_NAME,
-                                name, strlen(name) + 1);
-    }
-
-    reg_op = HAL_INTF_OP_REG;
-    if (op == cps_api_oper_CREATE) {
-        EV_LOGGING(INTERFACE,INFO,"NAS-INT", "interface register event for %s",name);
-    } else if (op == cps_api_oper_DELETE) {
-        EV_LOGGING(INTERFACE,INFO,"NAS-INT", "interface de-register event for %s",name);
-        reg_op = HAL_INTF_OP_DEREG;
-    } else {
-        EV_LOGGING(INTERFACE,INFO,"NAS-INT", "interface Loopback set event for %s", name);
-    }
-    if (op != cps_api_oper_SET) {
-        if (dn_hal_if_register(reg_op,&details)!=STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,INFO,"NAS-INT",
-                "interface register Error %s - mapping error or loopback interface already present",name);
-        }
-    }
-    send_lpbk_intf_oper_event(obj);
-    return;
-}
 
 /*  Update the MACVLAN intf create/deletion in the intf control block */
 static void nas_macvlan_ev_handler(cps_api_object_t obj)
@@ -764,7 +683,12 @@ static void nas_macvlan_ev_handler(cps_api_object_t obj)
     }
 
     const char *name =  (const char*)cps_api_object_attr_data_bin(if_name_attr);
-    if (op == cps_api_oper_DELETE) {
+    cps_api_object_attr_t _vrf_attr = cps_api_object_attr_get(obj, VRF_MGMT_NI_IF_INTERFACES_INTERFACE_VRF_ID);
+
+    if (_vrf_attr) {
+        details.vrf_id = cps_api_object_attr_data_u32(_vrf_attr);
+    }
+    if ((details.vrf_id == NAS_DEFAULT_VRF_ID) && (op == cps_api_oper_DELETE)) {
         interface_ctrl_t info;
         memset(&info, 0, sizeof(info));
         safestrncpy(info.if_name, name, sizeof(info.if_name));
@@ -829,6 +753,10 @@ void nas_mgmt_ev_handler (cps_api_object_t src_obj)
     if (attr_id != NULL) {
         src_ifidx = cps_api_object_attr_data_u32(attr_id);
     }
+
+    const char *intf_type = (const char *)
+            IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_BASE_IF_MANAGEMENT;
+
     std::string st_name = std::string(intf_ctrl.if_name);
     if ((dn_hal_get_interface_info(&intf_ctrl)) != STD_ERR_OK) {
         reg_req  = true;
@@ -870,7 +798,7 @@ void nas_mgmt_ev_handler (cps_api_object_t src_obj)
             }
         }
     }
-    EV_LOGGING(INTERFACE, ERR, "NAS-MGMT-INTF","MGMT event : %s, %d, %s, %u,op: %u",
+    EV_LOGGING(INTERFACE, INFO, "NAS-MGMT-INTF","MGMT event : %s, %d, %s, %u,op: %u",
             intf_ctrl.if_name, src_ifidx, vrf_name, src_vrfid, src_op);
 
     interface_ctrl_t details;
@@ -900,6 +828,10 @@ void nas_mgmt_ev_handler (cps_api_object_t src_obj)
     }
     cps_api_object_t clone = cps_api_object_create();
     cps_api_object_clone(clone, src_obj);
+
+    if (src_op == cps_api_oper_CREATE)
+        nas_intf_send_intf_event(src_obj, intf_type, src_op);
+
     nas_os_get_interface_ethtool_cmd_data(details.if_name, clone);
     nas_os_get_interface_oper_status(details.if_name, clone);
 
@@ -1020,6 +952,17 @@ void nas_int_ev_handler(cps_api_object_t obj) {
     }
 }
 
+/*  Update handler for the loopback interface */
+static void nas_lpbk_ev_handler(cps_api_object_t obj)
+{
+    /* update HAL (hal-common) */
+    nas_intf_event_hal_update(obj);
+
+    /* publish event; notifies all clients of the update */
+    nas_intf_event_publish(obj);
+    return;
+}
+
 static auto _int_ev_handlers = new std::unordered_map<BASE_CMN_INTERFACE_TYPE_t, void(*)
                                                 (cps_api_object_t), std::hash<int>>
 {
@@ -1030,8 +973,8 @@ static auto _int_ev_handlers = new std::unordered_map<BASE_CMN_INTERFACE_TYPE_t,
     { BASE_CMN_INTERFACE_TYPE_L2_PORT, nas_l2_port_ev_handler},
     { BASE_CMN_INTERFACE_TYPE_LAG, nas_lag_ev_handler},
     { BASE_CMN_INTERFACE_TYPE_MACVLAN, nas_macvlan_ev_handler},
-    { BASE_CMN_INTERFACE_TYPE_LOOPBACK, nas_loopback_ev_handler},
-    {BASE_CMN_INTERFACE_TYPE_MANAGEMENT, nas_mgmt_ev_handler},
+    { BASE_CMN_INTERFACE_TYPE_LOOPBACK, nas_lpbk_ev_handler},
+    { BASE_CMN_INTERFACE_TYPE_MANAGEMENT, nas_mgmt_ev_handler},
 };
 
 bool nas_int_ev_handler_cb(cps_api_object_t obj, void *param) {
@@ -1050,10 +993,9 @@ bool nas_int_ev_handler_cb(cps_api_object_t obj, void *param) {
      *  interface events are ignored.
      *  Also non-default VRF events are ignored.
      *  */
-    if (process_intf_os_event == false) {
-        /*  if type is not mgmt && not loopback && not macvlan then ignore it */
+    if (nas_switch_get_os_event_flag() == false) {
+        /*  if type is not mgmt && not macvlan then ignore it */
         if ((if_type != BASE_CMN_INTERFACE_TYPE_MANAGEMENT) &&
-            (if_type != BASE_CMN_INTERFACE_TYPE_LOOPBACK) &&
             (if_type != BASE_CMN_INTERFACE_TYPE_MACVLAN))
         {
             /* Ignore all interface events interface if this is not from non-default VRF */
@@ -1062,9 +1004,11 @@ bool nas_int_ev_handler_cb(cps_api_object_t obj, void *param) {
     }
 
     if (_vrf_attr && (cps_api_object_attr_data_u32(_vrf_attr) != NAS_DEFAULT_VRF_ID)
-            && (if_type != BASE_CMN_INTERFACE_TYPE_MANAGEMENT)) {
-        /* Ignore all interface events interface from non-default VRF */
-        EV_LOGGING(INTERFACE,ERR,"INTF-EV","Interface type %u", if_type);
+        && (if_type != BASE_CMN_INTERFACE_TYPE_MANAGEMENT)
+        && (if_type != BASE_CMN_INTERFACE_TYPE_MACVLAN)) {
+        /* Ignore all interface events interface from non-default VRF except mgmt
+         * and MAC-VLAN intf events. */
+        EV_LOGGING(INTERFACE,INFO,"INTF-EV","Interface type %u", if_type);
         return true;
     }
 
@@ -1097,8 +1041,7 @@ static bool nas_vxlan_remote_endpoint_handler_cb(cps_api_object_t obj, void *par
 
     remote_endpoint_t rem_ep;
     rem_ep.mac_learn_mode = BASE_IF_MAC_LEARN_MODE_DISABLE;
-    rem_ep.flooding_enabled = rem_ep.uc_flooding_enabled =rem_ep.mc_flooding_enabled  = rem_ep.bc_flooding_enabled =
-                                 (bool) cps_api_object_attr_data_u32(_flooding_enable);
+    rem_ep.flooding_enabled = (bool) cps_api_object_attr_data_u32(_flooding_enable);
     rem_ep.remote_ip.af_index = (BASE_CMN_AF_TYPE_t)cps_api_object_attr_data_u32(_af_type);
     if(rem_ep.remote_ip.af_index == AF_INET) {
          memcpy(&rem_ep.remote_ip.u.ipv4,cps_api_object_attr_data_bin(_ip_addr),
@@ -1110,15 +1053,15 @@ static bool nas_vxlan_remote_endpoint_handler_cb(cps_api_object_t obj, void *par
 
     if (op == cps_api_oper_CREATE) {
         if(nas_bridge_utils_add_remote_endpoint(vxlan_if, rem_ep) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"INTF-EV","Failed to add remote endpoint");
+            EV_LOGGING(INTERFACE,DEBUG,"INTF-EV","Failed to add remote endpoint");
         }
     } else if (op == cps_api_oper_DELETE) {
         if(nas_bridge_utils_remove_remote_endpoint(vxlan_if, rem_ep) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"INTF-EV","Failed to add remote endpoint");
+            EV_LOGGING(INTERFACE,DEBUG,"INTF-EV","Failed to remove remote endpoint");
         }
     }else if(op == cps_api_oper_SET){
         if(nas_bridge_utils_update_remote_endpoint(vxlan_if, rem_ep)!=STD_ERR_OK){
-            EV_LOGGING(INTERFACE,ERR,"INTF-EV","Failed to update remote endpoint");
+            EV_LOGGING(INTERFACE,DEBUG,"INTF-EV","Failed to update remote endpoint");
         }
     }
 

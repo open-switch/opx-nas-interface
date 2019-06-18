@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -103,7 +103,7 @@ TEST(std_vlan_test , lag_add_roll_bk) {
 
     cps_api_object_attr_add_u32(obj,BASE_IF_VLAN_IF_INTERFACES_INTERFACE_ID,44);
     cps_api_object_attr_add(obj, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS,
-             "bo30", strlen("bo44")+1);
+             "bo30", strlen("bo30")+1);
     cps_api_object_attr_add(obj, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS,
              "e101-011-0", strlen("e101-011-0")+1);
     cps_api_transaction_params_t tr;
@@ -140,9 +140,9 @@ TEST(std_vlan_test , lag_add_roll_bk) {
 
 
     cps_api_object_attr_add(obj2, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS,
-             "e101-005-0", strlen("e101-004-12")+1);
+             "e101-005-0", strlen("e101-005-0")+1);
     cps_api_object_attr_add(obj2, DELL_IF_IF_INTERFACES_INTERFACE_TAGGED_PORTS,
-             "bo33", strlen("bo43")+1);
+             "bo33", strlen("bo33")+1);
     cps_api_transaction_params_t tr2;
     ASSERT_TRUE(cps_api_transaction_init(&tr2)==cps_api_ret_code_OK);
     cps_api_set(&tr2,obj2);

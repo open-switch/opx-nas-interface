@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -280,7 +280,7 @@ TEST(int_rpc_test, delete_interface_fanout)
     char cmdbuf[256];
     /* NOTE : Currently, the Unit cases are tested in 40G platform (Eg. S6000) so using 40G Speed/Mode
      * as default here. If using other platforms, speed and mode should be giving explicitly here */
-    const char *if_speed = "10G";
+    const char *if_speed = "10g";
     const char *if_mode = "4x1";
 
 
@@ -291,7 +291,7 @@ TEST(int_rpc_test, delete_interface_fanout)
     }
     snprintf(ifname, sizeof(ifname), "e101-%03d-0", fanout_front_panel_port);
     cout << "Enable fanout of interface " << ifname << endl;
-    snprintf(cmdbuf,  sizeof(cmdbuf), "opx-config-fanout %s %s %s 2>/dev/null", ifname, if_mode, if_speed);
+    snprintf(cmdbuf,  sizeof(cmdbuf), "opx-config-fanout --port %s --mode %s --speed %s 2>/dev/null", ifname, if_mode, if_speed);
     system(cmdbuf);
     snprintf(ifname, sizeof(ifname), "e101-%03d-%d", fanout_front_panel_port, fanout_subport_id);
     delete_interface_rpc(ifname);
@@ -362,7 +362,7 @@ TEST(int_rpc_test, create_interface_front_panel_fanout)
     cps_api_transaction_close(&tr);
 
     cout << "Disable fanout of interface " << ifname << endl;
-    snprintf(cmdbuf, sizeof(cmdbuf), "opx-config-fanout %s %s %s 2>/dev/null", ifname, if_mode,if_speed);
+    snprintf(cmdbuf, sizeof(cmdbuf), "opx-config-fanout --port %s --mode %s --speed %s 2>/dev/null", ifname, if_mode,if_speed);
     system(cmdbuf);
 }
 

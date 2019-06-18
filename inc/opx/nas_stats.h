@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -42,6 +42,8 @@ t_std_error nas_stats_bridge_init(cps_api_operation_handle_t handle);
 t_std_error nas_stats_vxlan_init(cps_api_operation_handle_t handle);
 
 t_std_error nas_stats_tunnel_init(cps_api_operation_handle_t handle);
+
+t_std_error nas_stats_virt_network_init(cps_api_operation_handle_t handle);
 
 t_std_error nas_stats_vlan_sub_intf_init(cps_api_operation_handle_t handle);
 

@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -35,7 +35,6 @@ class NAS_VLAN_INTERFACE : public NAS_INTERFACE {
     public:
         hal_vlan_id_t   vlan_id;
         std::string     parent_intf_name;
-        std::string     bridge_name;
         nas_bridge_id_t bridge_id;
         nas_int_type_t  parent_intf_type; /* PHYSICAL or LAG */
         lag_id_t        lag_id;  /*  In case of lag type  */
@@ -54,9 +53,7 @@ class NAS_VLAN_INTERFACE : public NAS_INTERFACE {
 
         t_std_error nas_interface_parent_info_get(interface_ctrl_t *parent_info);
         cps_api_return_code_t nas_interface_fill_info(cps_api_object_t obj);
-        t_std_error set_mtu(size_t mtu);
-        t_std_error create_in_os();
-        t_std_error delete_from_os();
+        t_std_error update_os_mtu(void);
         std::string parent_name_get(void) {return parent_intf_name;}
         hal_vlan_id_t vlan_id_get(void) {return vlan_id;}
         void parent_type_set(nas_int_type_t parent_type) { parent_intf_type = parent_type;}

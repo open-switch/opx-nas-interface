@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -53,6 +53,9 @@ t_std_error nas_interface_vlan_subintf_create(std::string &intf_name, hal_vlan_i
  *  if in_os is false then just create object for the local  cache */
 t_std_error nas_interface_vlan_subintf_list_create(intf_list_t & intf_list, hal_vlan_id_t vlan_id, bool in_os);
 
+/*  Create sub interfaces in the kernel */
+t_std_error nas_interface_os_vlan_subintf_list_create(intf_list_t & intf_list, hal_vlan_id_t vlan_id);
+
 t_std_error nas_interface_vlan_subintf_delete(std::string &intf_name);
 t_std_error nas_interface_vlan_subintf_list_delete(intf_list_t &list);
 t_std_error nas_interface_utils_ifindex_get(const std::string &intf_name, hal_ifindex_t &ifindex);
@@ -92,4 +95,19 @@ t_std_error nas_interface_utils_set_lag_mac_learn_mode(std::string intf_name, np
 t_std_error nas_interface_utils_get_mac_learn_mode(std::string intf_name, BASE_IF_MAC_LEARN_MODE_t *learn_mode );
 t_std_error nas_interface_utils_config_port_1q_mac_learn_mode(std::string intf_name, ndi_port_t *port);
 t_std_error nas_interface_utils_config_lag_1q_mac_learn_mode(std::string intf_name, npu_id_t npu, ndi_obj_id_t lag_id);
+
+t_std_error nas_interface_util_bridge_name_set (std::string & intf_name, std::string &br_name);
+t_std_error nas_interface_util_bridge_name_clear (std::string & intf_name);
+
+t_std_error nas_interface_os_subintf_delete(std::string &intf_name, hal_vlan_id_t vlan_id,
+         std::string &parent, NAS_INTERFACE *intf_obj);
+
+t_std_error nas_interface_subintf_create(std::string &intf_name, hal_vlan_id_t vlan_id,
+         std::string &parent, hal_ifindex_t &intf_idx, NAS_INTERFACE *intf_obj);
+
+t_std_error nas_interface_create_subintfs(intf_list_t & intf_list);
+t_std_error nas_interface_delete_subintfs(intf_list_t & intf_list);
+t_std_error nas_get_int_name_type_frm_cache(const char *name, nas_int_type_t *type);
+
+
 #endif /* _NAS_INTERFACE_UTILS_H */

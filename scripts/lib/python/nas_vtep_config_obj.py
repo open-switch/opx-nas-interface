@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -19,7 +19,8 @@ import nas_os_if_utils as nas_if
 import copy
 import socket
 import cps_utils
-
+import bytearray_utils as ba
+import logging
 
 class RemoteEndpoint(object):
     """RemoteEndpoint class"""
@@ -109,6 +110,10 @@ def __read_attr(cps_obj, attr_id):
         nas_if.log_err("Failed to read value of the CPS attr %s" % str(attr_id))
     return val
 
+def get_vtep_name(cps_obj):
+    """Method to read CPS attr of the interface name  from CPS Object"""
+    vtep_name = __read_attr(cps_obj, VTEP_NAME)
+    return vtep_name
 def get_member_op(cps_obj):
     """Method to read CPS attr of the member operation from CPS Object"""
     member_op = __read_attr(cps_obj, MEMBER_OP_ATTR_NAME)
@@ -127,18 +132,24 @@ def get_remote_endpoint_list(cps_obj):
         for name in remote_endpoints:
             ip = None
             addr_family = None
-            flooding_enabled = None
+            flooding_enabled = 1
             try:
                 endpoint = remote_endpoints[name]
-
+                nas_if.log_info(" remote endpoint %s" % (str(remote_endpoints)))
                 addr_family = endpoint[REMOTE_ENDPOINT_ADDR_FAMILY]
                 if addr_family is None:
                     return False, rlist
-                cps_utils.cps_attr_types_map.add_type(cps_obj.generate_path([REMOTE_ENDPOINT_LIST, name, REMOTE_ENDPOINT_IP_ADDR]), INET_TO_STR_MAP[addr_family])
-
-                ip = endpoint[REMOTE_ENDPOINT_IP_ADDR]
-                flooding_enabled = endpoint[REMOTE_ENDPOINT_FLOODING_ENABLED]
+                ip = None
+                if addr_family is socket.AF_INET:
+                    ip_ba = ba.hex_to_ba('ipv4', endpoint[REMOTE_ENDPOINT_IP_ADDR])
+                    ip = ba.ba_to_ipv4str('ipv4', ip_ba)
+                else:
+                    ip_ba = ba.hex_to_ba('ipv6', endpoint[REMOTE_ENDPOINT_IP_ADDR])
+                    ip = ba.ba_to_ipv6str('ipv6', ip_ba)
+                if REMOTE_ENDPOINT_FLOODING_ENABLED in endpoint:
+                    flooding_enabled = endpoint[REMOTE_ENDPOINT_FLOODING_ENABLED]
             except ValueError:
+                logging.exception('error:')
                 nas_if.log_err("Failed to read attr of remote endpoint")
                 pass
 

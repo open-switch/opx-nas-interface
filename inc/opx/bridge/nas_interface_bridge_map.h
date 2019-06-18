@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -52,5 +52,5 @@ t_std_error nas_bridge_map_obj_remove(std::string name, NAS_BRIDGE **br_obj);
 t_std_error nas_bridge_map_obj_get(std::string name, NAS_BRIDGE **br_obj);
 cps_api_return_code_t nas_bridge_fill_info(std::string br_name, cps_api_object_t obj);
 cps_api_return_code_t nas_fill_all_bridge_info(cps_api_object_list_t *list, model_type_t model, bool get_state = false);
-
+bridge_map_t& nas_bridge_map_get();
 #endif /* _NAS_INTERFACE_BRIDGE_MAP_H */

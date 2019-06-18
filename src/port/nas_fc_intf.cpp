@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -21,6 +21,7 @@
 
 #include "nas_ndi_fc.h"
 #include "nas_ndi_port.h"
+#include "nas_int_utils.h"
 #include "cps_api_events.h"
 #include "cps_api_object_attr.h"
 #include "std_mac_utils.h"
@@ -28,8 +29,8 @@
 #include "dell-interface.h"
 #include "dell-base-if-phy.h"
 #include "iana-if-type.h"
+#include "cps_api_operation.h"
 #include <unordered_map>
-
 #define MAX_NO_OF_SUPP_SPEED 10
 #define FC_MTU_SIZE 2188
 
@@ -140,6 +141,7 @@ cps_api_return_code_t nas_cps_create_fc_port(npu_id_t npu_id, port_t port, BASE_
 cps_api_return_code_t nas_cps_set_fc_attr(npu_id_t npu_id, port_t port, cps_api_object_t obj, cps_api_object_t prev)
 {
 
+    cps_api_operation_types_t op = cps_api_object_type_operation(cps_api_object_key(obj));
     cps_api_object_it_t it_req;
     cps_api_object_it_begin(obj, &it_req);
 
@@ -154,9 +156,14 @@ cps_api_return_code_t nas_cps_set_fc_attr(npu_id_t npu_id, port_t port, cps_api_
               npu_id, port, id);
         t_std_error ret = func->second(npu_id, port, id, obj );
         if (ret != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-FCOE-MAP","Failed to set Attribute  %lu for port  %u", id, port);
-            /* TODO: Roll back */
-            return cps_api_ret_code_ERR;;
+            if (op == cps_api_oper_SET) {
+                EV_LOGGING(INTERFACE,ERR,"NAS-FCOE-MAP","Failed to set Attribute  %lu for port  %u", id, port);
+                /* TODO: Roll back */
+                return cps_api_ret_code_ERR;
+            } else {
+                // report error messages and continue with create operation
+                EV_LOGGING(INTERFACE,ERR,"NAS-FCOE-MAP","Failed to set Attribute  %lu for port  %u for create op", id, port);
+            }
         }
 
     }
@@ -213,23 +220,85 @@ void nas_fc_fill_speed_autoneg_state(npu_id_t npu, port_t port, cps_api_object_t
     return;
 }
 
+static BASE_IF_SPEED_t fc_supp_speed_arr_32gfc[MAX_NO_OF_SUPP_SPEED]= 
+                         {BASE_IF_SPEED_32GFC, BASE_IF_SPEED_16GFC, BASE_IF_SPEED_8GFC};
+static BASE_IF_SPEED_t fc_supp_speed_arr_16gfc[MAX_NO_OF_SUPP_SPEED]= 
+                         {BASE_IF_SPEED_16GFC, BASE_IF_SPEED_8GFC};
+static BASE_IF_SPEED_t fc_supp_speed_arr_8gfc[MAX_NO_OF_SUPP_SPEED]= 
+                         {BASE_IF_SPEED_8GFC};
+
+static std::unordered_map<BASE_IF_SPEED_t, BASE_IF_SPEED_t*> _fc_port_speed_to_supp_speed_map = { 
+    { BASE_IF_SPEED_32GFC, fc_supp_speed_arr_32gfc},
+    { BASE_IF_SPEED_16GFC, fc_supp_speed_arr_16gfc},
+    { BASE_IF_SPEED_8GFC,  fc_supp_speed_arr_8gfc}
+};
+
 void nas_fc_fill_supported_speed(npu_id_t npu, port_t port, cps_api_object_t obj)
 {
-    nas_fc_id_value_t param;
-    uint32_t  sup_speeds[MAX_NO_OF_SUPP_SPEED] = {0};
+    uint32_t sup_speeds[MAX_NO_OF_SUPP_SPEED] = {0};
+    BASE_IF_SPEED_t max_port_speed = BASE_IF_SPEED_0MBPS;
 
-    memset(&param, 0, sizeof(nas_fc_id_value_t));
-    param.attr_id = DELL_IF_IF_INTERFACES_STATE_INTERFACE_SUPPORTED_SPEED;
-    param.value.list.vals = sup_speeds;
-    param.value.list.len = MAX_NO_OF_SUPP_SPEED;
+    /* Obtain the max port-speed for the port from the cache */
+    if (nas_int_get_phy_speed(npu, port, &max_port_speed) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE, ERR, "NAS-FCOE-MAP", "Err obtaining max port speed from cache for port %d",port);
+        return;
+    } 
+
     cps_api_object_attr_delete(obj, DELL_IF_IF_INTERFACES_STATE_INTERFACE_SUPPORTED_SPEED);
 
-    EV_LOGGING(INTERFACE,DEBUG,"NAS-FCOE-MAP","nas_fc_fill_supported_speed  %d for port  %u", npu, port);
-    if ((ndi_get_fc_attr(npu, port, &param, 1)) == STD_ERR_OK) {
-        int mx = param.value.list.len;
-        for (int ix =0;ix < mx; ix++) {
-            cps_api_object_attr_add_u32(obj,DELL_IF_IF_INTERFACES_STATE_INTERFACE_SUPPORTED_SPEED, sup_speeds[ix]);
+    EV_LOGGING(INTERFACE,DEBUG,"NAS-FCOE-MAP","Filling INTERFACE_SUPPORTED_SPEED using "
+               "max_port_speed: %d for port %u", max_port_speed, port);
+
+    auto it = _fc_port_speed_to_supp_speed_map.find(max_port_speed);
+    if (it == _fc_port_speed_to_supp_speed_map.end()) {
+        return;  
+    }
+
+    for (int ix =0;ix < MAX_NO_OF_SUPP_SPEED; ix++) {
+        sup_speeds[ix] = (uint32_t) (it->second)[ix];
+        if (sup_speeds[ix] == 0) {
+            break;
         }
+        cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_STATE_INTERFACE_SUPPORTED_SPEED, 
+                                    sup_speeds[ix]);
+    }
+
+    return;
+}
+
+void nas_fc_phy_fill_supported_speed(npu_id_t npu, port_t port, cps_api_object_t obj)
+{
+    uint32_t sup_speeds[MAX_NO_OF_SUPP_SPEED] = {0};
+    BASE_IF_SPEED_t max_port_speed = BASE_IF_SPEED_0MBPS;
+    cps_api_object_attr_t _speed_attr;
+
+    _speed_attr = cps_api_object_attr_get(obj, BASE_IF_PHY_PHYSICAL_SPEED);
+    if (_speed_attr != nullptr) {
+        max_port_speed = (BASE_IF_SPEED_t) cps_api_object_attr_data_u32(_speed_attr);
+        EV_LOGGING(INTERFACE, DEBUG, "NAS-FCOE-MAP", "max_port_speed for FC: %d from phy obj for port:%d ",
+                   max_port_speed, port);
+    } else {
+        EV_LOGGING(INTERFACE, ERR, "NAS-FCOE-MAP", "NULL _speed_attr for port %d",port);
+        return;
+    }
+
+    cps_api_object_attr_delete(obj, BASE_IF_PHY_PHYSICAL_SUPPORTED_SPEED);
+
+    EV_LOGGING(INTERFACE,DEBUG,"NAS-FCOE-MAP","Filling PHYSICAL_SUPPORTED_SPEED for npu %d and port %u", 
+               npu, port);
+
+    auto it = _fc_port_speed_to_supp_speed_map.find(max_port_speed);
+    if (it == _fc_port_speed_to_supp_speed_map.end()) {
+        return;  
+    }
+
+    for (int ix =0;ix < MAX_NO_OF_SUPP_SPEED; ix++) {
+        sup_speeds[ix] = (uint32_t) (it->second)[ix];
+        if (sup_speeds[ix] == 0) {
+            break;
+        }
+        cps_api_object_attr_add_u32(obj, BASE_IF_PHY_PHYSICAL_SUPPORTED_SPEED, 
+                                    sup_speeds[ix]);
     }
 
     return;

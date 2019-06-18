@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -41,6 +41,7 @@
 #include "dell-interface.h"
 #include "ietf-interfaces.h"
 #include "nas_os_interface.h"
+#include "std_time_tools.h"
 
 #include <time.h>
 #include <chrono>
@@ -161,14 +162,6 @@ static t_std_error populate_if_stat_ids(){
     return STD_ERR_OK;
 }
 
-static auto get_current_time() -> std::size_t{
-
-    auto time_stamp = std::chrono::steady_clock::now();
-    auto time_dur =  time_stamp.time_since_epoch();
-    auto time_now = time_dur.count() * std::chrono::system_clock::period::num / std::chrono::system_clock::period::den;
-    return time_now;
-}
-
 static bool get_stats(hal_ifindex_t ifindex, cps_api_object_list_t list){
 
     cps_api_object_t obj = cps_api_object_list_create_obj_and_append(list);
@@ -205,8 +198,11 @@ static bool get_stats(hal_ifindex_t ifindex, cps_api_object_list_t list){
         cps_api_object_attr_add_u64(obj, if_stat_ids->at(ix), stat_values[ix]);
     }
 
-    auto time_now = get_current_time();
-    cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,time_now);
+    uint64_t time_uptime = std_get_uptime(nullptr);
+    uint64_t time_from_epoch = std_time_get_current_from_epoch_in_nanoseconds();
+    cps_api_object_set_timestamp(obj,time_from_epoch);
+    cps_api_object_attr_add_u32(obj, DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,
+    		(uint32_t)time_uptime); // Used for measuring time intervals and rate calculations
     cps_api_object_attr_add_u32(obj,IF_INTERFACES_STATE_INTERFACE_IF_INDEX, ifindex);
     if (strlen(intf_ctrl.if_name) != 0)
         cps_api_object_attr_add(obj, IF_INTERFACES_STATE_INTERFACE_NAME, intf_ctrl.if_name, strlen(intf_ctrl.if_name) + 1);
@@ -214,7 +210,7 @@ static bool get_stats(hal_ifindex_t ifindex, cps_api_object_list_t list){
     return true;
 }
 
-static bool fill_cps_stats (cps_api_object_t obj, char *ptr, const char *name) {
+static bool fill_cps_stats (cps_api_object_t obj, char *ptr, const char *name, const char *ifname) {
 
     char *save_ptr, *p;
     uint_t cnt = 0;
@@ -234,8 +230,12 @@ static bool fill_cps_stats (cps_api_object_t obj, char *ptr, const char *name) {
        cps_api_object_attr_add_u64(obj, stats_map[ix].oid, stats_arr[stats_map[ix].index]);
     }
 
-    auto time_now =  get_current_time();
-    cps_api_object_attr_add_u32(obj,DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,time_now);
+    uint64_t time_uptime = std_get_uptime(nullptr);
+    uint64_t time_from_epoch = std_time_get_current_from_epoch_in_nanoseconds();
+    cps_api_object_set_timestamp(obj,time_from_epoch); // For  retrieving time from epoch
+    cps_api_object_attr_add_u32(obj, DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP,
+    		(uint32_t)time_uptime); // Used for measuring time intervals
+    cps_api_object_attr_add(obj, IF_INTERFACES_STATE_INTERFACE_NAME, ifname, strlen(ifname) + 1);
     return ret;
 }
 
@@ -261,10 +261,11 @@ bool get_intf_stats_from_os( const char *name, cps_api_object_list_t list) {
 
     /* space at start and ':' at end will uniquely identify an interface*/
     snprintf(intf_name, sizeof(intf_name), " %s%s", name, ":");
+
     stats_buf[0] = ' ';
     while (fgets(&stats_buf[1], sizeof(stats_buf) -1, fp) == &stats_buf[1]) {
         if (strstr(stats_buf, intf_name) != NULL) {
-            ret = fill_cps_stats(obj, stats_buf, intf_name);
+            ret = fill_cps_stats(obj, stats_buf, intf_name, name);
             break;
         }
     }
@@ -314,6 +315,7 @@ cps_api_return_code_t if_mgmt_stats_get (void * context, cps_api_get_params_t * 
      }
 
      nas_os_get_interface_stats(name, obj);
+     cps_api_object_attr_add(obj, IF_INTERFACES_STATE_INTERFACE_NAME, name, strlen(name) + 1);
      return cps_api_ret_code_OK;
 }
 

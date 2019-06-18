@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -19,25 +19,36 @@ import copy
 import nas_fp_port_utils as fp_utils
 import nas_common_header as nas_comm
 
-if_mac_info_cache = {}
-def get_mac_addr_base_range(if_type):
-    if len(if_mac_info_cache) == 0:
+appl_mac_info_cache = {}
+
+def get_mac_addr_base_range(appl_name, type_name):
+
+    def add_node_to_cache(appl, xml_node):
+        n_type = xml_node.get('type')
+        n_base = int(xml_node.get('base-offset'))
+        n_range = int(xml_node.get('offset-range'))
+        nas_if.log_info('%-15s: base %d range %d' % (n_type, n_base, n_range))
+        appl_mac_info_cache[(appl, n_type)] = (n_base, n_range)
+
+    if len(appl_mac_info_cache) == 0:
         try:
             cfg = ET.parse('/etc/opx/mac_address_alloc.xml')
         except IOError:
             nas_if.log_err('No mac address config file')
             return None
         root = cfg.getroot()
-        for i in root.findall('interface'):
-            type_name = i.get('type')
-            base = int(i.get('base-offset'))
-            off_range = int(i.get('offset-range'))
-            if_mac_info_cache[type_name] = (base, off_range)
-            nas_if.log_info('%-15s: base %d range %d' % (type_name, base, off_range))
-    if not if_type in if_mac_info_cache:
-        nas_if.log_err('No mac address setting for type %s' % if_type)
+        for node in root.findall('interface'):
+            add_node_to_cache('interface', node)
+        for node in root.findall('application'):
+            appl = node.get('name')
+            for sub_node in node.findall('mac-range'):
+                add_node_to_cache(appl, sub_node)
+
+    if not (appl_name, type_name) in appl_mac_info_cache:
+        nas_if.log_err('No mac address setting for application %s and type %s' %
+                       (appl_name, type_name))
         return None
-    return if_mac_info_cache[if_type]
+    return appl_mac_info_cache[(appl_name, type_name)]
 
 def get_offset_mac_addr(base_addr, offset):
     if isinstance(base_addr, str):
@@ -68,6 +79,7 @@ def get_base_mac_addr():
 
 def get_alloc_mac_addr_params(if_type, cps_obj, fp_cache = None):
     ret_list = {'if_type': if_type}
+
     if if_type == 'front-panel':
         try:
             front_panel_port = cps_obj.get_attr_data(nas_comm.yang.get_value('fp_port', 'attr_name'))
@@ -102,6 +114,8 @@ def get_alloc_mac_addr_params(if_type, cps_obj, fp_cache = None):
             return None
         lag_id = nas_if.get_lag_id_from_name(lag_name)
         ret_list['lag_id'] = lag_id
+    elif if_type == 'virtual-network':
+        pass
     else:
         nas_if.log_err('Unknown interface type %s' % if_type)
         return None
@@ -109,7 +123,7 @@ def get_alloc_mac_addr_params(if_type, cps_obj, fp_cache = None):
 
 def if_get_mac_addr(if_type, fp_mac_offset = None, vlan_id = None, lag_id = None):
     base_mac = get_base_mac_addr()
-    base_range = get_mac_addr_base_range(if_type)
+    base_range = get_mac_addr_base_range('interface', if_type)
     if base_range is None:
         nas_if.log_err('Failed to get mac addr base and range for if type %s' % if_type)
         return None
@@ -132,11 +146,8 @@ def if_get_mac_addr(if_type, fp_mac_offset = None, vlan_id = None, lag_id = None
                            (fp_mac_offset, addr_range))
             return None
         mac_offset = fp_mac_offset + base_offset
-    elif if_type == 'vlan':
-        if vlan_id == None:
-            nas_if.log_err('No VLAN id for VLAN port')
-            return None
-        mac_offset = get_mac_offset(base_offset, addr_range, vlan_id)
+    elif if_type == 'vlan' or if_type  == 'virtual-network':
+        mac_offset = get_mac_offset(base_offset, addr_range, 1)
     elif if_type == 'lag':
         if lag_id == None:
             nas_if.log_err('No LAG id for LAG port')
@@ -149,7 +160,31 @@ def if_get_mac_addr(if_type, fp_mac_offset = None, vlan_id = None, lag_id = None
         return None
 
     mac_addr = get_offset_mac_addr(base_mac, mac_offset)
-    if mac_addr == None:
+    if mac_addr is None:
         nas_if.log_err('Failed to calculate mac address with offset')
         return None
-    return mac_addr
+    return (mac_addr, addr_range)
+
+def get_intf_mac_addr(if_type, cps_obj, fp_cache = None):
+    param_list = get_alloc_mac_addr_params(if_type, cps_obj, fp_cache)
+    if param_list is None:
+        nas_if.log_err('No enough attributes in input object to get mac address')
+        return None
+    return if_get_mac_addr(**param_list)
+
+def get_appl_mac_addr(appl_name, type_name, offset = 0):
+    base_mac = get_base_mac_addr()
+    base_range = get_mac_addr_base_range(appl_name, type_name)
+    if base_range is None:
+        nas_if.log_err('Failed to get mac addr base and range for application %s type %s' %
+                       (appl_name, type_name))
+        return None
+    (base_offset, addr_range) = base_range
+    if offset >= addr_range:
+        nas_if.log_err('Required offset %d should be smaller than configured range %d' % (offset, addr_range))
+        return None
+    mac_addr = get_offset_mac_addr(base_mac, base_offset + offset)
+    if mac_addr is None:
+        nas_if.log_err('Failed to calculate mac address with offset')
+        return None
+    return (mac_addr, addr_range)

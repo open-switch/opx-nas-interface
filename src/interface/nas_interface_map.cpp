@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -22,9 +22,10 @@
 #include "interface/nas_interface_map.h"
 
 // TODO define map based on the interface type
-using nas_intf_obj_map_t = std::unordered_map <std::string, class NAS_INTERFACE *>;
 static nas_intf_obj_map_t intf_obj_map;
-
+nas_intf_obj_map_t nas_interface_obj_map_get() {
+    return intf_obj_map;
+}
 class NAS_INTERFACE *nas_interface_map_obj_get(const std::string &intf_name)
 {
     auto it = intf_obj_map.find(intf_name);

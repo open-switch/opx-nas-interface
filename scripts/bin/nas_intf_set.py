@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -59,9 +59,9 @@ Delete an ethernet interface
 
 def delete_intf(port_id, subport_id=0):
     intf_name = ether_if_name(port_id, subport_id)
-    call(["cps_set_oid.py", "-qua", "target", "-oper", "action", set_intf_key, 
-       oper_key + '=' + oper_type['delete'], 
-       intf_type_key+'='+intf_types['ether'], intf_name_key+'='+ intf_name, 
+    call(["cps_set_oid.py", "-qua", "target", "-oper", "action", set_intf_key,
+       oper_key + '=' + oper_type['delete'],
+       intf_type_key+'='+intf_types['ether'], intf_name_key+'='+ intf_name,
        fp_port_key+'='+str(port_id), subport_id_key+'='+str(subport_id)])
 
 
@@ -71,9 +71,9 @@ Create an ethernet interface
 
 def create_intf(port_id, subport_id=0):
     intf_name = ether_if_name(port_id, subport_id)
-    call(["cps_set_oid.py", "-qua", "target", "-oper", "action", set_intf_key, 
-       oper_key + '=' + oper_type['create'], 
-       intf_type_key+'='+intf_types['ether'], intf_name_key+'='+ intf_name, 
+    call(["cps_set_oid.py", "-qua", "target", "-oper", "action", set_intf_key,
+       oper_key + '=' + oper_type['create'],
+       intf_type_key+'='+intf_types['ether'], intf_name_key+'='+ intf_name,
        fp_port_key+'='+str(port_id), subport_id_key+'='+str(subport_id)])
 
 

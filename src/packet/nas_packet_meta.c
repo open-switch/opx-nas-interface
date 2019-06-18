@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -34,12 +34,17 @@ uint_t nas_pkt_meta_attr_data_uint (nas_pkt_meta_attr_ptr_t attr)
 {
     size_t len = nas_pkt_meta_attr_len(attr);
     switch (len) {
-        case sizeof(uint64_t): return std_tlv_data_u64(attr);
+        case sizeof(uint64_t): return std_tlv_data_u64(attr); // The truncated use of u64
         case sizeof(uint32_t): return std_tlv_data_u32 (attr);
         case sizeof(uint16_t): return std_tlv_data_u16 (attr);
         case sizeof(uint8_t): return *(uint8_t*)std_tlv_data (attr);
         default: return 0;
     }
+}
+
+uint64_t nas_pkt_meta_attr_data_uint64 (nas_pkt_meta_attr_ptr_t attr)
+{
+    return std_tlv_data_u64(attr);
 }
 
 bool nas_pkt_meta_it_begin (uint8_t* pkt, nas_pkt_meta_attr_it_t* it)

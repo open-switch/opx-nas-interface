@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -203,6 +203,7 @@ def create_and_add_pg_state_obj(pg, resp):
                   pg_state_attr('default-phy-mode'):pg.get_def_phy_mode(),
                   pg_state_attr('default-breakout-mode'):pg.get_def_breakout(),
                   pg_state_attr('default-port-speed'):pg.get_default_phy_port_speed(),
+                  pg_state_attr('profile-type'):pg.get_profile_type(),
                   pg_state_attr('id'):pg.name })
     add_all_pg_caps_to_pg_obj(pg, cps_obj)
     resp.append(cps_obj.get())

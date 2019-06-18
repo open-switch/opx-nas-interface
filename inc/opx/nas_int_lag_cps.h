@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -36,6 +36,14 @@ extern "C" {
  * @return STD_ERR_OK or an error if the initialization fails
  */
 t_std_error nas_cps_lag_init(cps_api_operation_handle_t handle);
+
+
+/**
+ * Retrieve the resilient hash configuration (enabled, disabled) for LAG
+ * @param void
+ * @return boolean indication if LAG resilient has is enabled
+ */
+bool nas_lag_hash_value_get(void);
 
 
 #ifdef __cplusplus

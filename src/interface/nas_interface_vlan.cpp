@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -44,37 +44,8 @@ cps_api_return_code_t NAS_VLAN_INTERFACE::nas_interface_fill_info(cps_api_object
     return cps_api_ret_code_OK;
 }
 
-
-t_std_error NAS_VLAN_INTERFACE::set_mtu(size_t mtu){
-    cps_api_object_guard og(cps_api_object_create());
-    if(og.get() == nullptr){
-        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN","No memory to create new object");
-        return STD_ERR(INTERFACE,NOMEM,0);
-    }
-    cps_api_object_attr_add_u32(og.get(), DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, if_index);
-    cps_api_object_attr_add_u32(og.get(), DELL_IF_IF_INTERFACES_INTERFACE_MTU, mtu);
-    cps_api_object_attr_add_u16(og.get(), BASE_IF_VLAN_IF_INTERFACES_INTERFACE_ID, vlan_id);
-    if (nas_os_interface_set_attribute(og.get(),DELL_IF_IF_INTERFACES_INTERFACE_MTU)!=STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN","Failed to set mtu to %d for vlan sub interface %s",mtu, if_name.c_str());
-        return (STD_ERR(INTERFACE,FAIL, 0));
-    }
-    this->mtu = mtu;
-    return STD_ERR_OK;
-}
-
-t_std_error NAS_VLAN_INTERFACE::create_in_os(){
-    /*
-     * call nas-linux api to create sub interface
-     *
-     */
-    return STD_ERR_OK;
-}
-
-t_std_error NAS_VLAN_INTERFACE::delete_from_os(){
-    /*
-     * call nas-linux api to delete sub interface
-     */
-    return STD_ERR_OK;
+t_std_error NAS_VLAN_INTERFACE::update_os_mtu(void){
+    return set_mtu(get_mtu());
 }
 
 void nas_vlan_interface_set_default_vlan(hal_vlan_id_t vlan_id){

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -21,6 +21,7 @@
 #include "interface/nas_interface_vxlan.h"
 #include "dell-base-common.h"
 #include "dell-interface.h"
+#include "dell-base-l2-mac.h"
 #include "cps_class_map.h"
 #include "cps_api_object_key.h"
 #include "dell-base-if.h"
@@ -28,6 +29,7 @@
 #include "event_log_types.h"
 #include "nas_ndi_1d_bridge.h"
 #include "std_ip_utils.h"
+#include "std_utils.h"
 #include "event_log.h"
 #include "dell-base-if.h"
 #include "ietf-interfaces.h"
@@ -35,6 +37,7 @@
 #include "hal_if_mapping.h"
 #include "nas_os_vxlan.h"
 #include "nas_os_interface.h"
+#include "nas_linux_l2.h"
 
 #include "cps_class_map.h"
 #include "cps_api_operation.h"
@@ -52,9 +55,60 @@ std_mutex_type_t * get_vxlan_mutex(){
     return &vxlan_mutex;
 }
 
+t_std_error NAS_VXLAN_INTERFACE::nas_vxlan_os_enable_flooding(remote_endpoint_t & rem_ep, bool enable) {
+
+
+     uint8_t mac_addr[HAL_MAC_ADDR_LEN] = {0,0,0,0,0,0};
+
+     EV_LOGGING(INTERFACE,DEBUG,"NAS-IF"," Enable/disable (%d) Flooding: add 00:00 MAC for the vxlan intf %s if_ixd %d",
+            enable, get_ifname().c_str(),if_index);
+     if (if_index == NAS_IF_INDEX_INVALID) {
+         EV_LOGGING(INTERFACE,DEBUG,"NAS-IF","ifindex is valid so no flood set on %s", get_ifname().c_str());
+         return STD_ERR_OK;
+     }
+     cps_api_object_guard og(cps_api_object_create());
+
+     if(og.get() == nullptr) return STD_ERR(INTERFACE,NOMEM,0);
+
+     cps_api_operation_types_t op = (enable) ? cps_api_oper_CREATE : cps_api_oper_DELETE ;
+
+     cps_api_object_set_type_operation(cps_api_object_key(og.get()),op);
+     cps_api_object_attr_add_u32(og.get(),BASE_MAC_TABLE_IFINDEX,get_ifindex());
+     cps_api_object_attr_add_u32(og.get(),BASE_MAC_TABLE_STATIC, true);
+     cps_api_object_attr_add(og.get(), BASE_MAC_TABLE_MAC_ADDRESS, (void *)mac_addr, HAL_MAC_ADDR_LEN);
+
+     cps_api_attr_id_t ids[3] = {BASE_MAC_FORWARDING_TABLE_ENDPOINT_IP, 0, BASE_MAC_FORWARDING_TABLE_ENDPOINT_IP_ADDR_FAMILY};
+     const int ids_len = sizeof(ids)/sizeof(ids[0]);
+         /*  Add remote IP  addr family type and Remote IP */
+     cps_api_object_e_add(og.get(),ids,ids_len,cps_api_object_ATTR_T_U32,(const void *)&rem_ep.remote_ip.af_index,
+                         sizeof(rem_ep.remote_ip.af_index));
+
+     ids[2] = BASE_MAC_FORWARDING_TABLE_ENDPOINT_IP_ADDR;
+     cps_api_object_e_add(og.get(),ids ,ids_len,cps_api_object_ATTR_T_BIN, (const void *)&rem_ep.remote_ip.u,
+                                        sizeof(rem_ep.remote_ip.u));
+     t_std_error rc = nas_os_mac_update_entry(og.get());
+     if (rc != STD_ERR_OK) {
+         EV_LOGGING(INTERFACE,ERR,"NAS-IF","Failed to add 00:00 MAC for the vxlan intf %s ", get_ifname().c_str());
+     }
+     return rc;
+}
+
 t_std_error NAS_VXLAN_INTERFACE::nas_interface_add_remote_endpoint(remote_endpoint_t *remote_endpoint)
 {
     remote_endpoint_list.push_back(*remote_endpoint);
+    if (remote_endpoint->flooding_enabled) {
+        nas_vxlan_os_enable_flooding(*remote_endpoint, true);
+    }
+    return STD_ERR_OK;
+}
+
+/* this is called at intf model create of vn bridge after Vtep is created and added to vn bridge */
+t_std_error NAS_VXLAN_INTERFACE::nas_interface_update_all_rem_endpt_flooding() {
+    for (auto it = remote_endpoint_list.begin(); it != remote_endpoint_list.end(); it++) {
+        if (it->flooding_enabled) {
+            nas_vxlan_os_enable_flooding(*it, true);
+        }
+    }
     return STD_ERR_OK;
 }
 
@@ -64,6 +118,9 @@ t_std_error NAS_VXLAN_INTERFACE::nas_interface_remove_remote_endpoint(remote_end
     for (auto it = remote_endpoint_list.begin(); it != remote_endpoint_list.end(); it++) {
         if (it->remote_ip == remote_endpoint->remote_ip) {
             *remote_endpoint = *it;
+            if (!remote_endpoint->flooding_enabled) {
+                nas_vxlan_os_enable_flooding(*remote_endpoint, false);
+            }
             remote_endpoint_list.erase(it);
             return STD_ERR_OK;
         }
@@ -97,6 +154,9 @@ t_std_error NAS_VXLAN_INTERFACE::nas_interface_update_remote_endpoint(remote_end
 
     for (auto it = remote_endpoint_list.begin(); it != remote_endpoint_list.end(); it++) {
         if (it->remote_ip == remote_endpoint->remote_ip) {
+            if (remote_endpoint->flooding_enabled != it->flooding_enabled) {
+                nas_vxlan_os_enable_flooding(*remote_endpoint, remote_endpoint->flooding_enabled);
+            }
             *it = *remote_endpoint;
             return STD_ERR_OK;
         }
@@ -136,11 +196,12 @@ t_std_error NAS_VXLAN_INTERFACE::nas_interface_set_mac_learn_remote_endpt(remote
 
 cps_api_return_code_t NAS_VXLAN_INTERFACE::nas_interface_fill_info(cps_api_object_t obj)
 {
+
+    EV_LOGGING(INTERFACE,INFO,"NAS-VXLAN-INT","nas_interface_fill_com_info");
     if (nas_interface_fill_com_info(obj) != cps_api_ret_code_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-IF","Could not get common interface info");
+        EV_LOGGING(INTERFACE,ERR,"NAS-VXLAN-IF","Could not get common interface info");
         return cps_api_ret_code_ERR;
     }
-
     cps_api_object_attr_add_u32(obj, DELL_IF_IF_INTERFACES_INTERFACE_VNI, vni);
     BASE_CMN_AF_TYPE_t af_type;
     if (source_ip.af_index == AF_INET) {
@@ -263,4 +324,81 @@ void NAS_VXLAN_INTERFACE::nas_vxlan_add_attr_for_interface_obj(cps_api_object_t 
 
         ++ids[1];
      }
+}
+
+bool NAS_VXLAN_INTERFACE::nas_vxlan_register_vxlan_intf(bool add) {
+
+    hal_intf_reg_op_type_t reg_op;
+
+    interface_ctrl_t reg_block;
+    memset(&reg_block,0,sizeof(reg_block));
+
+    safestrncpy(reg_block.if_name,if_name.c_str(),sizeof(reg_block.if_name));
+    reg_block.if_index = if_index;
+    reg_block.int_type = nas_int_type_VXLAN;
+    reg_op = add ? HAL_INTF_OP_REG : HAL_INTF_OP_DEREG;
+    EV_LOGGING(INTERFACE,INFO,"NAS-VXLAN", "%s vxlan interface %s with ifindex %d",add ?
+                "Register" : "Deregister",reg_block.if_name,if_index);
+
+    if (dn_hal_if_register(reg_op,&reg_block) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-VXLAN",
+            "interface register Error %s - mapping error or interface already present",reg_block.if_name);
+        return false;
+    }
+
+    return true;
+}
+
+t_std_error  NAS_VXLAN_INTERFACE::nas_vxlan_create_in_os() {
+
+
+     hal_ifindex_t idx = get_ifindex();
+     if (idx != NAS_IF_INDEX_INVALID) {
+        return STD_ERR_OK;
+     }
+     cps_api_object_guard og(cps_api_object_create());
+     cps_api_set_key_data(og.get(),IF_INTERFACES_INTERFACE_NAME,
+                               cps_api_object_ATTR_T_BIN, if_name.c_str(), strlen(if_name.c_str())+1);
+     if (nas_interface_fill_info(og.get()) !=  cps_api_ret_code_OK) {
+         EV_LOGGING(INTERFACE,ERR,"VXLAN","Failed setting attr for vxlan interface %s to be created in os", if_name.c_str());
+         return STD_ERR(INTERFACE, FAIL, 0);
+     }
+
+     cps_api_object_attr_add_u32(og.get(),IF_INTERFACES_INTERFACE_ENABLED,true);
+
+     if(nas_os_create_vxlan_interface(og.get())!=STD_ERR_OK){
+         EV_LOGGING(INTERFACE,ERR,"VXLAN","Failed creating vxlan interface %s in the os", if_name.c_str());
+         return STD_ERR(INTERFACE, FAIL, 0);
+
+     }
+
+     cps_api_object_attr_t ifindex_attr = cps_api_object_attr_get(og.get(),
+                                        DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX);
+     if(ifindex_attr){
+            if_index = cps_api_object_attr_data_uint(ifindex_attr);
+     }
+     if(!nas_vxlan_register_vxlan_intf(true)){
+        EV_LOGGING(INTERFACE,ERR,"VXLAN","Failed registering vxlan interface %s ", if_name.c_str());
+        return STD_ERR(INTERFACE, FAIL, 0);
+     }
+     return STD_ERR_OK;
+}
+
+
+t_std_error  NAS_VXLAN_INTERFACE::nas_vxlan_del_in_os() {
+
+    hal_ifindex_t idx = get_ifindex();
+    if (idx != NAS_IF_INDEX_INVALID) {
+        if(nas_os_del_interface(get_ifindex())!=STD_ERR_OK){
+            EV_LOGGING(INTERFACE,ERR,"VXLAN","Failed deleting vxlan interface in the os %s", if_name.c_str());
+            return STD_ERR(INTERFACE, FAIL, 0);
+
+        }
+        if(!nas_vxlan_register_vxlan_intf(false)) {
+            EV_LOGGING(INTERFACE,ERR,"VXLAN","Deregister failed for vxlan %s",if_name.c_str());
+            return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        set_ifindex(NAS_IF_INDEX_INVALID);
+    }
+    return STD_ERR_OK;
 }

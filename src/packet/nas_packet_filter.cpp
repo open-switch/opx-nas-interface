@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -131,8 +131,8 @@ bool pf_table::pf_t_del_rule(nas_obj_id_t id) {
  */
 bool pf_table::pf_t_in_pkt_hndlr(uint8_t *pkt, uint32_t pkt_len, pf_pkt_attr *p_attr) {
 
-    EV_LOGGING (NAS_PKT_FILTER, DEBUG,"PKT-FIL","In_Pkt handler - len %d, port %d, trap id %d",
-                                pkt_len, p_attr->rx_port, p_attr->trap_id);
+    EV_LOGGING (NAS_PKT_FILTER, DEBUG,"PKT-FIL","In_Pkt handler - len %d, port %d, trap id %lld",
+		pkt_len, p_attr->rx_port, p_attr->trap_id);
 
     std::lock_guard<std::mutex> pf_tlock {pf_mtx};
 
@@ -145,6 +145,7 @@ bool pf_table::pf_t_in_pkt_hndlr(uint8_t *pkt, uint32_t pkt_len, pf_pkt_attr *p_
             const pf_match ref = pfr.pf_r_get_match_list();
             match &= ref.pf_m_inv_fptr(m_tv.m_type, pkt, pkt_len, p_attr, m_tv);
         });
+
         if(match) {
             pfr.pf_r_get_action_params([&](pf_action_t& a_tv) {
                 const pf_action ref = pfr.pf_r_get_action_list();
@@ -200,7 +201,9 @@ void pf_match::pf_m_init_fptr() {
 
 bool pf_match::pf_m_usr_trap_id(uint8_t *pkt, uint32_t len, pf_pkt_attr *p_attr,
                                 pf_match_t& m_tv) const {
-    EV_LOGGING (NAS_PKT_FILTER, DEBUG,"PKT-FIL","PKT TrapID: %d, FILTER TRAPID: %lu", p_attr->trap_id, m_tv.m_val.u64);
+    EV_LOGGING (NAS_PKT_FILTER, DEBUG,"PKT-FIL","PKT TrapID: %lld, FILTER Type %u TRAPID: %llu",
+		p_attr->trap_id, m_tv.m_type, m_tv.m_val.u64);
+
     if(m_tv.m_val.u64 == p_attr->trap_id) return true;
     return false;
 }
@@ -213,7 +216,8 @@ bool pf_match::pf_m_dest_mac(uint8_t *pkt, uint32_t len, pf_pkt_attr *p_attr,
 
 bool pf_match::pf_m_pseudo_fn(uint8_t *pkt, uint32_t len, pf_pkt_attr *p_attr,
                               pf_match_t& m_tv) const {
-    EV_LOGGING (NAS_PKT_FILTER, DEBUG,"PKT-FIL","Executing pseudo-match for type %d", m_tv.m_type);
+    EV_LOGGING (NAS_PKT_FILTER, DEBUG,"PKT-FIL","Executing pseudo-match for type %d val %lld",
+                m_tv.m_type, m_tv.m_val.u64);
     return false;
 }
 
@@ -429,8 +433,6 @@ static void nas_pf_match_list (const cps_api_object_t obj, const cps_api_object_
             break;
 
         case BASE_PACKET_PACKET_MATCH_TYPE_ETHER_TYPE:
-        case BASE_PACKET_PACKET_MATCH_TYPE_HOSTIF_TRAP_ID:
-        case BASE_PACKET_PACKET_MATCH_TYPE_HOSTIF_USER_TRAP_ID:
             attr_match_val = cps_api_object_it_find (&_attr, BASE_PACKET_RULE_MATCH_DATA);
             if (attr_match_val == NULL) {
                 throw nas::base_exception {std_err, __FUNCTION__, "Missing MATCH_VALUE attribute"};
@@ -438,6 +440,17 @@ static void nas_pf_match_list (const cps_api_object_t obj, const cps_api_object_
             _value = cps_api_object_attr_data_u32 (attr_match_val);
             m_tv.m_val.u64 = _value;
             EV_LOGGING (NAS_PKT_FILTER, DEBUG, "PKT-FIL", "Match_type %d value %lu", _type, _value);
+            break;
+
+        case BASE_PACKET_PACKET_MATCH_TYPE_HOSTIF_TRAP_ID:
+        case BASE_PACKET_PACKET_MATCH_TYPE_HOSTIF_USER_TRAP_ID:
+            attr_match_val = cps_api_object_it_find (&_attr, BASE_PACKET_RULE_MATCH_DATA);
+            if (attr_match_val == NULL) {
+                throw nas::base_exception {std_err, __FUNCTION__, "Missing MATCH_VALUE attribute"};
+            }
+            _value = cps_api_object_attr_data_u64 (attr_match_val);
+            m_tv.m_val.u64 = _value;
+            EV_LOGGING (NAS_PKT_FILTER, DEBUG, "PKT-FIL", "Match_type %d value %llu", _type, _value);
             break;
 
         default:

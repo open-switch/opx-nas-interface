@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the 'License'); you may
 # not use this file except in compliance with the License. You may obtain
@@ -98,6 +98,8 @@ def set_intf_request(pas_media_obj):
         ch = {'operation': 'set', 'change': ifobj.get()}
         cps.transaction([ch])
         if_name = if_config.if_config_get_by_npu_port(npu, port)
+        config= if_config.if_config_get(if_name)
+        speed = config.get_speed()
         if_details = nas_if.nas_os_if_list(d={'if/interfaces/interface/name':if_name})
         enable = ba.from_ba(if_details[0]['data']['if/interfaces/interface/enabled'],"uint64_t")
         for hwport in hwport_list:
@@ -111,6 +113,10 @@ def set_intf_request(pas_media_obj):
                     _lane = pg_obj.get_lane(hwport)
                 else:
                     _lane = fp_details.lane
+            if speed is not None:
+                media.media_led_set(1, fp_details.media_id, _lane, speed)
+            else:
+                nas_if.log_err("Error speed not present")
             media.media_transceiver_set(1, fp_details.media_id, _lane, enable)
 
 def monitor_media_events():

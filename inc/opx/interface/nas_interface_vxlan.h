@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -40,11 +40,8 @@
 struct remote_endpoint_t {
     hal_ip_addr_t remote_ip;
     bool rem_membership; /*  will be set only if remote endpoint IP is explicitly added by vxlan
-                             interface object. */
+                                         interface object. */
     bool flooding_enabled;
-    bool uc_flooding_enabled;
-    bool mc_flooding_enabled;
-    bool bc_flooding_enabled;
     ndi_obj_id_t tunnel_id;
     BASE_IF_MAC_LEARN_MODE_t mac_learn_mode;
 
@@ -52,9 +49,6 @@ struct remote_endpoint_t {
         memset(&remote_ip,0,sizeof(remote_ip));
         rem_membership = false;
         flooding_enabled = true;
-        uc_flooding_enabled = true;
-        mc_flooding_enabled = true;
-        bc_flooding_enabled = true;
         tunnel_id = NAS_INVALID_TUNNEL_ID;
         mac_learn_mode = BASE_IF_MAC_LEARN_MODE_HW;
     };
@@ -88,7 +82,12 @@ class NAS_VXLAN_INTERFACE : public NAS_INTERFACE {
         t_std_error nas_interface_remove_remote_endpoint(remote_endpoint_t *remote_endpoint);
         t_std_error nas_interface_get_remote_endpoint(remote_endpoint_t *remote_endpoint);
         t_std_error nas_interface_update_remote_endpoint(remote_endpoint_t *remote_endpoint);
-
+        t_std_error nas_vxlan_os_enable_flooding(remote_endpoint_t & rem_ep, bool enable);
+        t_std_error nas_vxlan_create_in_os();
+        t_std_error nas_vxlan_del_in_os();
+        /* creates 00 mac for all remote vteps if flooding is enabled */
+        t_std_error nas_interface_update_all_rem_endpt_flooding();
+        bool nas_vxlan_register_vxlan_intf(bool add);
         t_std_error nas_interface_set_mac_learn_remote_endpt(remote_endpoint_t *remote_endpoint);
 
         void nas_interface_for_each_remote_endpoint(std::function <void (BASE_CMN_VNI_t, hal_ip_addr_t &, remote_endpoint_t &) > fn);

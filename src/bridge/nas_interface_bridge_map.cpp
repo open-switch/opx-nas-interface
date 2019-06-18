@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -138,4 +138,8 @@ cps_api_return_code_t nas_fill_all_bridge_info(cps_api_object_list_t *list, mode
         }
     });
     return cps_api_ret_code_OK;
+}
+
+bridge_map_t& nas_bridge_map_get() {
+   return bridge_map;
 }

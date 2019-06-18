@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -57,22 +57,34 @@ void nas_interface_cps_publish_event(std::string &if_name, nas_int_type_t if_typ
             EV_LOGGING(INTERFACE,ERR,"NAS-IF","Publish failure : Could not get interface object");
             return;
         }
+
+
         /*
          * To be fixed when we create sub classes for lag and physical interfaces
          */
         if(if_type == nas_int_type_VLANSUB_INTF){
             NAS_VLAN_INTERFACE *intf = dynamic_cast<NAS_VLAN_INTERFACE *>(nas_intf);
+            if (!intf) {
+                EV_LOGGING(INTERFACE,ERR,"NAS-IF","Could not get interface info for %s", if_name.c_str());
+                return;
+            }
             if (intf->nas_interface_fill_info(og.get()) != cps_api_ret_code_OK) {
                 EV_LOGGING(INTERFACE,ERR,"NAS-IF","Could not get common interface info");
                 return;
             }
+            cps_api_object_attr_add_u32(og.get(), DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, intf->get_ifindex());
         }
         if(if_type == nas_int_type_VXLAN){
             NAS_VXLAN_INTERFACE *intf = dynamic_cast<NAS_VXLAN_INTERFACE *>(nas_intf);
+            if (!intf) {
+                EV_LOGGING(INTERFACE,ERR,"NAS-IF","Could not get interface info for %s", if_name.c_str());
+                return;
+            }
             if (intf->nas_interface_fill_info(og.get()) != cps_api_ret_code_OK) {
                 EV_LOGGING(INTERFACE,ERR,"NAS-IF","Could not get common interface info");
                 return;
             }
+            cps_api_object_attr_add_u32(og.get(), DELL_BASE_IF_CMN_IF_INTERFACES_INTERFACE_IF_INDEX, intf->get_ifindex());
         }
 
     }
@@ -116,6 +128,7 @@ t_std_error nas_interface_utils_vlan_create(std::string intf_name,
     nas_int_type_t parent_type;
     if (nas_get_int_name_type(parent.c_str(), &parent_type) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR, "NAS-INTERFACE", " Failed to get interface type for %s %s ", parent.c_str());
+        delete(obj);
         return STD_ERR(INTERFACE, FAIL, 0);
     }
     /*  set parent interface type */
@@ -124,6 +137,7 @@ t_std_error nas_interface_utils_vlan_create(std::string intf_name,
     /*  Add it in the map */
     if (nas_interface_map_obj_add(intf_name, (NAS_INTERFACE *)obj) != STD_ERR_OK) {
         /*  Failed to add in the map */
+        delete(obj);
         return STD_ERR(INTERFACE, FAIL, 0);
     }
 
@@ -150,6 +164,7 @@ static BASE_IF_MAC_LEARN_MODE_t nas_common_learn_mode (BASE_IF_PHY_MAC_LEARN_MOD
         {BASE_IF_PHY_MAC_LEARN_MODE_HW, BASE_IF_MAC_LEARN_MODE_HW},
         {BASE_IF_PHY_MAC_LEARN_MODE_CPU_TRAP, BASE_IF_MAC_LEARN_MODE_CPU_TRAP},
         {BASE_IF_PHY_MAC_LEARN_MODE_CPU_LOG, BASE_IF_MAC_LEARN_MODE_CPU_LOG},
+        {BASE_IF_PHY_MAC_LEARN_MODE_HW_DISABLE_ONLY, BASE_IF_MAC_LEARN_MODE_HW_DISABLE_ONLY},
     };
 
     BASE_IF_MAC_LEARN_MODE_t mode;
@@ -174,6 +189,7 @@ static BASE_IF_PHY_MAC_LEARN_MODE_t nas_ndi_learn_mode (BASE_IF_MAC_LEARN_MODE_t
         {BASE_IF_MAC_LEARN_MODE_HW, BASE_IF_PHY_MAC_LEARN_MODE_HW},
         {BASE_IF_MAC_LEARN_MODE_CPU_TRAP, BASE_IF_PHY_MAC_LEARN_MODE_CPU_TRAP},
         {BASE_IF_MAC_LEARN_MODE_CPU_LOG, BASE_IF_PHY_MAC_LEARN_MODE_CPU_LOG},
+        {BASE_IF_MAC_LEARN_MODE_HW_DISABLE_ONLY, BASE_IF_PHY_MAC_LEARN_MODE_HW_DISABLE_ONLY},
     };
 
     BASE_IF_PHY_MAC_LEARN_MODE_t mode;
@@ -274,7 +290,7 @@ t_std_error nas_interface_utils_set_lag_mac_learn_mode(std::string intf_name, np
     NAS_INTERFACE *i_obj = nullptr;
     if((rc = ndi_set_lag_learn_mode(0, lag_id, learn_mode)) != STD_ERR_OK){
         EV_LOGGING(INTERFACE,ERR,"NAS-IF-REG","Failed to update MAC Learn mode to %d for "
-                        "npu %d lag_id %llx",mode,npu,lag_id);
+               "npu %d lag_id %llx",mode,npu,lag_id);
     }
 
     if((i_obj = nas_interface_map_obj_get(intf_name)) != nullptr){
@@ -426,6 +442,93 @@ t_std_error nas_interface_utils_os_vlan_intf_create_delete(const char *if_name, 
 
     return STD_ERR_OK;
 }
+
+/* Call when intf exists in OS and needs to be deleted from OS .
+ * Also intf cache needs will be updated with invalid ifindex
+ */
+
+t_std_error nas_interface_os_subintf_delete(std::string &intf_name, hal_vlan_id_t vlan_id,
+         std::string &parent, NAS_INTERFACE *intf_obj) {
+
+    /* Delete sub interface from kernel and interface ctrl block but leave it in interface cache */
+
+    if (intf_obj == nullptr) {
+        intf_obj = nas_interface_map_obj_get(intf_name);
+    }
+    if  (intf_obj == nullptr) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-SUB-INTF", "Failed to delete sub intf as it doesn't exist in cache %s",
+                      intf_name.c_str());
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    hal_ifindex_t if_index = intf_obj->get_ifindex();
+
+    if (if_index == NAS_IF_INDEX_INVALID) {
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN-SUB-INTF", "Failed to delete sub intf as it doesn't exist in kernel %s",
+                      intf_name.c_str());
+        return STD_ERR_OK;
+    }
+
+    if (nas_interface_utils_os_vlan_intf_create_delete(intf_name.c_str(), vlan_id, parent.c_str(),
+                                                    cps_api_oper_DELETE, &if_index) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-SUB-INTF", "Failed to delete sub intf in kernel %s",
+                      intf_name.c_str());
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    intf_obj->set_ifindex(NAS_IF_INDEX_INVALID);
+    if(!nas_intf_cntrl_blk_register(if_index,intf_name,nas_int_type_VLANSUB_INTF,false)){
+        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-SUB-INTF","Failed to register the vlan sub interface %s",
+                    intf_name.c_str());
+        return STD_ERR(INTERFACE,FAIL,0);
+    }
+    return STD_ERR_OK;
+}
+
+
+/* Create sub interface if ifindex is invalid , update in interface cache and interface ctrl block */
+
+t_std_error nas_interface_subintf_create(std::string &intf_name, hal_vlan_id_t vlan_id,
+         std::string &parent, hal_ifindex_t &if_index, NAS_INTERFACE *intf_obj) {
+
+    if (intf_obj == nullptr) {
+        intf_obj = nas_interface_map_obj_get(intf_name);
+    }
+    if  (intf_obj == nullptr) {
+        if (nas_interface_utils_os_vlan_intf_create_delete(intf_name.c_str(), vlan_id, parent.c_str(),
+                                                    cps_api_oper_CREATE, &if_index) != STD_ERR_OK) {
+            return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        if (nas_interface_utils_vlan_create(intf_name, if_index, vlan_id, parent) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR, "NAS-VLAN-SUB-INTF", " Failed to add interface %s: Already present  in the cache",
+                                intf_name.c_str());
+            return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        if(!nas_intf_cntrl_blk_register(if_index,intf_name,nas_int_type_VLANSUB_INTF,true)){
+            EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-SUB-INTF","Failed to register the vlan sub interface %s",
+                    intf_name.c_str());
+            return STD_ERR(INTERFACE,FAIL,0);
+        }
+
+    } else if (intf_obj->get_ifindex() == NAS_IF_INDEX_INVALID) {
+
+        EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN-SUB-INTF", "vlan id %d ,Subintf exist in intf cache but not in kernel %s", vlan_id, intf_name.c_str());
+        if (nas_interface_utils_os_vlan_intf_create_delete(intf_name.c_str(), vlan_id, parent.c_str(),
+                                                    cps_api_oper_CREATE, &if_index) != STD_ERR_OK) {
+            return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        /* Update cache and intf_ctrl_blk */
+        intf_obj->set_ifindex(if_index);
+        if(!nas_intf_cntrl_blk_register(if_index,intf_name,nas_int_type_VLANSUB_INTF,true)){
+            EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-SUB-INTF","Failed to register the vlan sub interface %s",
+                    intf_name.c_str());
+            return STD_ERR(INTERFACE,FAIL,0);
+        }
+
+    } else {
+       EV_LOGGING(INTERFACE,DEBUG,"NAS-VLAN-SUB-INTF", "Subintf alredy exist in the kernel %s", intf_name.c_str());
+    }
+    return STD_ERR_OK;
+}
+
 t_std_error nas_interface_vlan_subintf_create(std::string &intf_name, hal_vlan_id_t vlan_id, std::string &parent, bool in_os)
 {
     NAS_INTERFACE *intf_obj = nas_interface_map_obj_get(intf_name);
@@ -440,6 +543,12 @@ t_std_error nas_interface_vlan_subintf_create(std::string &intf_name, hal_vlan_i
                                                     cps_api_oper_CREATE, &if_index) != STD_ERR_OK) {
             return STD_ERR(INTERFACE, FAIL, 0);
         }
+        /*  register only if  created in the kernel since if_index is used as a key */
+        if(!nas_intf_cntrl_blk_register(if_index,intf_name,nas_int_type_VLANSUB_INTF,true)){
+            EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-SUB-INTF","Failed to register the vlan sub interface %s",
+                        intf_name.c_str());
+            return STD_ERR(INTERFACE,FAIL,0);
+        }
     }
     if (nas_interface_utils_vlan_create(intf_name, if_index, vlan_id, parent) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR, "NAS-INTF", " Failed to add interface %s: Already present  in the cache",
@@ -447,16 +556,114 @@ t_std_error nas_interface_vlan_subintf_create(std::string &intf_name, hal_vlan_i
         return STD_ERR(INTERFACE, FAIL, 0);
     }
 
-    if(!nas_intf_cntrl_blk_register(if_index,intf_name,nas_int_type_VLANSUB_INTF,true)){
+    nas_interface_cps_publish_event(intf_name,nas_int_type_VLANSUB_INTF,cps_api_oper_CREATE);
+
+    return STD_ERR_OK;
+}
+
+t_std_error nas_interface_os_vlan_subintf_create(std::string &intf_name, hal_vlan_id_t vlan_id)
+{
+    NAS_VLAN_INTERFACE *vlan_obj = dynamic_cast<NAS_VLAN_INTERFACE *> (nas_interface_map_obj_get(intf_name));
+    if (vlan_obj == nullptr) {
+        EV_LOGGING(INTERFACE,ERR, "NAS-INTF", " Failed to get interface %s: ",
+                                intf_name.c_str());
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+    std::string parent_name = vlan_obj->parent_name_get();
+    hal_ifindex_t if_index =NAS_IF_INDEX_INVALID;
+    if (nas_interface_utils_os_vlan_intf_create_delete(intf_name.c_str(), vlan_id, parent_name.c_str(),
+                                                cps_api_oper_CREATE, &if_index) != STD_ERR_OK) {
+        return STD_ERR(INTERFACE, FAIL, 0);
+    }
+
+    if(!nas_intf_cntrl_blk_register(if_index,intf_name.c_str(),nas_int_type_VLANSUB_INTF,true)){
         EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-SUB-INTF","Failed to register the vlan sub interface %s",
                     intf_name.c_str());
         return STD_ERR(INTERFACE,FAIL,0);
     }
 
-    nas_interface_cps_publish_event(intf_name,nas_int_type_VLANSUB_INTF,cps_api_oper_CREATE);
+    vlan_obj->set_ifindex(if_index);
+    vlan_obj->update_os_mtu();
 
     return STD_ERR_OK;
 }
+
+t_std_error nas_interface_os_vlan_subintf_list_create(intf_list_t & intf_list, hal_vlan_id_t vlan_id)
+
+{
+    std_mutex_simple_lock_guard lock(get_vlan_mutex());
+    for (auto intf_name : intf_list ) {
+
+        EV_LOGGING(INTERFACE,DEBUG, "NAS-INTF", " Create sub interface %s", intf_name.c_str());
+        nas_interface_os_vlan_subintf_create(intf_name,vlan_id);
+    }
+    return STD_ERR_OK;
+}
+
+/* Create all sub intf from the list */
+t_std_error nas_interface_create_subintfs(intf_list_t &intf_list)
+{
+
+   std_mutex_simple_lock_guard lock(get_vlan_mutex());
+   for (auto  intf_name : intf_list ) {
+       NAS_INTERFACE *intf_obj = nas_interface_map_obj_get(intf_name);
+       if (intf_obj == nullptr ) {
+           EV_LOGGING(INTERFACE,ERR, "NAS-INTF", " Sub intf doesn't exist in cache ",
+                                    intf_name.c_str());
+           return STD_ERR(INTERFACE, FAIL, 0);
+       }
+       NAS_VLAN_INTERFACE *vlan_obj =  dynamic_cast<NAS_VLAN_INTERFACE *>(intf_obj);
+       if (vlan_obj == nullptr) {
+           EV_LOGGING(INTERFACE,ERR, "NAS-INTF", " Failed to get intf %s: ",
+                                intf_name.c_str());
+           return STD_ERR(INTERFACE, FAIL, 0);
+       }
+       if (vlan_obj->get_ifindex() != NAS_IF_INDEX_INVALID) {
+           EV_LOGGING(INTERFACE,ERR, "NAS-INTF", " Sub intf is already created %s", intf_name.c_str());
+           return STD_ERR(INTERFACE, FAIL, 0);
+
+       }
+       std::string parent = vlan_obj->parent_name_get();
+       hal_vlan_id_t vlan_id = vlan_obj->vlan_id_get();
+       hal_ifindex_t idx = NAS_IF_INDEX_INVALID;
+       nas_interface_subintf_create(intf_name, vlan_id, parent, idx, intf_obj);
+   }
+
+    return STD_ERR_OK;
+}
+
+/* Delete all subint in the list from OS */
+
+t_std_error nas_interface_delete_subintfs(intf_list_t &intf_list)
+{
+
+   std_mutex_simple_lock_guard lock(get_vlan_mutex());
+   for (auto  intf_name : intf_list ) {
+       NAS_INTERFACE *intf_obj = nas_interface_map_obj_get(intf_name);
+       if (intf_obj == nullptr ) {
+           EV_LOGGING(INTERFACE,ERR, "NAS-INTF", " Sub intf doesn't exist in cache ",
+                                    intf_name.c_str());
+           return STD_ERR(INTERFACE, FAIL, 0);
+       }
+       NAS_VLAN_INTERFACE *vlan_obj =  dynamic_cast<NAS_VLAN_INTERFACE *>(intf_obj);
+       if (intf_obj == nullptr ) {
+           EV_LOGGING(INTERFACE,ERR, "NAS-INTF", " Sub intf doesn't exist in cache ",
+                                    intf_name.c_str());
+           return STD_ERR(INTERFACE, FAIL, 0);
+       }
+       if (vlan_obj->get_ifindex() == NAS_IF_INDEX_INVALID) {
+           EV_LOGGING(INTERFACE,DEBUG, "NAS-INTF", " Sub intf is already deleted in kernel %s", intf_name.c_str());
+           return STD_ERR_OK;
+
+       }
+       std::string parent = vlan_obj->parent_name_get();
+       hal_vlan_id_t vlan_id = vlan_obj->vlan_id_get();
+       nas_interface_os_subintf_delete(intf_name, vlan_id, parent, vlan_obj);
+   }
+   return STD_ERR_OK;
+
+}
+
 
 t_std_error nas_interface_vlan_subintf_list_create(intf_list_t & intf_list, hal_vlan_id_t vlan_id, bool in_os)
 {
@@ -483,41 +690,44 @@ t_std_error nas_interface_vlan_subintf_list_create(intf_list_t & intf_list, hal_
             parent = intf_name;
             intf_name = intf_name + "." + std::to_string(vlan_id);
         }
-        EV_LOGGING(INTERFACE,NOTICE, "NAS-INTF", " Create sub interface with parent %s", parent.c_str());
+        EV_LOGGING(INTERFACE,DEBUG, "NAS-INTF", " Create sub interface with parent %s", parent.c_str());
 
         nas_interface_vlan_subintf_create(intf_name,vlan_id,parent,in_os);
     }
     return STD_ERR_OK;
 }
-
 t_std_error nas_interface_vlan_subintf_delete(std::string &intf_name)
 {
-    NAS_INTERFACE *intf_obj = nas_interface_map_obj_get(intf_name);
-    if (intf_obj == nullptr) {
-        EV_LOGGING(INTERFACE,ERR, "NAS-INTF", " Failed to delete interface %s: Not present ",
+    NAS_VLAN_INTERFACE *vlan_intf_obj = dynamic_cast<NAS_VLAN_INTERFACE *> (nas_interface_map_obj_get(intf_name));
+    if (vlan_intf_obj == nullptr) {
+        EV_LOGGING(INTERFACE,ERR, "NAS-VLAN-SUB-INTF", " Failed to delete interface %s: Not present ",
                                 intf_name.c_str());
         return STD_ERR(INTERFACE, FAIL, 0);
     }
-    NAS_VLAN_INTERFACE *vlan_intf_obj =  dynamic_cast<NAS_VLAN_INTERFACE *>(intf_obj);
     hal_vlan_id_t vlan_id = vlan_intf_obj->vlan_id_get();
     std::string parent = vlan_intf_obj->parent_name_get();
-    if (nas_interface_utils_os_vlan_intf_create_delete(intf_name.c_str(), vlan_id, parent.c_str(),
+    if (vlan_intf_obj->get_ifindex() != NAS_IF_INDEX_INVALID) {
+        if (nas_interface_utils_os_vlan_intf_create_delete(intf_name.c_str(), vlan_id, parent.c_str(),
                                             cps_api_oper_DELETE,&vlan_intf_obj->if_index) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR, "NAS-INTF", " Failed to delete interface %s: in the kernel ", intf_name.c_str());
-        //  TODO it may not be created
-    }
+            EV_LOGGING(INTERFACE,ERR, "NAS-VLAN-SUB-INTF", " Failed to delete interface %s: in the kernel ", intf_name.c_str());
+            return STD_ERR(INTERFACE, FAIL, 0);
+            //  TODO it may not be created
+        }
 
-    if(!nas_intf_cntrl_blk_register(vlan_intf_obj->if_index,vlan_intf_obj->if_name,
+       if(!nas_intf_cntrl_blk_register(vlan_intf_obj->if_index,vlan_intf_obj->if_name,
                                     nas_int_type_VLANSUB_INTF,false)){
-        EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-SUB-INTF","Failed to de-register the vlan sub interface %s",
+           EV_LOGGING(INTERFACE,ERR,"NAS-VLAN-SUB-INTF","Failed to de-register the vlan sub interface %s",
                 vlan_intf_obj->if_name.c_str());
-        return STD_ERR(INTERFACE,FAIL,0);
+           return STD_ERR(INTERFACE, FAIL, 0);
+       }
+    } else {
+       EV_LOGGING(INTERFACE,DEBUG, "NAS-VLAN-SUB-INTF", "Sub Interface %s doesn't exist in kernel", vlan_intf_obj->if_name.c_str());
     }
 
     nas_interface_cps_publish_event(intf_name,nas_int_type_VLANSUB_INTF,cps_api_oper_DELETE);
 
     if (nas_interface_utils_vlan_delete(intf_name) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR, "NAS-INTF", " Failed to delete interface %s from cache",
+        EV_LOGGING(INTERFACE,ERR, "NAS-VLAN-SUB-INTF", " Failed to delete interface %s from cache",
                                 intf_name.c_str());
         return STD_ERR(INTERFACE, FAIL, 0);
     }
@@ -537,16 +747,11 @@ t_std_error nas_interface_vlan_subintf_list_delete(intf_list_t &list) {
 }
 
 static auto sub_intf_attr_fn = [](const std::string & intf_name, nas_com_id_value_t & val) -> t_std_error {
-    NAS_INTERFACE *obj = nullptr;
-    if(((obj = nas_interface_map_obj_get(intf_name)) == nullptr)){
-        EV_LOGGING(INTERFACE,ERR,"SUB-INTF-ATTR-SET","No Interface %s exsist in the map",intf_name.c_str());
-        return STD_ERR(INTERFACE,PARAM,0);
-    }
 
-    NAS_VLAN_INTERFACE *vlan_obj = dynamic_cast<NAS_VLAN_INTERFACE *>(obj);
-    if(!vlan_obj){
-        EV_LOGGING(INTERFACE,ERR,"SUB-INTF-ATTR-SET","Failed to typecast %s to vlan interface obejct",intf_name.c_str());
-        return STD_ERR(INTERFACE,FAIL,0);
+    NAS_VLAN_INTERFACE *vlan_obj = dynamic_cast<NAS_VLAN_INTERFACE *> (nas_interface_map_obj_get(intf_name));
+    if (vlan_obj == nullptr) {
+        EV_LOGGING(INTERFACE,ERR,"SUB-INTF-ATTR-SET","No Interface %s exists in the map",intf_name.c_str());
+        return STD_ERR(INTERFACE,PARAM,0);
     }
 
     if (!vlan_obj->nas_is_1d_br_member()) {
@@ -720,4 +925,61 @@ t_std_error nas_interface_util_mgmt_duplex_set (std::string intf_name, BASE_CMN_
         mgmt_intf->set_duplex(dp);
     } while (0);
     return rc;
+}
+
+t_std_error nas_interface_util_bridge_name_set (std::string & intf_name, std::string &br_name)
+{
+    t_std_error rc = STD_ERR_OK;
+    NAS_INTERFACE *intf_obj = nas_interface_map_obj_get(intf_name);
+    if (intf_obj != nullptr) {
+        intf_obj->set_bridge_name(br_name);
+    } else {
+        EV_LOGGING(INTERFACE,ERR,"BRIDGE-SET", "Setting bridge name (%s) for interface (%s) failed",
+                br_name.c_str(), intf_name.c_str());
+        rc = STD_ERR(INTERFACE, FAIL, 0);
+    }
+
+    return rc;
+}
+
+t_std_error nas_interface_util_bridge_name_clear (std::string & intf_name)
+{
+    t_std_error rc = STD_ERR_OK;
+    NAS_INTERFACE *intf_obj = nas_interface_map_obj_get(intf_name);
+    if (intf_obj != nullptr) {
+        intf_obj->clear_bridge_name();
+    } else {
+        EV_LOGGING(INTERFACE,ERR,"BRIDGE-SET", "Clearing bridge name for interface (%s) failed",
+                intf_name.c_str());
+        rc = STD_ERR(INTERFACE, FAIL, 0);
+    }
+
+    return rc;
+}
+/* Check for an interface in intf_ctrl_blk , only for subint /vlan type it can fail to exist in intf_ctrl_blk
+ * In that case check  in interface cache
+ */
+t_std_error nas_get_int_name_type_frm_cache(const char *name, nas_int_type_t *type) {
+
+
+    if (nas_get_int_name_type(name, type) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,DEBUG, "NAS-BRIDGE", " Failed to get the member type in intf ctrl blk %s ", name);
+        NAS_INTERFACE *intf_obj = nas_interface_map_obj_get(name);
+        if (intf_obj == nullptr) {
+            EV_LOGGING(INTERFACE,ERR, "NAS-INTF", " Failed to get interface in intf_ctr_blk and intf cache %s",
+                                name);
+            return STD_ERR(INTERFACE, FAIL, 0);
+        }
+        if (intf_obj->if_type ==  nas_int_type_VLANSUB_INTF) {
+            *(type) = nas_int_type_VLANSUB_INTF;
+        }  else if  (intf_obj->if_type ==  nas_int_type_VXLAN) {
+            *(type) = nas_int_type_VXLAN;
+        } else {
+            EV_LOGGING(INTERFACE,ERR, "NAS-INTF", "Failed to get interface in intf_ctr_blk  %s, in cache type is not subint or vxlan type",
+                                name);
+            return STD_ERR(INTERFACE, FAIL, 0);
+        }
+
+    }
+    return STD_ERR_OK;
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -75,11 +75,11 @@ def __add_remote_endpoints(vtep_name, remote_endpoints):
     rlist = {}
     for src_ip in remote_endpoints:
         remote_endpoint = remote_endpoints[src_ip]
-        if dn_base_br_tool.add_learnt_mac_to_vtep_fdb(vtep_name, src_ip, \
-                                                      remote_endpoint.addr_family, \
-                                                      remote_endpoint.mac_addr) is False:
-            nas_if.log_err("Failed to add remote endpoints " + str(src_ip) + " to VTEP Interface " + str(vtep_name))
-            return False, rlist
+        if remote_endpoint.flooding_enabled is 1:
+            if dn_base_br_tool.add_learnt_mac_to_vtep_fdb(vtep_name, src_ip, \
+                                                          remote_endpoint.addr_family, \
+                                                          remote_endpoint.mac_addr) is False:
+                nas_if.log_err("Failed to add remote endpoints " + str(src_ip) + " to VTEP Interface " + str(vtep_name))
         rlist[src_ip] = remote_endpoints[src_ip]
         nas_if.log_info("Successfully added remote endpoint %s to Bridge Interface" % (str(src_ip)))
     return True, rlist
@@ -92,8 +92,7 @@ def __remove_remote_endpoints(vtep_name, remote_endpoints):
         if dn_base_br_tool.del_learnt_mac_from_vtep_fdb(vtep_name, src_ip, \
                                                         remote_endpoint.addr_family, \
                                                         remote_endpoint.mac_addr) is False:
-            nas_if.log_err("Failed to remove remote endpoints " + str(src_ip) + " to VTEP Interface " + str(vtep_name))
-            return False, rlist
+            nas_if.log_info("Failed to remove remote endpoints " + str(src_ip) + " to VTEP Interface " + str(vtep_name))
         rlist[src_ip] = remote_endpoints[src_ip]
         nas_if.log_info("Successfully removed remote endpoint %s to Bridge Interface" % (str(src_ip)))
     return True, rlist
@@ -167,8 +166,12 @@ def handle_vtep_intf(cps_obj, params):
     if op is None:
         return False
 
+
     if not use_linux_path:
-        return _send_obj_to_base(cps_obj,op)
+        if _send_obj_to_base(cps_obj,op) is False:
+            nas_if.log_err("BASE  %s request for vxlan failed" % (str(op)))
+            return False
+        return True
 
     cfg_obj = if_vtep_config.create(cps_obj)
     if cfg_obj is None:

@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -41,21 +41,27 @@ def create_interface(obj):
 
 if __name__ == '__main__':
 
-    while cps.enabled(nas_comm.yang.get_tbl('keys_id')['fp_key']) == False:
-        nas_if.log_err('fetch front panel port info  not ready ')
-        time.sleep(1) #in seconds
-    front_panel_ports = nas_if.FpPortCache()
-    if front_panel_ports.len() == 0:
-        nas_if.log_err('front panel port info  not present')
-
     while cps.enabled(nas_comm.yang.get_tbl('keys_id')['physical_key']) == False:
         nas_if.log_err('physical port info  not ready ')
         time.sleep(1) #in seconds
+
     port_cache = nas_if.PhyPortCache()
     if port_cache.len() ==0:
         nas_if.log_err('physical port info  not present')
 
+    while cps.enabled(nas_comm.yang.get_tbl('keys_id')['fp_key']) == False:
+        nas_if.log_err('fetch front panel port info  not ready ')
+        time.sleep(1) #in seconds
+
+    front_panel_ports = nas_if.FpPortCache()
+    if front_panel_ports.len() == 0:
+        nas_if.log_err('front panel port info  not present')
+
     if_cache = nas_if.IfCache()
+
+    while cps.enabled(nas_comm.yang.get_tbl('keys_id')['set_intf_key']) == False: 
+        nas_if.log_err('Logical Interface handler not ready')
+        time.sleep(1)
 
     # walk through the list of physical ports
     for port in port_cache.get_port_list():

@@ -1,6 +1,6 @@
 
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -19,6 +19,7 @@
  * filename: nas_interface_1d_bridge.cpp
  */
 
+#include "dell-base-if.h"
 #include "bridge/nas_interface_bridge.h"
 #include "bridge/nas_interface_1d_bridge.h"
 #include "interface/nas_interface_vlan.h"
@@ -62,39 +63,17 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_l2mc_create(){
     t_std_error rc = STD_ERR_OK;
 
     /*  Create L2 MC groups add add flood control on bridge */
-    if ((rc = ndi_l2mc_group_create(npu_id, &uc_l2mc_group_id)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to create unicast L2MC group for %s",
+    if ((rc = ndi_l2mc_group_create(npu_id, &l2mc_group_id)) != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to create  L2MC group for %s",
                   bridge_name.c_str());
         return rc;
     }
-
-    if ((rc = ndi_l2mc_group_create(npu_id, &mc_l2mc_group_id)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to create multicast L2MC group for %s",
-                  bridge_name.c_str());
-        return rc;
-    }
-
-    if ((rc = ndi_flood_control_1d_bridge(npu_id, bridge_id, uc_l2mc_group_id,
-                                NDI_BRIDGE_PKT_UNICAST, true)) != STD_ERR_OK) {
+    if ((rc = ndi_flood_control_1d_bridge(npu_id, bridge_id, l2mc_group_id,
+                                NDI_BRIDGE_PKT_ALL, true)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to set L2MC group %llu and "
-                "unicast flooding on bridge %s",uc_l2mc_group_id, bridge_name.c_str());
+                "unicast flooding on bridge %s",l2mc_group_id, bridge_name.c_str());
         return rc;
     }
-
-    if ((rc = ndi_flood_control_1d_bridge(npu_id, bridge_id, mc_l2mc_group_id,
-                                NDI_BRIDGE_PKT_MULTICAST, true)) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to set L2MC group %llu and "
-                    "multicast flooding on bridge %s",mc_l2mc_group_id, bridge_name.c_str());
-        return rc;
-    }
-
-    if ((rc = ndi_flood_control_1d_bridge(npu_id, bridge_id, mc_l2mc_group_id,
-                                NDI_BRIDGE_PKT_BROADCAST, true)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to set L2MC group %llu and "
-                "broadcast flooding on bridge %s",mc_l2mc_group_id, bridge_name.c_str());
-        return rc;
-    }
-
     return rc;
 }
 
@@ -125,35 +104,15 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_l2mc_delete(){
     t_std_error rc = STD_ERR_OK;
 
     /* Delete L2 MC group   */
-    if ((rc = ndi_flood_control_1d_bridge(npu_id, bridge_id, uc_l2mc_group_id,
-                                    NDI_BRIDGE_PKT_UNICAST, false)) != STD_ERR_OK) {
+    if ((rc = ndi_flood_control_1d_bridge(npu_id, bridge_id, l2mc_group_id,
+                                    NDI_BRIDGE_PKT_ALL, false)) != STD_ERR_OK) {
         EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to remove L2MC group %llu and "
-                    "unicast flooding on bridge %s",uc_l2mc_group_id, bridge_name.c_str());
+                    "unicast flooding on bridge %s",l2mc_group_id, bridge_name.c_str());
         return rc;
     }
 
-    if ((rc = ndi_flood_control_1d_bridge(npu_id, bridge_id, mc_l2mc_group_id,
-                                NDI_BRIDGE_PKT_MULTICAST, false)) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to remove L2MC group %llu and "
-                    "multicast flooding on bridge %s",mc_l2mc_group_id, bridge_name.c_str());
-        return rc;
-    }
-
-    if ((rc = ndi_flood_control_1d_bridge(npu_id, bridge_id, mc_l2mc_group_id,
-                                NDI_BRIDGE_PKT_BROADCAST, false)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to remove L2MC group %llu and "
-                "broadcast flooding on bridge %s",mc_l2mc_group_id, bridge_name.c_str());
-        return rc;
-    }
-
-    if ((rc =  ndi_l2mc_group_delete(npu_id, uc_l2mc_group_id)) != STD_ERR_OK) {
-        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to delete unicast L2MC group for %s",
-                   bridge_name.c_str());
-        return rc;
-    };
-
-    if ((rc =  ndi_l2mc_group_delete(npu_id, mc_l2mc_group_id)) != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to delete multicast L2MC group for %s",
+    if ((rc =  ndi_l2mc_group_delete(npu_id, l2mc_group_id)) != STD_ERR_OK) {
+            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to delete L2MC group for %s",
                        bridge_name.c_str());
         return rc;
     };
@@ -191,8 +150,8 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_npu_delete()
 
 /* TODO: this function args needs to be reduced */
 static t_std_error _nas_npu_add_remove_port_member( hal_ifindex_t ifx, ndi_port_t *port, nas_bridge_id_t bridge_id ,
-                                                   ndi_obj_id_t uc_l2mc_group_id,
-                                                   ndi_obj_id_t mc_l2mc_group_id, hal_vlan_id_t vlan_id,
+                                                   ndi_obj_id_t l2mc_group_id,
+                                                    hal_vlan_id_t vlan_id,
                                                    nas_port_mode_t port_mode,  bool add_member)
 {
 
@@ -232,32 +191,19 @@ static t_std_error _nas_npu_add_remove_port_member( hal_ifindex_t ifx, ndi_port_
                         port->npu_port, bridge_id);
             return rc;
         }
-        rc = ndi_l2mc_handle_subport_add (port->npu_id, uc_l2mc_group_id, port->npu_port, vlan_id, add_member);
+        rc = ndi_l2mc_handle_subport_add (port->npu_id, l2mc_group_id, port->npu_port, vlan_id, add_member);
         if (rc != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to add port %d to the to uc_l2mc group %x in the NPU",
-                        port->npu_port, uc_l2mc_group_id);
+            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to add port %d to the to l2mc group %x in the NPU",
+                        port->npu_port, l2mc_group_id);
             return rc;
         }
 
-
-        rc = ndi_l2mc_handle_subport_add (port->npu_id, mc_l2mc_group_id, port->npu_port, vlan_id, add_member);
-        if (rc != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to add port %d to the to mc_l2mc group %x in the NPU",
-                        port->npu_port, mc_l2mc_group_id);
-            return rc;
-        }
 
     } else {
-        rc = ndi_l2mc_handle_subport_add (port->npu_id, uc_l2mc_group_id, port->npu_port, vlan_id, add_member);
+        rc = ndi_l2mc_handle_subport_add (port->npu_id, l2mc_group_id, port->npu_port, vlan_id, add_member);
         if(rc != STD_ERR_OK){
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to delete port %d from the uc_l2mc group %x in the NPU",
-                        port->npu_port, uc_l2mc_group_id);
-            return rc;
-        }
-        rc = ndi_l2mc_handle_subport_add (port->npu_id, mc_l2mc_group_id, port->npu_port, vlan_id, add_member);
-        if(rc != STD_ERR_OK){
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to delete port %d from mc_l2mc group %x in the NPU",
-                        port->npu_port, mc_l2mc_group_id);
+            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to delete port %d from the l2mc group %x in the NPU",
+                        port->npu_port, l2mc_group_id);
             return rc;
         }
 
@@ -273,8 +219,8 @@ static t_std_error _nas_npu_add_remove_port_member( hal_ifindex_t ifx, ndi_port_
 
 /* TOD :REDUCE ARGS IN THIS FUNCT */
 static t_std_error _nas_npu_add_remove_lag_member(npu_id_t npu_id, ndi_obj_id_t lag_id,hal_ifindex_t ifx, nas_bridge_id_t bridge_id ,
-                                                  ndi_obj_id_t uc_l2mc_group_id,ndi_obj_id_t mc_l2mc_group_id,
-                                                  hal_vlan_id_t vlan_id, nas_port_mode_t port_mode, bool add_member)
+                                                  ndi_obj_id_t l2mc_group_id, hal_vlan_id_t vlan_id,
+                                                  nas_port_mode_t port_mode, bool add_member)
 {
 
     t_std_error rc = STD_ERR_OK;
@@ -311,31 +257,18 @@ static t_std_error _nas_npu_add_remove_lag_member(npu_id_t npu_id, ndi_obj_id_t 
                        lag_id, bridge_id);
             return rc;
         }
-        rc = ndi_l2mc_handle_lagport_add (npu_id, uc_l2mc_group_id, lag_id, vlan_id, add_member);
+        rc = ndi_l2mc_handle_lagport_add (npu_id, l2mc_group_id, lag_id, vlan_id, add_member);
         if (rc != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to add lag %lu to the to uc_l2mc group %x in the NPU",
-                        lag_id, uc_l2mc_group_id);
-            return rc;
-        }
-
-        rc = ndi_l2mc_handle_lagport_add (npu_id, mc_l2mc_group_id, lag_id, vlan_id, add_member);
-        if (rc != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to add lag %lu to the to mc_l2mc group %x in the NPU",
-                        lag_id, mc_l2mc_group_id);
+            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to add lag %lu to the to l2mc group %x in the NPU",
+                        lag_id, l2mc_group_id);
             return rc;
         }
 
     } else {
-        rc = ndi_l2mc_handle_lagport_add (npu_id, uc_l2mc_group_id,lag_id, vlan_id, add_member);
+        rc = ndi_l2mc_handle_lagport_add (npu_id, l2mc_group_id,lag_id, vlan_id, add_member);
         if(rc != STD_ERR_OK){
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to delete lag %lu from the uc_l2mc group %x in the NPU",
-                        lag_id, uc_l2mc_group_id);
-            return rc;
-        }
-        rc = ndi_l2mc_handle_lagport_add (npu_id, mc_l2mc_group_id,lag_id, vlan_id, add_member);
-        if(rc != STD_ERR_OK){
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to delete lag %lu from the mc_l2mc group %x in the NPU",
-                        lag_id, mc_l2mc_group_id);
+            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", " Failed to delete lag %lu from the l2mc group %x in the NPU",
+                        lag_id, l2mc_group_id);
             return rc;
         }
 
@@ -457,12 +390,16 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_npu_add_remove_member(std::string &mem_
         if (nas_intf_handle_intf_mode_change(intf_ctrl.if_index, new_intf_mode) == false) {
             EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Update to NAS-L3 about interface mode change failed(%s)", intf_ctrl.if_name);
         }
+        if (nas_intf_l3mc_intf_mode_change(intf_ctrl.if_index, new_intf_mode) == false) {
+            EV_LOGGING(INTERFACE, ERR, "NAS-BRIDGE", "L3 MC mode change RPC failed if_index(%d), mode(%d)",
+                    intf_ctrl.if_index, new_intf_mode);
+        }
     }
 
     if (intf_ctrl.int_type == nas_int_type_LAG) {
 
-        if((rc = _nas_npu_add_remove_lag_member(npu_id,intf_ctrl.lag_id, intf_ctrl.if_index, bridge_id,uc_l2mc_group_id,
-                mc_l2mc_group_id,vlan_id,port_mode,add_member)) != STD_ERR_OK){
+        if((rc = _nas_npu_add_remove_lag_member(npu_id,intf_ctrl.lag_id, intf_ctrl.if_index, bridge_id,l2mc_group_id,
+                vlan_id,port_mode,add_member)) != STD_ERR_OK){
             return rc;
         }
         /* subintf_attr set handled later */
@@ -479,7 +416,7 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_npu_add_remove_member(std::string &mem_
 
         // TODO replace the section with following call
         ndi_port_t _port = { npu_id, intf_ctrl.port_id};
-        if((rc = _nas_npu_add_remove_port_member(intf_ctrl.if_index, &_port, bridge_id_get(), uc_l2mc_group_id,mc_l2mc_group_id,
+        if((rc = _nas_npu_add_remove_port_member(intf_ctrl.if_index, &_port, bridge_id_get(), l2mc_group_id,
                                                   vlan_id, port_mode,  add_member)) != STD_ERR_OK){
             return rc;
         }
@@ -527,8 +464,21 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_add_remove_member(std::string & mem_nam
     if ((rc = nas_bridge_npu_add_remove_member(mem_name, mem_type, add)) != STD_ERR_OK) {
         nas_bridge_os_add_remove_member(mem_name, port_mode, !add);
         EV_LOGGING(INTERFACE,ERR,"INT-DB-GET","Failed to %s member %s to/from bridge %s",
-                            (add ? "add":"delete"), mem_name.c_str(), get_bridge_name());
+                            (add ? "add":"delete"), mem_name.c_str(), get_bridge_name().c_str());
         return rc;
+    }
+    if (port_mode == NAS_PORT_TAGGED) {
+        NAS_VLAN_INTERFACE * intf = dynamic_cast<NAS_VLAN_INTERFACE *>(nas_interface_map_obj_get(mem_name));
+        if(intf){
+            if((rc = intf->set_mtu(nas_bridge_get_mtu())) != STD_ERR_OK){
+                EV_LOGGING(INTERFACE, ERR ,"NAS-BRIDGE","Failed to set MTU for member %s", mem_name.c_str());
+            }
+        }
+    }
+    if (add == true) {
+        nas_interface_util_bridge_name_set(mem_name, bridge_name);
+    } else {
+        nas_interface_util_bridge_name_clear(mem_name);
     }
     return STD_ERR_OK;
 }
@@ -547,13 +497,29 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_add_remove_memberlist(memberlist_t & m_
     if (rc != STD_ERR_OK) {
         // IF any failure then rollback the added or removed members
         for (auto mem : processed_mem_list) {
-            if ((rc = nas_bridge_add_remove_member(mem, port_mode, !add)) != STD_ERR_OK) {
+            if (nas_bridge_add_remove_member(mem, port_mode, !add) != STD_ERR_OK) {
                 EV_LOGGING(INTERFACE,ERR,"INT-DB-GET","Failed to rollback member %s update", mem.c_str());
             }
         }
     }
     return rc;
 }
+
+bool NAS_DOT1D_BRIDGE::nas_add_sub_interface()
+{
+    create_type_t flg = get_create_flag();
+    if (flg == BOTH_MODEL || flg == INT_MOD_CREATE) {
+        EV_LOGGING(INTERFACE,DEBUG , "NAS-BRIDGE",
+           "1D bidge: Member  will  be added to br %s as mode is %d",
+             get_bridge_name().c_str(), flg);
+        return true;
+    }
+    EV_LOGGING(INTERFACE,DEBUG , "NAS-BRIDGE",
+        "1D bridgei: Member will not be added to br %s as mode is %d",
+        get_bridge_name().c_str(), flg);
+    return false;
+}
+
 t_std_error NAS_DOT1D_BRIDGE:: nas_bridge_associate_npu_port(std::string &mem_name, ndi_port_t *port, nas_port_mode_t port_mode, bool associate)
 {
 
@@ -579,7 +545,7 @@ t_std_error NAS_DOT1D_BRIDGE:: nas_bridge_associate_npu_port(std::string &mem_na
 
     }
     /* TODO : this association code path needs to be tested */
-    rc =  _nas_npu_add_remove_port_member(if_index,port, bridge_id_get(), uc_l2mc_group_id, mc_l2mc_group_id,
+    rc =  _nas_npu_add_remove_port_member(if_index,port, bridge_id_get(), l2mc_group_id,
                                             vlan_id, port_mode,  associate);
     if (rc == STD_ERR_OK) {
         nas_bridge_set_tag_untag_drop(if_index, port);
@@ -615,6 +581,8 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_npu_add_vxlan_member(std::string mem_na
      **/
     /*  Update the memberlist */
     rc = nas_bridge_add_vxlan_member_in_list(mem_name);
+    // Now set MTU on the bridge and VXLAN interface in the kernel
+    NAS_BRIDGE::nas_bridge_set_mtu();
     vxlan_obj->bridge_name = bridge_name;
     return rc;
 }
@@ -655,7 +623,7 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_add_remote_endpoint(BASE_CMN_VNI_t vni,
     char buff[HAL_INET6_TEXT_LEN + 1];
     std_ip_to_string((const hal_ip_addr_t*) &rm_endpoint->remote_ip, buff, HAL_INET6_TEXT_LEN);
 
-    EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Add  remote endpoint :br %s, ip %s", bridge_name.c_str(), buff);
+    EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Add  remote endpoint :br %s, remote ip-address %s", bridge_name.c_str(), buff);
     if (g_vrf_id == 0) {
         if (nas_get_vrf_obj_id_from_vrf_name(NAS_DEFAULT_VRF_NAME, &g_vrf_id) != STD_ERR_OK) {
             EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to get vrf OID from VRF name %s", bridge_name.c_str());
@@ -697,23 +665,13 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_add_remote_endpoint(BASE_CMN_VNI_t vni,
         EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to add remote endpoint to the bridge %s", bridge_name.c_str());
         return rc;
     }
-    if (rm_endpoint->uc_flooding_enabled) {
-        rc =  ndi_l2mc_handle_tunnel_member(npu_id, uc_l2mc_group_id, rm_endpoint->tunnel_id, &(rm_endpoint->remote_ip), true);
+    if (rm_endpoint->flooding_enabled) {
+        rc =  ndi_l2mc_handle_tunnel_member(npu_id, l2mc_group_id, rm_endpoint->tunnel_id, &(rm_endpoint->remote_ip), true);
         if (rc != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to add remote endpoint to the uc_l2mc group %s", bridge_name.c_str());
+            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to add remote endpoint to the l2mc group %s", bridge_name.c_str());
             return rc;
         }
-        uc_l2mc_members.insert(rm_endpoint->tunnel_id);
-
-    }
-
-    if (rm_endpoint->mc_flooding_enabled && rm_endpoint->bc_flooding_enabled ) {
-        rc =  ndi_l2mc_handle_tunnel_member(npu_id, mc_l2mc_group_id, rm_endpoint->tunnel_id, &(rm_endpoint->remote_ip), true);
-        if (rc != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to add remote endpoint to the mc_l2mc group %s", bridge_name.c_str());
-            return rc;
-        }
-        mc_l2mc_members.insert(rm_endpoint->tunnel_id);
+        l2mc_members.insert(rm_endpoint->tunnel_id);
     }
 
     if (rm_endpoint->mac_learn_mode) {
@@ -731,7 +689,7 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_add_remote_endpoint(BASE_CMN_VNI_t vni,
 t_std_error NAS_DOT1D_BRIDGE::nas_bridge_set_flooding(remote_endpoint_t *rm_endpoint)
 {
     t_std_error rc = STD_ERR_OK;
-    if ((uc_l2mc_group_id == INVALID_L2MC_GROUP_ID) || (mc_l2mc_group_id == INVALID_L2MC_GROUP_ID) ||
+    if ((l2mc_group_id == INVALID_L2MC_GROUP_ID) ||
          (rm_endpoint->tunnel_id == NAS_INVALID_TUNNEL_ID)) {
         EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to add remote endpoint: l2mc or tunnel id invalid %s",
                                    bridge_name.c_str());
@@ -740,22 +698,15 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_set_flooding(remote_endpoint_t *rm_endp
     EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Set flooding  to %d in NDI for bridge %s",
                                  rm_endpoint->flooding_enabled, bridge_name.c_str());
 
-    if (rm_endpoint->uc_flooding_enabled) {
-        rc =  ndi_l2mc_handle_tunnel_member(npu_id, uc_l2mc_group_id, rm_endpoint->tunnel_id, &(rm_endpoint->remote_ip), true);
-        if (rc != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to add remote endpoint to the uc_l2mc group %s", bridge_name.c_str());
-            return rc;
-        }
-        uc_l2mc_members.insert(rm_endpoint->tunnel_id);
+    rc =  ndi_l2mc_handle_tunnel_member(npu_id, l2mc_group_id, rm_endpoint->tunnel_id, &(rm_endpoint->remote_ip), rm_endpoint->flooding_enabled);
+    if (rc != STD_ERR_OK) {
+        EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to add remote endpoint to the l2mc group %s", bridge_name.c_str());
+        return rc;
     }
-
-    if (rm_endpoint->mc_flooding_enabled && rm_endpoint->bc_flooding_enabled) {
-        rc =  ndi_l2mc_handle_tunnel_member(npu_id, mc_l2mc_group_id, rm_endpoint->tunnel_id, &(rm_endpoint->remote_ip), true);
-        if (rc != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to add remote endpoint to the mc_l2mc group %s", bridge_name.c_str());
-            return rc;
-        }
-        mc_l2mc_members.insert(rm_endpoint->tunnel_id);
+    if (rm_endpoint->flooding_enabled) {
+        l2mc_members.insert(rm_endpoint->tunnel_id);
+    } else {
+        l2mc_members.erase(rm_endpoint->tunnel_id);
     }
 
     return rc;
@@ -765,29 +716,18 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_set_flooding(remote_endpoint_t *rm_endp
 t_std_error NAS_DOT1D_BRIDGE::nas_bridge_remove_remote_endpoint(BASE_CMN_VNI_t vni, hal_ip_addr_t local_ip, remote_endpoint_t *rm_endpoint)
 {
     t_std_error rc = STD_ERR_OK;
-    EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Remove remote endpoint to the l2mc group %s", bridge_name.c_str());
     if (rm_endpoint == nullptr)  { return STD_ERR(INTERFACE, FAIL, 0); }
 
     char buff[HAL_INET6_TEXT_LEN + 1];
     std_ip_to_string((const hal_ip_addr_t*) &rm_endpoint->remote_ip, buff, HAL_INET6_TEXT_LEN);
     EV_LOGGING(INTERFACE,DEBUG,"NAS-BRIDGE", "Remove remote endpoint :br %s, remote ip-address %s", bridge_name.c_str(), buff);
-
-    if(uc_l2mc_members.find(rm_endpoint->tunnel_id) != uc_l2mc_members.end()){
-        rc =  ndi_l2mc_handle_tunnel_member(npu_id, uc_l2mc_group_id, rm_endpoint->tunnel_id, NULL, false);
+    if(l2mc_members.find(rm_endpoint->tunnel_id) != l2mc_members.end()){
+        rc =  ndi_l2mc_handle_tunnel_member(npu_id, l2mc_group_id, rm_endpoint->tunnel_id, NULL, false);
         if (rc != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to remove remote endpoint to the uc_l2mc group %s", bridge_name.c_str());
+            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to remove remote endpoint to the l2mc group %s", bridge_name.c_str());
             return rc;
         }
-        uc_l2mc_members.erase(rm_endpoint->tunnel_id);
-    }
-
-    if(mc_l2mc_members.find(rm_endpoint->tunnel_id) != mc_l2mc_members.end()){
-        rc =  ndi_l2mc_handle_tunnel_member(npu_id, mc_l2mc_group_id, rm_endpoint->tunnel_id, NULL, false);
-        if (rc != STD_ERR_OK) {
-            EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Failed to remove remote endpoint to the mc_l2mc group %s", bridge_name.c_str());
-            return rc;
-        }
-        mc_l2mc_members.erase(rm_endpoint->tunnel_id);
+        l2mc_members.erase(rm_endpoint->tunnel_id);
     }
 
     nas_com_id_value_t tunnel_params[2]; /*  VNI, local IP, Remove IP, */
@@ -862,6 +802,8 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_intf_cntrl_block_register(hal_intf_reg_
     safestrncpy(details.if_name,bridge_name.c_str(), sizeof(details.if_name));
     details.bridge_id = bridge_id;
     details.int_type = nas_int_type_DOT1D_BRIDGE;
+    std::string intf_mac = get_bridge_mac();
+    safestrncpy(details.mac_addr,intf_mac.c_str(), sizeof(details.mac_addr));
 
     if ((op == HAL_INTF_OP_DEREG) && ((dn_hal_get_interface_info(&details)) != STD_ERR_OK)) {
         EV_LOGGING(INTERFACE,ERR,"NAS-BRIDGE", "Bridge %d %s Not registered with ifCntrl ",
@@ -937,5 +879,24 @@ t_std_error NAS_DOT1D_BRIDGE::nas_bridge_set_learning_disable(bool disable) {
     /*
      * To add code to set learning disable in ndi
      */
+    nas_bridge_com_set_learning_disable(disable);
     return STD_ERR_OK;
 }
+
+t_std_error NAS_DOT1D_BRIDGE::nas_bridge_set_mtu(cps_api_object_t obj, cps_api_object_it_t  & it)
+{
+
+    uint32_t mtu = cps_api_object_attr_data_u32(it.attr);
+    t_std_error rc;
+
+    for(auto member : _vxlan_members){
+        NAS_VXLAN_INTERFACE * intf = dynamic_cast<NAS_VXLAN_INTERFACE *>(nas_interface_map_obj_get(member));
+        if(intf){
+            if((rc = intf->set_mtu(mtu))!=STD_ERR_OK){
+                EV_LOGGING(INTERFACE, ERR ,"NAS-BRIDGE","Failed to set MTU for vxlan member %s", member.c_str());
+            }
+        }
+    }
+    return (NAS_BRIDGE::nas_bridge_set_mtu(obj, it));
+}
+

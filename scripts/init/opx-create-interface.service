@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may
 # not use this file except in compliance with the License. You may obtain
@@ -17,15 +17,15 @@
 [Unit]
 Description=This service is to create all interface during system initiation
 ConditionPathExists=!/etc/opx/nas_if_nocreate
-After=opx-cps.service opx-nas.service
-Requires=opx-cps.service opx-nas.service
+After=opx-cps.service opx-nas.service opx-interface-manager.service
+Requires=opx-cps.service opx-nas.service opx-interface-manager.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 EnvironmentFile=/etc/opx/opx-environment
 ExecStart=/usr/bin/python -u /usr/bin/base_nas_create_interface.py
-ExecStartPost=/bin/sh -c "/usr/bin/python -u /usr/bin/base_nas_fanout_init.py && /usr/bin/network_restart.sh"
+ExecStartPost=/bin/sh -c "/bin/sh -c /usr/bin/base_nas_fanout_init.sh && /usr/bin/network_restart.sh"
 TimeoutStartSec=360
 
 [Install]

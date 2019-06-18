@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018 Dell Inc.
+ * Copyright (c) 2019 Dell Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License. You may obtain
@@ -60,14 +60,6 @@
 #define PKT_DBG_DIR_BOTH   (PKT_DBG_DIR_IN | PKT_DBG_DIR_OUT)
 #define PKT_DBG_DUMP(x)    ((x & PKT_DBG_DIR_IN) || (x & PKT_DBG_DIR_OUT))
 
-#define PKT_DEBUG(arg...)\
-    do {\
-        if (!pkt_debug) break;\
-        printf("[PKT_IO]: %s:%d: ",__FUNCTION__, __LINE__);\
-        printf(arg);\
-        printf("\r\n");\
-    } while (0)
-
 /*
  * Global variables
  */
@@ -77,6 +69,7 @@ static uint64_t sample_count=0;
 static uint64_t packets_txed; // cumulative packet txed
 static uint64_t packets_txed_to_pipeline_bypass; // packet txed directly to egress bypassing the pipeline
 static uint64_t packets_txed_to_pipeline_lookup; // packet txed to ingress pipeline
+static uint64_t packets_txed_to_pipeline_lookup_hybrid; // packet txed to ingress pipeline hybrid
 static uint64_t packets_rxed;
 static uint8_t  pkt_buf[MAX_PKT_LEN];
 
@@ -119,7 +112,7 @@ static void _sflow_sock_init ()
     t_std_error rc = std_socket_create (e_std_sock_INET4, e_std_sock_type_DGRAM,
                                         0, NULL, &sflow_sock_fd);
     if (rc != STD_ERR_OK) {
-        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "SFlow socket Error %d", rc);
+        EV_LOGGING (NAS_PKT_IO, ERR, "SFlow", "socket Error %d", rc);
     }
     /* Set the SFlow pkt dest addr from default values. Will be made configurable in future */
 #define SFLOW_PKT_DEF_IP    "127.0.0.1"
@@ -127,7 +120,7 @@ static void _sflow_sock_init ()
     rc = std_sock_addr_from_ip_str (e_std_sock_INET4, SFLOW_PKT_DEF_IP,
                                     SFLOW_PKT_DEF_PORT, &sflow_sock_dest);
     if (rc != STD_ERR_OK) {
-        EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "SFlow socket address creation error %d", rc);
+        EV_LOGGING (NAS_PKT_IO, ERR, "SFlow", "socket address creation error %d", rc);
     }
 }
 
@@ -137,19 +130,19 @@ static t_std_error _sflow_pkt_hdl (uint8_t *pkt, uint32_t pkt_len,
     hal_ifindex_t rx_ifindex,tx_ifindex = 0;
 
     if (!nas_int_port_ifindex (p_attr->npu_id, p_attr->rx_port, &rx_ifindex)) {
-        EV_LOGGING (NAS_PKT_IO, DEBUG, "PKT-IO",
+        EV_LOGGING (NAS_PKT_IO, DEBUG, "SFlow",
                  "Interface invalid - no matching port %d:%d",
-                p_attr->npu_id, p_attr->rx_port);
+                 p_attr->npu_id, p_attr->rx_port);
         return STD_ERR (INTERFACE, PARAM, 0);
     }
 
     if (!nas_int_port_ifindex (p_attr->npu_id, p_attr->tx_port, &tx_ifindex)) {
-        EV_LOGGING (NAS_PKT_IO, DEBUG, "PKT-IO",
+        EV_LOGGING (NAS_PKT_IO, DEBUG, "SFlow",
                  "Interface invalid - no matching port %d:%d",
                 p_attr->npu_id, p_attr->tx_port);
     }
 
-    EV_LOGGING (NAS_PKT_IO, DEBUG,"PKT-IO","[RX] SFLOW Pkt received - length %d npu %d rx_ifindex %d"
+    EV_LOGGING (NAS_PKT_IO, DEBUG,"SFlow","Pkt received - length %d npu %d rx_ifindex %d"
               " tx_ifindex %d sample count %lu\r\n",
               pkt_len, p_attr->npu_id, rx_ifindex,tx_ifindex,sample_count);
 
@@ -185,8 +178,9 @@ static t_std_error _sflow_pkt_hdl (uint8_t *pkt, uint32_t pkt_len,
     int n = std_socket_op (std_socket_transit_o_WRITE, sflow_sock_fd, &sock_msg,
             std_socket_transit_f_NONE, 0, &rc);
     if (n < 0) {
-        PKT_DEBUG("[RX] ForwardMsg to UDP socket %d FAILED - Error %d code (%d)\r\n",
-                  sflow_sock_fd, rc, STD_ERR_EXT_PRIV(rc));
+        EV_LOGGING (NAS_PKT_IO, ERR, "SFlow",
+                "ForwardMsg to UDP socket %d FAILED - Error %d code (%d)\r\n",
+                sflow_sock_fd, rc, STD_ERR_EXT_PRIV(rc));
     }
 
     return rc;
@@ -486,7 +480,10 @@ static t_std_error dn_hal_packet_rx(uint8_t *pkt, uint32_t len, ndi_packet_attr_
 {
     ++packets_rxed;
     if (PKT_DBG_DUMP(pkt_debug)) hal_packet_io_dump(pkt, len, PKT_DBG_DIR_IN);
-    PKT_DEBUG("[RX] on front npu %d port %d len %d",p_attr->npu_id,p_attr->rx_port,len);
+
+    EV_LOGGING(NAS_PKT_IO, INFO, "RX",
+            "On npu %d port %d len %d, rx count:%d",
+            p_attr->npu_id, p_attr->rx_port, len, packets_rxed);
 
     if (p_attr->trap_id == NDI_PACKET_TRAP_ID_SAMPLEPACKET)
         return _sflow_pkt_hdl (pkt, len, p_attr);
@@ -497,7 +494,14 @@ static t_std_error dn_hal_packet_rx(uint8_t *pkt, uint32_t len, ndi_packet_attr_
     }
 
     t_std_error err = hal_virtual_interface_send(p_attr->npu_id,p_attr->rx_port,0,pkt,len);
-    PKT_DEBUG("[RX] Data written to fd %d", err);
+
+    if (err != STD_ERR_OK)
+        EV_LOGGING(NAS_PKT_IO, ERR, "RX",
+                "Failed to write data to fd %d", err);
+    else
+        EV_LOGGING(NAS_PKT_IO, DEBUG, "RX",
+                "Data written to fd");
+
     return (STD_ERR_OK);
 }
 
@@ -521,10 +525,15 @@ static void dn_hal_packet_tx(npu_id_t npu, npu_port_t port, void  *pkt, uint32_t
     }
 
     if (ndi_packet_tx(pkt, len, &attr) != STD_ERR_OK) {
-        PKT_DEBUG("[TX] Pkt txmission FAILED \r\n");
+        EV_LOGGING(NAS_PKT_IO, ERR, "TX",
+                "Pkt txmission FAILED for npu:%d, port:%d, len:%d",
+                npu, port, len);
 
     } else {
-        PKT_DEBUG("[TX] Pkt txmission OK for npu %d port %d len %d\r\n",npu,port,len);
+        EV_LOGGING(NAS_PKT_IO, INFO, "TX",
+                "Pkt txmission OK for npu %d port %d len %d, "
+                "tx count:%d",
+                npu, port, len, packets_txed_to_pipeline_bypass);
     }
 }
 
@@ -550,9 +559,47 @@ void dn_hal_packet_tx_to_ingress_pipeline (void  *pkt, uint32_t len)
     attr.tx_type = NDI_PACKET_TX_TYPE_PIPELINE_LOOKUP;
 
     if (ndi_packet_tx (pkt, len, &attr) != STD_ERR_OK) {
-        PKT_DEBUG("[TX] Pkt txmission to ingress pipeline FAILED \r\n");
+        EV_LOGGING(NAS_PKT_IO, ERR, "TX-INGRESS",
+                "Pkt txmission to ingress pipeline FAILED for npu:%d, len:%d",
+                npu, len);
     } else {
-        PKT_DEBUG("[TX] Pkt txmission to ingress pipeline OK for npu %d len %d\r\n",npu,len);
+        EV_LOGGING(NAS_PKT_IO, INFO, "TX-INGRESS",
+                "Pkt txmission to ingress pipeline OK for npu %d len %d, "
+                "tx-ingress-pipeline count:%d",
+                npu, len, packets_txed_to_pipeline_lookup);
+    }
+}
+
+void dn_hal_packet_tx_to_ingress_pipeline_hybrid (void  *pkt, uint32_t len, ndi_packet_tx_type_t tx_type, ndi_obj_id_t obj_id)
+{
+    npu_id_t npu;
+    ndi_packet_attr_t attr;
+
+    /* for now, npu-id for injecting packet to ingress pipeline hybrid
+     * is done using npu-id 0. Needs revisit when handling multi line card.
+     */
+    npu = 0;
+
+    ++packets_txed;
+    ++packets_txed_to_pipeline_lookup_hybrid;
+
+    if (PKT_DBG_DUMP(pkt_debug)) hal_packet_io_dump(pkt, len, PKT_DBG_DIR_OUT);
+
+    attr.npu_id  = npu;
+    attr.tx_port = 0;
+
+    attr.tx_type = tx_type;
+    attr.bridge_id = obj_id;
+
+    if (ndi_packet_tx (pkt, len, &attr) != STD_ERR_OK) {
+        EV_LOGGING(NAS_PKT_IO, ERR, "TX-INGRESS-HYBRID",
+                "Pkt txmission to ingress pipeline hybrid FAILED for npu:%d, len:%d",
+                npu, len);
+    } else {
+        EV_LOGGING(NAS_PKT_IO, INFO, "TX-INGRESS-HYBRID",
+                "Pkt txmission to ingress pipeline hybrid OK for npu %d len %d, "
+                "tx-ingress-pipeline-hybrid:%d",
+                npu, len, packets_txed_to_pipeline_lookup_hybrid);
     }
 }
 
@@ -589,6 +636,7 @@ t_std_error hal_packet_io_main(void) {
      */
     if (hal_virtual_interface_wait(dn_hal_packet_tx,
                                    dn_hal_packet_tx_to_ingress_pipeline,
+                                   dn_hal_packet_tx_to_ingress_pipeline_hybrid,
                                    pkt_buf,MAX_PKT_LEN)!=STD_ERR_OK) {
         EV_LOGGING (NAS_PKT_IO, ERR, "PKT-IO", "Error in initializing virtual interface packet tx");
     }

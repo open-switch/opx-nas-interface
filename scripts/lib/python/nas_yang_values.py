@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2018 Dell Inc.
+# Copyright (c) 2019 Dell Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the 'License'); you may
 # not use this file except in compliance with the License. You may obtain
@@ -89,7 +89,8 @@ class YangValues(object):
                     'base-if:bridge'          : 'bridge',
                     'base-if:management'      : 'management',
                     'base-if:macvlan'         : 'macvlan',
-                    'base-if:vlanSubInterface': 'vlanSubInterface'
+                    'base-if:vlanSubInterface': 'vlanSubInterface',
+                    'base-if:virtualNetwork'  : 'virtual-network'
                 },
 
                 'eth-to-fc-speed': {
@@ -206,20 +207,28 @@ class YangValues(object):
                     16: 32000   # 32 gfc
                 },
 
+                'yang-to-breakout-mode' : {
+                    1 : "disabled",
+                    2 : "4x1",
+                    3 : "2x1",
+                    4 : "1x1",
+                    5 : "8x2",
+                    6 : "2x2",
+                    7 : "4x4",
+                    8 : "2x4",
+                    9 : "4x2",
+                    10: "unknown",
+                    11: "no-breakout",
+                    12: "8x1"
+                },
+
                 'yang-autoneg-support' : {
                     'not-supported' : 1,
                     'on-supported'  : 2,
                     'off-supported' : 3,
                     'both-supported': 4
-                },
-
-                'breakout-allowed-speed' : {
-                    '1x1' : ('40g', '100g'),
-                    '2x1' : ('20g', '50g'),
-                    '4x1' : ('10g', '25g'),
-                    '4x4' : ('10g', '25g')
-					
                 }
+
             }
             yang_values.update(extra_values)
 
