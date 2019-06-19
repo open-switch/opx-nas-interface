@@ -17,129 +17,23 @@ import cps
 import cps_object
 import sys
 import nas_os_if_utils as nas_if
-import nas_front_panel_map as fp
-import nas_fp_port_utils as fp_utils
-import nas_port_group_utils as nas_pg
 import cps_utils
 import time
 import base_qos_init
 import nas_common_header as nas_comm
-import bytearray_utils
 import argparse
-from subprocess import call
+from collections import defaultdict
 
 _g_if_name = 'if/interfaces/interface/name'
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='fanout port-group or port', epilog='example:opx-config-fanout --pg_name port-group-1 --mode 4x4 --speed 10g')
-    parser.add_argument("--port",  help="ifindex or interface name")
-    parser.add_argument("--mode",  help="Set Port group config", required=True)
-    parser.add_argument("--speed",  help="Set Port group config", required=True)
-    parser.add_argument("--pg_name", help="Port Group Name")
 
-    args = parser.parse_args()
-
-    if args.pg_name and args.port:
-        print "Specify --port or --pg_name, but not both"
-        sys.exit(0)
-
-    pg_id = args.pg_name
-    br_mode = args.mode
-    if br_mode not in nas_comm.yang.get_tbl('yang-breakout-mode'):
-        print 'Invalid breakout mode %s' % br_mode
-        sys.exit(0)
-    port_speed = args.speed
-    if port_speed not in nas_comm.yang.get_tbl('yang-speed'):
-        print 'Invalid port speed %s' % port_speed
-        sys.exit(0)
-
-    allowed_speed = nas_comm.yang.get_value(br_mode, 'breakout-allowed-speed')
-    if port_speed not in allowed_speed:
-        print 'Invalid break mode and port speed combination'
-        sys.exit(0)
-    _speed = nas_comm.yang.get_value(port_speed, 'yang-speed')
-    _mode = nas_comm.yang.get_value(br_mode, 'yang-breakout-mode')
-
-    nas_fp_cache = nas_if.FpPortCache()
-    if_cache = nas_if.IfCache()
-    fp_utils.init()
-
-    if args.port:
-        if args.port.isdigit():
-            fp_port_id=int(args.port)
-        else:
-            front_port = nas_if.get_front_port_from_name(args.port)
-            if front_port == None:
-                print 'Failed to get front port id'
-                sys.exit(0)
-            fp_port_id=front_port[0]
-        #Check if port-group exists on platform, if yes exit and give pg_id
-        port = fp.find_front_panel_port(fp_port_id)
-        if port.is_pg_member() is True:
-            pg_id = port.get_port_group_id()
-            print "Port groups exist on platform, specify --pg_name"
-            print "For given port:",fp_port_id,",port-group is:",pg_id
-            sys.exit(0)
-        fp_obj = nas_fp_cache.get(fp_port_id)
-        if fp_obj is None:
-            print "Invalid front panel port specified..."
-            print "Please choose from one of the following..."
-            nas_fp_cache.print_keys()
-            sys.exit(0)
-        br_cap_list = fp_obj.get_attr_data('br-cap')
-        current_mode = fp_obj.get_attr_data('breakout-mode')
-        current_speed = fp_obj.get_attr_data('port-speed')
-        fp_list = [fp_port_id]
-
-    if args.pg_name:
-        pg_name_list=fp.get_port_group_list()
-        if pg_id in pg_name_list:
-            print "Given port group name is valid"
-        else:
-            print "Given Port Group does not exist"
-            sys.exit(0)
-        br_cap_list = nas_if.get_pg_br_cap_list(pg_id)
-        pg = pg_name_list[pg_id]	#port-group obj
-        print "Port-group profile type:", pg.get_profile_type()
-        l=nas_if.nas_os_pg_list(d={'dell-pg/port-groups/port-group/id':pg_id})
-        obj=cps_object.CPSObject(obj=l[0])
-        current_mode = obj.get_attr_data(nas_pg.pg_attr('breakout-mode'))
-        print "Current breakout-mode:", current_mode
-        current_speed = obj.get_attr_data(nas_pg.pg_attr('port-speed'))
-        print "Current port-speed:", current_speed
-        fp_list = pg.get_fp_ports()
-        print "List of ports in port group:", fp_list
-
-    if current_mode == _mode and current_speed == _speed:
-        print 'Port already configured as breakout mode %d and speed %d' % ( _mode, _speed)
-        sys.exit(0)
-
-    breakout_cap = []
-    port_speed_cap = []
-
-    br_cap = None
-    br_port_speed = None
-
-    for cap_items in br_cap_list.values():
-        for cap_item_key in cap_items.keys():
-            if 'breakout-mode' in cap_item_key:
-                br_cap = cap_items[cap_item_key]
-            if 'port-speed' in cap_item_key:
-                br_port_speed = cap_items[cap_item_key]
-        if br_cap not in breakout_cap:
-            breakout_cap.append(br_cap)
-            port_speed_cap.append(br_port_speed)
-
-    if _mode not in breakout_cap:
-        print 'breakout mode %d not supported on this port' % _mode
-        sys.exit(1)
-
+# Delete existing interfaces
+def delete_interfaces(fp_list):
     for fp in fp_list:
-        if isinstance(fp, tuple):
-            fp = fp[0]
         fp_obj = nas_fp_cache.get(int(fp))
         l = []
         npu = fp_obj.get_attr_data('npu-id')
+
         phy_port_list = nas_if.physical_ports_for_front_panel_port(fp_obj)
         for phy_port in phy_port_list:
             if_port = if_cache.get_by_port(
@@ -155,23 +49,186 @@ if __name__ == '__main__':
             l.append(('rpc', cps_obj.get()))
 
         tr = cps_utils.CPSTransaction(l)
-        tr.commit()
-        obj = cps_object.CPSObject(module='base-if-phy/breakout',
-                                   data={
-                                   'base-if-phy/breakout/input/front-panel-port':
-                                                fp_obj.get_attr_data(
-                                                        'base-if-phy/front-panel-port/front-panel-port'),
-                                   'base-if-phy/breakout/input/breakout-mode': _mode,
-                                   'base-if-phy/breakout/input/port-speed': _speed
-                                   })
-        tr = cps_utils.CPSTransaction([('rpc', obj.get())])
-
         if tr.commit() == False:
-            print "Failed..."
+            print "Deletion of interfaces failed"
+            sys.exit(0)
 
-            # revert ports delete
+
+# Create new logical interfaces
+def create_logical_interfaces(fp_list, _mode):
+
+    for fp in fp_list:
+        fp_obj = nas_fp_cache.get(int(fp))
+        # look at the breakout mode and determine the number of hardware ports
+        pp_count,fp_count = nas_comm.yang.get_value(_mode, 'breakout-to-phy-fp-port-count')
+        target_number_of_ports = pp_count / fp_count
+        phy_port_list = []
+        while len(phy_port_list) < target_number_of_ports:
+        # wait for all of the physical ports to appear - depends on timing
+            time.sleep(1)
+            phy_port_list = nas_if.physical_ports_for_front_panel_port(fp_obj)
+
+        l = []
+        ifnames = []
+        # add ports to a transaction
+        for phy_port in phy_port_list:
+            ifobj = nas_if.make_interface_from_phy_port(phy_port)
+            print "Creating interface " + ifobj.get_attr_data(_g_if_name)
+            l.append(('rpc', ifobj.get()))
+            ifnames.append(ifobj.get_attr_data(_g_if_name))
+            target_number_of_ports -= 1
+            if target_number_of_ports == 0:
+                break
+
+        # do the actual port create
+        tr = cps_utils.CPSTransaction(l)
+        # commit
+        if tr.commit() == False:
+            print "Failed to create interfaces for breakout operation"
+            sys.exit(1)
+        else:
+            print "Successfully created interfaces"
+
+        # init qos default
+        base_qos_init.init_interfaces(ifnames)
+
+
+# Get breakout mode and speed mapping
+def breakout_mode_speed_mapping(br_cap_list):
+    br_cap_speed_dict=defaultdict(list)
+    br_cap = None
+    br_port_speed = None
+
+    for cap_items in br_cap_list.values():
+        for cap_item_key in cap_items.keys():
+            if 'breakout-mode' in cap_item_key:
+                br_cap = cap_items[cap_item_key]
+            if 'port-speed' in cap_item_key:
+                br_port_speed = cap_items[cap_item_key]
+                br_cap_speed_dict[br_cap].append(br_port_speed)
+    br_cap_speed_dict.default_factory = None
+    return br_cap_speed_dict
+
+
+# Check if given breakout mode is valid
+def validate_breakout_mode(br_cap_speed_dict, _mode):
+    breakout_cap=br_cap_speed_dict.keys()
+    # Check if given mode valid
+    if _mode not in breakout_cap:
+        print 'Invalid breakout mode given'
+        print 'Supported breakout mode and port speeds(in mbps) are:'
+        for mode in br_cap_speed_dict:
+            speeds = [nas_comm.yang.get_value(s,'yang-to-mbps-speed') for s in br_cap_speed_dict[mode]]
+            mode_str = nas_comm.yang.get_value(mode,'yang-to-breakout-mode')
+            print '\t%s (%d)' %(mode_str,mode),' : ',','.join(map(str,speeds))
+        sys.exit(0)
+
+
+# Check if given speed is valid
+def validate_port_speed(br_cap_speed_dict, _speed, _mode):
+
+    # Check if the given breakout mode supports the given port speed
+    if _speed not in br_cap_speed_dict[_mode]:
+        print 'Invalid break mode and port speed combination'
+        speeds = [nas_comm.yang.get_value(s,'yang-to-mbps-speed')/1000 for s in br_cap_speed_dict[_mode]]
+        print 'For given breakout mode supported port speeds are(in gbps)',','.join(map(str,speeds))
+        sys.exit(0)
+
+
+nas_fp_cache = nas_if.FpPortCache()
+if_cache = nas_if.IfCache()
+
+def main(args):
+
+    if args.pg_name and args.port:
+        print "Specify --port or --pg_name, but not both"
+        sys.exit()
+
+    pg_id = args.pg_name
+    br_mode = args.mode
+    port_speed = args.speed
+
+    if br_mode not in nas_comm.yang.get_tbl('yang-breakout-mode'):
+        print 'Invalid breakout mode %s' % br_mode
+        sys.exit()
+
+    if port_speed:
+        if port_speed not in nas_comm.yang.get_tbl('yang-speed'):
+            print 'Invalid port speed %s' % port_speed
+            sys.exit()
+        _speed = nas_comm.yang.get_value(port_speed, 'yang-speed')
+
+    _mode = nas_comm.yang.get_value(br_mode, 'yang-breakout-mode')
+
+
+    if args.port:
+        if args.port.isdigit():
+            fp_port_id=int(args.port)
+        else:
+            front_port = nas_if.get_front_port_from_name(args.port)
+            if front_port == None:
+                print 'Failed to get front port id'
+                sys.exit()
+            fp_port_id=front_port[0]
+
+        fp_obj = nas_fp_cache.get(fp_port_id)
+        if fp_obj is None:
+            print "Invalid front panel port specified..."
+            print "Please choose from one of the following..."
+            nas_fp_cache.print_keys()
+            sys.exit()
+        pg_id= nas_if.get_cps_attr(fp_obj, 'port-group')
+        if pg_id:
+            print "Port groups exist on platform, specify --pg_name"
+            print "For given front-panel-port, port-group is:",pg_id
+            sys.exit()
+        br_cap_list = fp_obj.get_attr_data('br-cap')
+        current_mode = fp_obj.get_attr_data('breakout-mode')
+        current_speed = fp_obj.get_attr_data('port-speed')
+        fp_list = [fp_port_id]
+        br_cap_speed_dict=breakout_mode_speed_mapping(br_cap_list)
+
+        # Verify if given breakout mode is valid
+        validate_breakout_mode(br_cap_speed_dict, _mode)
+
+        if port_speed == None:
+            speed_lst=br_cap_speed_dict[_mode]
+            if len(speed_lst)==1:
+                _speed=speed_lst[0]
+                print "Supported port speed for given breakout mode =", str(nas_comm.yang.get_value(_speed,'yang-to-mbps-speed')/1000)+'g', '(%d)'%_speed
+            else:
+                print "For given mode specify --speed:",
+                print ' or '.join([str(nas_comm.yang.get_value(i,'yang-to-mbps-speed')/1000)+'g' for i in speed_lst])
+                sys.exit()
+        else:
+            # Verify if given breakout speed is valid for given breakout mode
+            validate_port_speed(br_cap_speed_dict, _speed, _mode)
+
+        if current_mode == _mode and current_speed == _speed:
+            print 'Port already configured as breakout mode %s and speed %s' % (br_mode, _speed)
+            sys.exit()
+
+        # Starting deletion of interface
+        print "---(1)---Start deletion of existing interface"
+        delete_interfaces(fp_list)
+
+        # Configure front-panel-port 
+        print "---(2)---Change front-panel-port configuration"
+        obj = cps_object.CPSObject(module='base-if-phy/breakout',
+               data={
+               'base-if-phy/breakout/input/front-panel-port':
+                    fp_obj.get_attr_data(
+                        'base-if-phy/front-panel-port/front-panel-port'),
+               'base-if-phy/breakout/input/breakout-mode': _mode,
+               'base-if-phy/breakout/input/port-speed': _speed
+               })
+        tr = cps_utils.CPSTransaction([('rpc', obj.get())])
+        if tr.commit() == False:
+            print "Failed to configure front panel port with new mode, reverting ports deletion"
+           # revert ports delete
             l = []
             # add ports to a transaction
+            phy_port_list = nas_if.physical_ports_for_front_panel_port(fp_obj)
             for phy_port in phy_port_list:
                 ifobj = nas_if.make_interface_from_phy_port(phy_port, current_mode, current_speed)
                 print "Creating interface " + ifobj.get_attr_data(_g_if_name)
@@ -179,59 +236,91 @@ if __name__ == '__main__':
 
             # do the actual port create
             tr = cps_utils.CPSTransaction(l)
-
             # commit
             if tr.commit() == False:
-                print "Failed to create interfaces"
+                print "Failed...Revert ports deletion unsuccessful"
+                sys.exit(1)
             else:
-                print "Successfully created interfaces"
+                print "Failed...Revert ports deletion successful"
+                sys.exit(0)
         else:
             print "Completed..."
 
-            # look at thephysical port and determine the number of hardware ports
-            # that exist
-            target_number_of_ports = len(
-                    fp_obj.get()['data']['base-if-phy/front-panel-port/port'])
+        # Create new logical interfaces
+        print "---(3)---Creating new logical interfaces"
+        create_logical_interfaces(fp_list, _mode)
 
-            # if the mode is breakin... then need to create one port only
-            if _mode == 4:  # 1x1
-                target_number_of_ports = 1
-            elif _mode == 3: # 2x1
-                target_number_of_ports = 2
-            elif _mode == 7: # 4x4
-                target_number_of_ports = 1
-            else: # 4x1
-                target_number_of_ports = 4
 
-            phy_port_list = []
-            while len(phy_port_list) < target_number_of_ports:
-            # wait for all of the physical ports to appear - depends on timing
-                time.sleep(1)
-                phy_port_list = nas_if.physical_ports_for_front_panel_port(fp_obj)
+    if args.pg_name:
+        l=nas_if.nas_os_pg_list(d={'dell-pg/port-groups/port-group/id':pg_id})
+        if l == []:
+            print "Given Port Group does not exist"
+            sys.exit(0)
+        obj=cps_object.CPSObject(obj=l[0])
+        current_mode = obj.get_attr_data('breakout-mode')
+        print "Current breakout-mode:", nas_comm.yang.get_value(current_mode,'yang-to-breakout-mode')
+        current_speed = obj.get_attr_data('port-speed')
+        print "Current port-speed(in mbps):", nas_comm.yang.get_value(current_speed,'yang-to-mbps-speed')
+        l=nas_if.nas_os_pg_state_list(d={'dell-pg/port-groups-state/port-group-state/id':pg_id})
+        obj=cps_object.CPSObject(obj=l[0])
+        fp_list = obj.get_attr_data('base-pg/dell-pg/port-groups-state/port-group-state/front-panel-port')
+        print "List of ports in port group:", fp_list
+        br_cap_list=  obj.get_attr_data('br-cap') 
+        br_cap_speed_dict=breakout_mode_speed_mapping(br_cap_list)
 
-            l = []
-            ifnames = []
-            # add ports to a transaction
-            for phy_port in phy_port_list:
-                ifobj = nas_if.make_interface_from_phy_port(phy_port)
-                print "Creating interface " + ifobj.get_attr_data(_g_if_name)
-                l.append(('rpc', ifobj.get()))
-                ifnames.append(ifobj.get_attr_data(_g_if_name))
-                target_number_of_ports -= 1
-                if target_number_of_ports == 0:
-                    break
-
-            # do the actual port create
-            tr = cps_utils.CPSTransaction(l)
-
-            # commit
-            if tr.commit() == False:
-                print "Failed to create interfaces for breakout operation"
+        # Verify if given breakout mode is valid
+        validate_breakout_mode(br_cap_speed_dict, _mode)
+        # If no port speed given, get port speeds supported by given breakout mode
+        if port_speed == None:
+            speed_lst=br_cap_speed_dict[_mode]
+            if len(speed_lst)==1:
+                _speed=speed_lst[0]
+                print "Supported port speed for given breakout mode=", str(nas_comm.yang.get_value(_speed,'yang-to-mbps-speed')/1000)+'g', '(%d)'%_speed
             else:
-                print "Successfully created interfaces"
+                print "For given mode specify --speed:",
+                print ' or '.join([str(nas_comm.yang.get_value(i,'yang-to-mbps-speed')/1000)+'g' for i in speed_lst])
+                sys.exit()
+        else:
+            # Verify if given breakout speed is valid for given breakout mode
+            validate_port_speed(br_cap_speed_dict, _speed, _mode)
 
-            # init qos default
-            base_qos_init.init_interfaces(ifnames)
-    if pg_id:
-        print "Change port-group breakout mode and port speed configuration"
-        call(["nas_port_group_cmd.py", '-s', pg_id, '-b', br_mode, '-S', port_speed])
+        if current_mode == _mode and current_speed == _speed:
+            print 'Port already configured as breakout mode %s and speed %s' % (br_mode, _speed)
+            sys.exit()
+
+        print "---(1)---Starting deletion of interfaces"
+        delete_interfaces(fp_list)
+
+        # Change port-group configuration
+        print "---(2)---Change port-group breakout mode and port speed configuration"
+        data_dict={'dell-pg/port-groups/port-group/id': pg_id, 'dell-pg/port-groups/port-group/breakout-mode': _mode, \
+                    'dell-pg/port-groups/port-group/port-speed': _speed}
+        obj = cps_object.CPSObject(module='base-pg/dell-pg/port-groups/port-group',qual='target', data=data_dict)
+        ret=cps.transaction([{"operation": "set", "change": obj.get()}])
+        if ret:
+          print "Success"
+        else:
+          print "Configuring port-group failed"
+          sys.exit(0)
+
+        # Create new logical interfaces
+        print "---(3)---Creating new logical interfaces"
+        create_logical_interfaces(fp_list, _mode)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='fanout port-group or port', formatter_class=argparse.RawTextHelpFormatter)
+    parser.epilog = "Examples:\n(1) opx-config-fanout --pg_name port-group-1 --mode 4x4 --speed 10g \
+                                \n(2) opx-config-fanout --pg_name port-group-13 --mode 8x2 --speed 25g \
+                                \n(3) opx-config-fanout --port e101-001-0 --mode 4x1 --speed 10g \
+                                \n(4) opx-config-fanout --port e101-001-1 --mode 1x1 --speed 40g"
+
+    parser.add_argument("--port",  help="ifindex or interface name")
+    parser.add_argument("--mode",  help="Set Port group config", required=True)
+    parser.add_argument("--speed",  help="Set Port group config")
+    parser.add_argument("--pg_name", help="Port Group Name")
+
+    args = parser.parse_args()
+    main(args)
+
+
