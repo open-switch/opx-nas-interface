@@ -1,3 +1,10 @@
+opx-nas-interface (5.22.2) unstable; urgency=medium
+
+  * Bugfix: Fixed issue where bond interfaces created with commands doesnt work with opx commands
+  * Bugfix: Fixed issue where vlan created by brctl are not visible in opx-show-vlan 
+
+ -- Dell EMC <ops-dev@lists.openswitch.net>  Fri, 14 Feb 2020 02:56:52 -0800
+
 opx-nas-interface (5.22.1) unstable; urgency=medium
 
   * Update: opx-config-fanout script to support new breakout modes

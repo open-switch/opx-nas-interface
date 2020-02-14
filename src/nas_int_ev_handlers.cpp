@@ -30,6 +30,8 @@
 #include "nas_int_com_utils.h"
 #include "bridge/nas_interface_bridge_utils.h"
 #include "bridge/nas_interface_bridge_com.h"
+#include "interface/nas_interface_lag.h"
+#include "interface/nas_interface_map.h"
 #include "interface/nas_interface_vlan.h"
 #include "interface/nas_interface_vxlan.h"
 #include "interface/nas_interface_utils.h"
@@ -468,6 +470,17 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                 create = true;
             }
             /* TODO Add function to set intf description on netlink message */
+
+            std::string lag_name = std::string(bond_name);
+            /*
+             * Register LAG object with interface cache
+             */
+            NAS_LAG_INTERFACE *l_obj = new NAS_LAG_INTERFACE(lag_name, bond_idx, nas_int_type_LAG);
+
+            if(l_obj){
+                nas_interface_map_obj_add(lag_name,l_obj);
+            }
+
         }
         /*   Check if Member port is present then add the members in the lag */
         if (_mem_attr != nullptr) {
@@ -550,6 +563,20 @@ void nas_lag_ev_handler(cps_api_object_t obj) {
                 EV_LOGGING(INTERFACE, DEBUG, "NAS-LAG",
                         "Update to NAS-L3-MCAST about interface delete change failed(%d)", bond_idx);
             }
+
+            nas_lag_entry = nas_get_lag_node(bond_idx);
+            if(!nas_lag_entry) {
+                EV_LOGGING(INTERFACE, INFO,"NAS-CPS-LAG",
+                            "Can't find LAG entry for Lag %d", bond_idx);
+                return ;
+            }
+
+            NAS_INTERFACE * l_obj = nullptr;
+            std::string intf_name = std::string(nas_lag_entry->name);
+            if(nas_interface_map_obj_remove(intf_name,&l_obj) ==STD_ERR_OK){
+                if(l_obj) delete l_obj;
+            }
+
             /*  Otherwise the event is to delete the lag */
             if((nas_lag_master_delete(bond_idx) != STD_ERR_OK))
                 return ;

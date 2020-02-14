@@ -256,6 +256,7 @@ t_std_error NAS_DOT1Q_BRIDGE::nas_bridge_npu_add_remove_member(std::string &mem_
         vlan_id  = vlan_intf_obj->vlan_id;
         if (bridge_vlan_id == 0) {
             bridge_vlan_id = vlan_id;
+            set_bridge_model(INT_VLAN_MODEL);
             /*  then create vlan in the  NPU and add all tagged members */
             if ((rc = nas_bridge_npu_create()) != STD_ERR_OK) {
                 EV_LOGGING(INTERFACE, ERR, "NAS-BRIDGE",
